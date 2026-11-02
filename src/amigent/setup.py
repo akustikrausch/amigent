@@ -67,6 +67,9 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         text = (AMIGA / name).read_text(encoding="iso-8859-1").replace("SYS:amigent", home)
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
+    for name in ("amigent-status", "amigent-status.info"):  # the little window on the Amiga's side
+        if (AMIGA / "bin" / name).exists():
+            link.put(f"{home}/{name}", (AMIGA / "bin" / name).read_bytes())
     print("setting the key")
     link.put("S:amigent.key", (key + "\n").encode())
     link.put(f"{home}/amigent.key", (key + "\n").encode())
@@ -75,6 +78,7 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         run_script(link, allow_script(allow, home))
     script = f"""FailAt 21
 Protect {home}/amigent-repair +s
+Protect >NIL: {home}/amigent-status +rwed
 Copy C:amigentd.new C:amigentd QUIET
 Protect C:amigentd rwed
 Delete >NIL: C:amigentd.new QUIET

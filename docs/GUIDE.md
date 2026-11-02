@@ -275,9 +275,11 @@ settings and menu entries; see
 | `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/` |
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
 
-On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number` and `QUIET`
-from the command line or, started from Workbench, from the tool types of its
-icon.
+On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
+`TLSONLY` from the command line or, started from Workbench, from the tool types
+of its icon. It answers ARexx on the port `AMIGENT` (`STATUS`, `CLIENTS`,
+`VERSION`, `HELP`, `QUIT`), and `amigent-status` shows the same in a small
+window.
 
 ## Security
 

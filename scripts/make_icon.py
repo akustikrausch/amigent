@@ -4,6 +4,7 @@ for OS 3.5 and later, from the Amigent icon.
 Usage: make_icon.py repair OUT.info      project icon that runs a script through IconX
        make_icon.py amigentd OUT.info    tool icon for amigentd with its tool types
        make_icon.py drawer OUT.info      drawer icon for the Amigent folder
+       make_icon.py status OUT.info      tool icon for the amigent-status window
 Layout from the icon.library DiskObject structure and the GlowIcon IFF chunks.
 """
 
@@ -116,13 +117,17 @@ def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types:
 
 
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status"):
         raise SystemExit(__doc__)
     if sys.argv[1] == "repair":
         data = disk_object(WBPROJECT, planes(repair_pixel), b"C:IconX\0", [], 4096)
     elif sys.argv[1] == "drawer":
         rows = amigent_pixels()
         data = disk_object(WBDRAWER, planes(lambda x, y: rows[y][x]), None, [], 0) + glow_icon()
+    elif sys.argv[1] == "status":
+        rows = amigent_pixels()  # same face, the tool type says which amigentd to watch
+        data = disk_object(WBTOOL, planes(lambda x, y: rows[y][x]), None, ["(PORT=AMIGENT)"], 8192)
+        data += glow_icon()
     else:
         rows = amigent_pixels()
         data = disk_object(WBTOOL, planes(lambda x, y: rows[y][x]), None,

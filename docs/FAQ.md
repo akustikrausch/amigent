@@ -14,6 +14,12 @@ The first time, Windows may ask whether Python may accept connections.
 Only `amigentd`, started from `S:User-Startup`. It handles the screen, commands
 and files on one port. Older installs also had amigactld; it keeps working.
 
+**How do I see on the Amiga who is connected?**
+Double-click `amigent-status` in the Amigent folder (`SYS:amigent` after setup).
+Its window shows amigentd's version, uptime, encryption and every connection
+with its address, refreshed every 2 seconds. Scripts get the same from the
+ARexx port `AMIGENT`: `STATUS`, `CLIENTS`, `VERSION`, `HELP` and `QUIT`.
+
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:
 `SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands started through it

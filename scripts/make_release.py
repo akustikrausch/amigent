@@ -32,11 +32,15 @@ amigentd is the small service that runs on the Amiga. To install everything:
 3. On the PC, run amigent-setup. It finds the Amiga, copies amigentd to C:,
    adds it to S:User-Startup and gives it a key.
 
-Requirements: AmigaOS 3.0 or newer, 68020 or better (68000 with amigentd.000),
-a TCP/IP stack with bsdsocket.library.
+Requirements: AmigaOS 3.0 or newer, any CPU from the 68000 on (amigentd.000
+on a plain 68000), a TCP/IP stack with bsdsocket.library.
 
 Tool types of the icon: SETUP (accept the first install from the PC),
-KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET.
+KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
+
+amigent-status shows a small window with amigentd's state and its
+connections, refreshed every 2 seconds. amigentd also answers ARexx on the
+port AMIGENT: STATUS, CLIENTS, VERSION, HELP, QUIT.
 
 Licence: MIT, see LICENSE.
 """
@@ -54,6 +58,9 @@ def main() -> None:
     ctl.makedir(folder)
     files = {"amigentd": BIN / "amigentd", "amigentd.info": BIN / "amigentd.info",
              "LICENSE": ROOT / "LICENSE"}
+    if (BIN / "amigent-status").exists():
+        files["amigent-status"] = BIN / "amigent-status"
+        files["amigent-status.info"] = BIN / "amigent-status.info"
     if (BIN / "amigentd.000").exists():
         files["amigentd.000"] = BIN / "amigentd.000"
         files["amigentd.000.info"] = BIN / "amigentd.info"
@@ -61,7 +68,7 @@ def main() -> None:
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
     ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
-    for name in ("amigentd", "amigentd.000"):
+    for name in ("amigentd", "amigentd.000", "amigent-status"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
     archive = f"amigent-{__version__}.lha"
