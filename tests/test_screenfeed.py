@@ -1,11 +1,12 @@
 import socket
-import struct
 import threading
 import time
 
+import pytest
+
 from amigent.amigentd import Amigentd, Pipeline, decode_tile, tile_fits, unpack_tile
 from amigent.screenfeed import Feed, InputQueue, Planner, chunks, commands
-from slowlink import FakeAmiga, SlowLink, mark_colour, pack
+from slowlink import FakeAmiga, SlowLink, mark_colour, mark_rgb, pack
 
 
 def test_moves_squeeze_to_the_newest():
@@ -124,35 +125,31 @@ def test_pipeline_streams_frames_and_input_together():
     amiga.close()
 
 
-def test_feed_shows_a_key_through_a_slow_link():
-    amiga = FakeAmiga(320, 256, profile="fast")
+@pytest.mark.parametrize("kind", ["yes", "old"])
+def test_feed_shows_a_key_through_a_slow_link(kind):
+    amiga = FakeAmiga(320, 256, profile="fast", planar=kind)
     link = SlowLink(amiga.port, 30_000, 0.02)
     screen = Amigentd("127.0.0.1", link.port, timeout=5)
-    got = []
-    screen.listeners.append(lambda kind, payload: got.extend(payload) if kind == "tiles" else None)
     lock = threading.Lock()
     inputs = InputQueue()
     feed = Feed(screen, lambda: lock, inputs)
     threading.Thread(target=feed.run, daemon=True).start()
     deadline = time.monotonic() + 10
-    while screen.missing_tiles() and time.monotonic() < deadline:
+    while (not screen.width or screen.missing_tiles()) and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert not screen.missing_tiles()
+    assert screen.width and not screen.missing_tiles()
+    assert screen.planar == (kind == "yes")
     cx, cy = amiga.cursor
     inputs.put({"t": "char", "c": "a"})
     feed.ring()
-    want = mark_colour(1)
 
     def shown():
-        for x, y, w, h, data in list(got):
-            if x <= cx < x + w and y <= cy < y + h and unpack_tile(data, w, h)[(cy - y) * w + cx - x] == want:
-                return True
-        return False
+        with lock:
+            return tuple(screen.pixels(cx, cy, 1, 1)) == mark_rgb(1)
 
     start = time.monotonic()
     while not shown():
         assert time.monotonic() - start < 3
         time.sleep(0.01)
-    assert struct.pack(">B", 7)  # the key went out as CHAR
     amiga.close()
     link.close()

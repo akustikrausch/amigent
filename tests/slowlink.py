@@ -22,6 +22,8 @@ import threading
 import time
 from collections import deque
 
+from PIL import Image
+
 TILE = 64
 SETTLE = 0.25  # amigentd: reads less than this after input count as stale
 MAX_AGE = 0.5  # and so does anything older than this
@@ -32,11 +34,17 @@ PROFILES = {
     "68020": (0.004, 0.0015),  # 14 MHz A1200
     "fast": (0.0, 0.0),
 }
+# planar: (compare a tile's planes, pack it); the real 68000 did 80 ms / 0.64 s for a screen
+PLANAR_PROFILES = {
+    "68000": (0.002, 0.014),
+    "68020": (0.0005, 0.004),
+    "fast": (0.0, 0.0),
+}
 
 
 def mark_colour(n: int) -> int:
-    """Colour of mark n: never the desktop's own colours (0..3), never twice in a row."""
-    return 16 + n % 200
+    """Pen of mark n: never the desktop's own (0..3), never twice in a row, fits in 4 planes."""
+    return 4 + n % 12
 
 
 def pack(tile: bytes) -> bytes:
@@ -150,9 +158,13 @@ class FakeAmiga:
     """amigentd protocol 3 on localhost, with a desktop that can be made busy."""
 
     def __init__(self, width: int = 640, height: int = 256, profile: str = "68020",
-                 seed: int = 1200):
+                 seed: int = 1200, planar: str = "yes", depth: int = 4):
         self.w, self.h = width, height
         self.read_cost, self.pack_cost = PROFILES[profile]
+        self.compare_cost, self.planar_pack = PLANAR_PROFILES[profile]
+        self.planar = planar  # "yes", "rtg" (knows planar, the screen isn't), "old" (before planar)
+        self.depth = depth
+        self.input_between = planar != "old"
         self.cols, self.rows = -(-width // TILE), -(-height // TILE)
         rnd = random.Random(seed)
         self.screen = bytearray(_desktop(width, height, rnd))
@@ -267,50 +279,64 @@ class FakeAmiga:
                 return
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+            threading.Thread(target=self._serve, args=(_Conn(conn),), daemon=True).start()
 
-    def _serve(self, conn: socket.socket) -> None:
+    def _serve(self, c: "_Conn") -> None:
         try:
-            conn.sendall(b"AMGT" + struct.pack(">HH", 3, 0))
-            buf = b""
+            c.sock.sendall(b"AMGT" + struct.pack(">HH", 3, 0))
             first = True
             while not self.closed:
-                while len(buf) < 10:
-                    more = conn.recv(4096)
-                    if not more:
-                        return
-                    buf += more
-                cmd, buf = buf[:10], buf[10:]
+                cmd = c.next_command()
+                if cmd is None:
+                    return
                 if first:
                     first = False
                     if cmd[0] == 20:  # no command channels here: the PC falls back
-                        conn.sendall(b"\1")
-                        conn.close()
+                        c.sock.sendall(b"\1")
+                        c.sock.close()
                         return
                     if self.client:  # the newcomer wins
                         try:
                             self.client.shutdown(socket.SHUT_RDWR)
                         except OSError:
                             pass
-                    self.client = conn
-                if conn is not self.client:
+                    self.client = c.sock
+                if c.sock is not self.client:
                     return
                 with self.cpu:
                     self.commands += 1
-                    reply = self._command(conn, *struct.unpack(">BBHHHH", cmd))
+                    reply = self._command(c, *struct.unpack(">BBHHHH", cmd))
                 if reply is not None:
-                    conn.sendall(reply)
+                    c.sock.sendall(reply)
+                if c.late:  # answers to input carried out during that reply
+                    c.sock.sendall(bytes(c.late))
+                    c.late.clear()
         except OSError:
             pass
 
-    def _command(self, conn, cmd, arg, x, y, w, h):
+    def _command(self, c, cmd, arg, x, y, w, h):
         if cmd == 1:
             return struct.pack(">HHHH", self.w, self.h, TILE, 0)
         if cmd == 2:
-            self._frame(conn, arg & 1, x, y, w, h)
+            if arg & 2 and self.planar == "yes":
+                self._planar_frame(c, arg & 1, x, y, w, h)
+            else:
+                if arg & 2 and self.planar == "rtg":
+                    c.sock.sendall(b"\0")  # format 0: the classic frame follows
+                self._frame(c, arg & 1, x, y, w, h)
             return None
-        if cmd in (3, 4, 5, 7, 14):
-            self.input_at = time.perf_counter()
+        if cmd in INPUT:
+            return self._input(cmd, arg, x, y)
+        if cmd == 11:
+            return struct.pack(">H", 0)
+        if cmd == 18:
+            return b"\1"  # nobody owns the picture here
+        if cmd not in (6, 12):
+            return b"\1"
+        return b"\0"
+
+    def _input(self, cmd, arg, x, y) -> bytes:
+        self.input_at = time.perf_counter()
         if cmd == 3:
             self.pointer = (x, y)
             if self.buttons:
@@ -320,42 +346,174 @@ class FakeAmiga:
             self.buttons = arg & 7
             if pressed:
                 self._mark(self.pointer[0] - 4, self.pointer[1] - 4, 9, 9)
-        elif cmd in (5, 7):
-            if cmd == 7 or arg & 1:
-                cx, cy = self.cursor
-                self._mark(cx, cy, 6, 8)
-                cx += 8
-                self.cursor = (cx, cy) if cx < self.w - 16 else (16, cy)
-        elif cmd == 11:
-            return struct.pack(">H", 0)
-        elif cmd == 18:
-            return b"\1"  # nobody owns the picture here
-        elif cmd not in (6, 12, 14):
-            return b"\1"
+        elif cmd == 7 or (cmd == 5 and arg & 1):
+            cx, cy = self.cursor
+            self._mark(cx, cy, 6, 8)
+            cx += 8
+            self.cursor = (cx, cy) if cx < self.w - 16 else (16, cy)
         return b"\0"
 
-    def _frame(self, conn, force, x, y, w, h) -> None:
+    def _between_tiles(self, c) -> None:
+        """amigentd since planar: input that came meanwhile is carried out now, answered later."""
+        if self.input_between:
+            for cmd in c.input_waiting():
+                c.late += self._input(cmd[0], cmd[1], *struct.unpack(">HH", cmd[2:6]))
+
+    def _send_tiles(self, c, out: bytearray, pieces) -> None:
+        for piece in pieces:
+            out += piece
+            if len(out) >= 2048:
+                c.sock.sendall(out)
+                out.clear()
+                self._between_tiles(c)
+        c.sock.sendall(out)
+
+    def _spend(self, seconds: float) -> None:
+        if seconds:
+            time.sleep(seconds)
+            self.cpu_time += seconds
+
+    def _frame(self, c, force, x, y, w, h) -> None:
         self.frames += 1
         tiles = self._tiles(x, y, w, h)
         now = time.perf_counter()
         self._read([t for t in tiles if force or self._stale(t, now)])
         send = [t for t in tiles if force or self.cur[t] != self.ref.get(t)]
-        out = bytearray(struct.pack(">I", len(send)))
-        for t in send:
-            if self.pack_cost:
-                time.sleep(self.pack_cost)
-                self.cpu_time += self.pack_cost
-            data = pack(self.cur[t])
-            self.ref[t] = self.cur[t]
-            tw, th = self._size(t)
-            out += struct.pack(">HHHHI", t[0] * TILE, t[1] * TILE, tw, th, len(data)) + data
-            if len(out) >= 16384:
-                conn.sendall(out)
-                out = bytearray()
-        conn.sendall(out)
+
+        def pieces():
+            for t in send:
+                self._spend(self.pack_cost)
+                data = pack(self.cur[t])
+                self.ref[t] = self.cur[t]
+                tw, th = self._size(t)
+                yield struct.pack(">HHHHI", t[0] * TILE, t[1] * TILE, tw, th, len(data)) + data
+
+        self._send_tiles(c, bytearray(struct.pack(">I", len(send))), pieces())
         for t in tiles:
             self.wanted.setdefault(t, True)
         self.wake_reader.set()
+
+    def _planar_frame(self, c, force, x, y, w, h) -> None:
+        """Bitplanes straight from chip RAM: compare, pack, no reading ahead."""
+        self.frames += 1
+        tiles = self._tiles(x, y, w, h)
+        known = c.planes  # per connection, as amigentd keeps it for a client it knows
+        force = force or not c.palette_sent
+        self._spend(self.compare_cost * len(tiles))
+        with self.screen_lock:
+            now = {t: self._planes(t) for t in tiles}
+        send = [t for t in tiles if force or known.get(t) != now[t]]
+        px, py = self.pointer[0] // TILE, self.pointer[1] // TILE
+        send.sort(key=lambda t: (max(abs(t[0] - px), abs(t[1] - py)) > 1, t[1], t[0]))
+        flags = 0 if c.palette_sent and not force else 2
+        head = struct.pack(">BBBBHH", 1, self.depth, flags, 0, self.w, self.h)
+        if flags & 2:
+            colours = 1 << self.depth
+            head += struct.pack(">H", colours) + bytes(
+                v for pen in range(colours) for v in (_LUT_R[pen], _LUT_G[pen], _LUT_B[pen]))
+            c.palette_sent = True
+
+        def pieces():
+            for t in send:
+                self._spend(self.planar_pack)
+                raw = now[t]
+                method, data = 1, packbits(raw)
+                old = known.get(t)
+                if old is not None and not force:
+                    delta = packbits(bytes(a ^ b for a, b in zip(raw, old)))
+                    if len(delta) < len(data):
+                        method, data = 2, delta
+                if method == 1 and len(data) >= len(raw):
+                    method, data = 0, raw
+                known[t] = raw
+                tw, th = self._size(t)
+                yield struct.pack(">HHHHBI", t[0] * TILE, t[1] * TILE, tw, th, method, len(data)) + data
+
+        self._send_tiles(c, bytearray(head + struct.pack(">I", len(send))), pieces())
+
+    def _planes(self, t) -> bytes:
+        """A tile as amigentd sends it: plane 0 first, rows of (w+7)/8 bytes, top bit leftmost."""
+        tw, th = self._size(t)
+        x0, y0 = t[0] * TILE, t[1] * TILE
+        pens = b"".join(bytes(self.screen[(y0 + r) * self.w + x0:(y0 + r) * self.w + x0 + tw]) for r in range(th))
+        out = []
+        for p in range(self.depth):
+            bits = pens.translate(_PLANE_BIT[p])
+            out.append(Image.frombytes("L", (tw, th), bits).convert("1", dither=Image.Dither.NONE).tobytes())
+        return b"".join(out)
+
+
+INPUT = (3, 4, 5, 7, 14)  # MOVE, BUTTON, RAWKEY, CHAR, MOVE_REL
+_PLANE_BIT = [bytes(255 if v >> p & 1 else 0 for v in range(256)) for p in range(8)]
+_LUT_R = bytes((v & 7) * 255 // 7 for v in range(256))
+_LUT_G = bytes((v >> 3 & 7) * 255 // 7 for v in range(256))
+_LUT_B = bytes((v >> 6 & 3) * 255 // 3 for v in range(256))
+
+
+def mark_rgb(n: int) -> tuple:
+    """Mark n as the page sees it, whichever way it came."""
+    c = mark_colour(n)
+    return _LUT_R[c], _LUT_G[c], _LUT_B[c]
+
+
+def packbits(data: bytes) -> bytes:
+    """Apple's PackBits as amigentd writes it: runs of 3+ repeat, the rest literal."""
+    out = bytearray()
+    i, n = 0, len(data)
+    while i < n:
+        j = i + 1
+        while j < n and j - i < 128 and data[j] == data[i]:
+            j += 1
+        if j - i >= 3:
+            out += bytes((257 - (j - i), data[i]))
+            i = j
+            continue
+        start = i
+        while i < n and i - start < 128 and not (i + 2 < n and data[i] == data[i + 1] == data[i + 2]):
+            i += 1
+        out.append(i - start - 1)
+        out += data[start:i]
+    return bytes(out)
+
+
+class _Conn:
+    """One connection's socket, its unread commands and what amigentd keeps for it."""
+
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+        self.buf = bytearray()
+        self.late = bytearray()
+        self.planes: dict = {}
+        self.palette_sent = False
+
+    def next_command(self) -> bytes | None:
+        while len(self.buf) < 10:
+            more = self.sock.recv(4096)
+            if not more:
+                return None
+            self.buf += more
+        cmd = bytes(self.buf[:10])
+        del self.buf[:10]
+        return cmd
+
+    def input_waiting(self) -> list:
+        """Input commands at the head of what came in, without waiting for more."""
+        self.sock.setblocking(False)
+        try:
+            while True:
+                more = self.sock.recv(4096)
+                if not more:
+                    break
+                self.buf += more
+        except OSError:
+            pass
+        finally:
+            self.sock.setblocking(True)
+        found = []
+        while len(self.buf) >= 10 and self.buf[0] in INPUT:
+            found.append(bytes(self.buf[:10]))
+            del self.buf[:10]
+        return found
 
 
 def _text_line(screen, width, x, y, w, rnd) -> None:
@@ -375,7 +533,7 @@ def _text_line(screen, width, x, y, w, rnd) -> None:
 
 def _desktop(width, height, rnd) -> bytes:
     """Grey backdrop, a few windows with text: packs like a real Workbench."""
-    screen = bytearray(b"\x92" * (width * height))  # RGB332 grey-blue
+    screen = bytearray(b"\x02" * (width * height))  # pen 2, the backdrop; pens double as RGB332
     for wx, wy, ww, wh in ((20, 20, 300, 140), (width // 2, 40, width // 2 - 30, height // 2),
                            (10, height - 100, width - 40, 90)):
         ww, wh = min(ww, width - wx), min(wh, height - wy)

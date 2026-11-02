@@ -234,6 +234,8 @@
     const kind = new Uint8Array(buffer, 0, 1)[0];
     if (kind === 1) {
       drawing = drawing.then(() => drawTiles(buffer));
+    } else if (kind === 3) {
+      drawing = drawing.then(() => drawPixels(buffer));
     } else if (kind === 2) {
       drawing = drawing
         .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
@@ -276,6 +278,23 @@
           pixels.fill(LUT[data[i + 1]], p, p + run);
           p += run;
         }
+      }
+      ctx.putImageData(image, x, y);
+    }
+  }
+
+  // Message 3: regions the PC already decoded (bitplanes, HAM), three bytes a pixel.
+  function drawPixels(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    let at = 1;
+    while (at < buffer.byteLength) {
+      const x = view.getUint16(at), y = view.getUint16(at + 2);
+      const w = view.getUint16(at + 4), h = view.getUint16(at + 6);
+      at += 8;
+      const { image, pixels } = tileImage(w, h);
+      for (let i = 0, n = w * h; i < n; i++, at += 3) {
+        pixels[i] = 0xff000000 | (bytes[at + 2] << 16) | (bytes[at + 1] << 8) | bytes[at];
       }
       ctx.putImageData(image, x, y);
     }

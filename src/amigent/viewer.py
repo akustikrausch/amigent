@@ -73,6 +73,15 @@ def tiles_message(tiles) -> bytes:
     return b"".join(parts)
 
 
+def pixels_message(regions) -> bytes:
+    """Binary message 3: x, y, w, h and w*h*3 bytes RGB, for pictures the PC decoded (planar)."""
+    parts = [b"\x03"]
+    for x, y, w, h, rgb in regions:
+        parts.append(struct.pack(">HHHH", x, y, w, h))
+        parts.append(rgb)
+    return b"".join(parts)
+
+
 _join = join_path
 
 
@@ -137,7 +146,6 @@ class Viewer:
         self.screen_list: list = []
         self._system: dict = {}
         self.alone_since = time.monotonic()
-        self.received = 0
         self.screen.listeners.append(self._on_screen)
 
     @property
@@ -219,9 +227,10 @@ class Viewer:
         if kind == "size":
             self.event("size", w=payload[0], h=payload[1])
         elif kind == "tiles":
-            message = tiles_message(payload)
-            self.received += len(message)
-            self.broadcast(message)
+            self.broadcast(tiles_message(payload))
+        elif kind == "planar":  # bitplanes: the c2p happened here, the page gets RGB
+            regions = [(x, y, w, h, self.screen.pixels(x, y, w, h)) for x, y, w, h in payload]
+            self.broadcast(pixels_message(regions))
 
     # input: queued here, played by the feed on its pipeline
 
@@ -253,13 +262,13 @@ class Viewer:
     def _stats(self) -> None:
         seconds = 0
         while True:
-            before = self.received
+            before = self.screen.received
             time.sleep(1)
             with self.clients_lock:
                 watching = bool(self.clients)
             if not watching:
                 continue
-            self.event("stats", kbps=round((self.received - before) / 1024, 1),
+            self.event("stats", kbps=round((self.screen.received - before) / 1024, 1),
                        rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height)
             if self.online and seconds % 2 == 0:
                 self._read_screens()

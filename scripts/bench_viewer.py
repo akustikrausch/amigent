@@ -29,22 +29,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 
-LINKS = {  # name: (bytes per second, one-way delay, screen, profile)
+LINKS = {  # name: (bytes per second, one-way delay, screen, profile[, amigentd kind])
     "50K/20ms": (50_000, 0.020, (640, 512), "68020"),
     "50K/100ms": (50_000, 0.100, (640, 512), "68020"),
     "15K/20ms": (15_000, 0.020, (640, 512), "68020"),
     "15K/100ms": (15_000, 0.100, (640, 512), "68020"),
     "68000 15K/100ms": (15_000, 0.100, (640, 256), "68000"),
+    "68000 15K/100ms chunky": (15_000, 0.100, (640, 256), "68000", "old"),  # amigentd before planar
 }
 TIMEOUT = 20.0
 
 
+def rgb(c: int) -> tuple:
+    return (c & 7) * 255 // 7, (c >> 3 & 7) * 255 // 7, (c >> 6 & 3) * 255 // 3
+
+
 # ---------------------------------------------------------------- the Amiga side, in a child
 
-def _amiga(conn, rate, delay, size, profile) -> None:
+def _amiga(conn, rate, delay, size, profile, kind) -> None:
     from slowlink import FakeAmiga, SlowLink
 
-    amiga = FakeAmiga(*size, profile=profile)
+    amiga = FakeAmiga(*size, profile=profile, planar=kind)
     link = SlowLink(amiga.port, rate, delay)
     conn.send(link.port)
     while True:
@@ -60,10 +65,10 @@ def _amiga(conn, rate, delay, size, profile) -> None:
 
 
 class Amiga:
-    def __init__(self, rate, delay, size, profile):
+    def __init__(self, rate, delay, size, profile, kind="yes"):
         ctx = multiprocessing.get_context("fork")
         self.conn, child = ctx.Pipe()
-        self.proc = ctx.Process(target=_amiga, args=(child, rate, delay, size, profile), daemon=True)
+        self.proc = ctx.Process(target=_amiga, args=(child, rate, delay, size, profile, kind), daemon=True)
         self.proc.start()
         self.port = self.conn.recv()
         self.lock = threading.Lock()
@@ -125,7 +130,7 @@ class Page:
                     n = struct.unpack(">Q", self._exact(8))[0]
                 data = self._exact(n)
                 self.bytes += n + 2
-                if b1 & 0x0F == 2 and data[:1] == b"\x01":
+                if b1 & 0x0F == 2 and data[:1] in (b"\x01", b"\x03"):
                     self._tiles(data)
         except (OSError, EOFError):
             pass
@@ -133,12 +138,21 @@ class Page:
             print("page reader died:", repr(e), file=sys.stderr)
 
     def _tiles(self, data):
+        """Message 1 (RGB332 tiles as sent) or 3 (RGB the PC decoded): kept as they came,
+        a pixel is only worked out when asked, so the page costs this process nothing."""
         at = 1
         found = {}
         while at < len(data):
-            x, y, w, h, size = struct.unpack(">HHHHI", data[at:at + 12])
-            found[(x, y)] = (w, h, data[at + 12:at + 12 + size])
-            at += 12 + size
+            if data[0] == 1:
+                x, y, w, h, size = struct.unpack(">HHHHI", data[at:at + 12])
+                body, at = data[at + 12:at + 12 + size], at + 12 + size
+            else:
+                x, y, w, h = struct.unpack(">HHHH", data[at:at + 8])
+                body, at = data[at + 8:at + 8 + w * h * 3], at + 8 + w * h * 3
+            entry = (data[0], x, y, w, h, body)
+            for ty in range(y // 64 * 64, y + h, 64):
+                for tx in range(x // 64 * 64, x + w, 64):
+                    found[(tx, ty)] = entry
         with self.cond:
             if self.first_tile is None:
                 self.first_tile = time.perf_counter()
@@ -146,16 +160,19 @@ class Page:
             self.cond.notify_all()
 
     def pixel(self, x, y):
-        tile = self.tiles.get((x // 64 * 64, y // 64 * 64))
-        if not tile:
+        """RGB at x, y as the page shows it."""
+        entry = self.tiles.get((x // 64 * 64, y // 64 * 64))
+        if not entry:
             return None
-        w, h, data = tile
-        at = (y % 64) * w + x % 64
+        kind, rx, ry, w, h, data = entry
+        at = (y - ry) * w + x - rx
+        if kind == 3:
+            return tuple(data[3 * at:3 * at + 3])
         if len(data) == w * h:
-            return data[at]
+            return rgb(data[at])
         for i in range(0, len(data), 2):
             if at <= data[i]:
-                return data[i + 1]
+                return rgb(data[i + 1])
             at -= data[i] + 1
         return None
 
@@ -198,9 +215,9 @@ def _free_port() -> int:
 
 
 def run_one(name: str) -> dict:
-    rate, delay, (w, h), profile = LINKS[name]
-    amiga = Amiga(rate, delay, (w, h), profile)  # fork before any thread runs here
-    from slowlink import mark_colour
+    rate, delay, (w, h), profile, *kind = LINKS[name]
+    amiga = Amiga(rate, delay, (w, h), profile, *kind)  # fork before any thread runs here
+    from slowlink import mark_rgb as mark_colour  # the page shows RGB, however it came
 
     _isolate()
     from amigent.viewer import Viewer
