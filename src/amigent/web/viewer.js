@@ -12,12 +12,19 @@
 
   const DE = {
     connecting: "Verbinde mit dem Amiga…",
-    offline: "Amiga antwortet nicht – neuer Versuch läuft…",
-    disconnected: "Verbindung zu amigent getrennt – neuer Versuch läuft…",
-    state_offline: "offline",
+    offline: "Der Amiga antwortet nicht. Neuer Versuch läuft…",
+    disconnected: "Verbindung zu amigent getrennt. Neuer Versuch läuft…",
+    state_offline: "nicht verbunden",
+    send_file: "Datei senden",
+    send_tip: "Dateien von diesem PC auf den Amiga kopieren",
+    type_text: "Text tippen",
+    type_tip: "Text auf dem Amiga tippen lassen",
+    fit: "An Fenster anpassen",
+    fullscreen: "Vollbild",
+    screenshot: "Bildschirmfoto speichern",
+    restart: "Amiga neu starten…",
+    panel: "Tastatur-Leiste ein/aus",
     drop_here: "Loslassen, um es zum Amiga zu senden",
-    hide_panel: "Leiste ausblenden",
-    show_panel: "Leiste einblenden",
     screens: "Bildschirme",
     wb_front: "Workbench vorn",
     next_screen: "Schirm wechseln",
@@ -29,35 +36,29 @@
     cut: "Ausschneiden",
     paste: "Einfügen",
     select_all: "Alle wählen",
-    undo: "Rückgängig",
+    undo: "Widerrufen",
     break: "Abbrechen",
-    end_input: "Eingabe Ende",
+    end_input: "Eingabe-Ende",
     keys: "Tasten",
-    modifiers: "Für nächste Taste halten",
-    lamiga_tip: "Linke Amiga-Taste",
-    ramiga_tip: "Rechte Amiga-Taste",
-    mod_hint: "Klick: einmal. Doppelklick: bleibt, bis du wieder klickst.",
+    modifiers: "Für die nächste Taste halten",
+    lamiga: "Linke Amiga-Taste",
+    ramiga: "Rechte Amiga-Taste",
+    mod_tip: "Klick: für die nächste Taste. Doppelklick: einrasten.",
     mouse: "Maus",
     hold_right: "Rechte Taste halten",
     middle_click: "Mittelklick",
     keyboard: "Tastatur",
     kb_text: "Text",
     kb_direct: "Direkt (Spiele)",
-    kb_hint: "Text tippt Zeichen über die Tastaturbelegung des Amiga. Direkt schickt die Tastenpositionen, gehaltene Tasten bleiben gehalten.",
-    transfer: "Übertragen",
-    send_file: "Datei zum Amiga senden…",
-    drop_hint: "Oder Dateien auf den Bildschirm ziehen.",
-    type_placeholder: "Text, den der Amiga tippen soll",
-    type: "Tippen",
-    view: "Ansicht",
-    fit: "Einpassen",
-    fullscreen: "Vollbild",
-    screenshot: "Foto",
-    restart: "Amiga neu starten…",
+    kb_text_tip: "Zeichen über die Tastaturbelegung des Amiga",
+    kb_direct_tip: "Tastenpositionen, gehaltene Tasten bleiben gehalten",
     send_title: "Zum Amiga senden",
     target_folder: "Ordner auf dem Amiga",
     cancel: "Abbrechen",
     send: "Senden",
+    type_title: "Auf dem Amiga tippen",
+    type_hint: "Der Text geht ins aktive Fenster, Zeilenumbrüche drücken Return.",
+    type_go: "Tippen",
     restart_title: "Amiga neu starten?",
     restart_text: "Offene Dateien werden vorher auf die Platte geschrieben. Ungesicherte Arbeit in Programmen geht verloren.",
     restart_go: "Neu starten",
@@ -73,9 +74,18 @@
   };
 
   const EN = {
+    connecting: "Connecting to the Amiga…",
     offline: "The Amiga is not answering. Trying again…",
     disconnected: "Lost the connection to amigent. Trying again…",
-    state_offline: "offline",
+    state_offline: "not connected",
+    fit: "Fit to window",
+    fullscreen: "Full screen",
+    screenshot: "Save screenshot",
+    restart: "Restart Amiga…",
+    panel: "Show or hide the keyboard panel",
+    lamiga: "Left Amiga",
+    ramiga: "Right Amiga",
+    mod_tip: "Click: next key only. Double-click: lock.",
     restarting: "Restarting the Amiga…",
     restart_failed: "Restart failed",
     exists: "{path} exists. Replace it?",
@@ -105,6 +115,11 @@
     for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
     for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
   }
+  for (const el of document.querySelectorAll("[data-i18n-label]")) {
+    el.title = t(el.dataset.i18nLabel);
+    el.setAttribute("aria-label", el.title);
+  }
+  for (const el of document.querySelectorAll("[data-mod]")) el.title = `${el.title || el.textContent}. ${t("mod_tip")}`;
 
   for (const el of document.querySelectorAll("[data-combo]")) {
     el.title = el.dataset.combo.replace("lamiga", "Amiga links").replace("ramiga", "Amiga rechts")
@@ -160,7 +175,7 @@
     else if (amigaOnline === null) message = t("connecting");
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
-    pill.className = "pill " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
+    pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
     $("state-text").textContent = socketOpen && amigaOnline ? host : t("state_offline");
   }
 
@@ -257,7 +272,7 @@
     canvas.style.height = `${Math.max(1, Math.floor(h * scale))}px`;
     canvas.classList.toggle("sharp", scale >= 1);
     stage.classList.toggle("actual", !fit);
-    $("fit").classList.toggle("on", fit);
+    $("fit").setAttribute("aria-pressed", String(fit));
   }
 
   new ResizeObserver(layout).observe(stage);
@@ -320,7 +335,7 @@
 
   $("hold-right").addEventListener("click", () => {
     holdRight = !holdRight;
-    $("hold-right").classList.toggle("on", holdRight);
+    $("hold-right").setAttribute("aria-pressed", String(holdRight));
     send({ t: "buttons", mask: buttons() });
   });
 
@@ -380,7 +395,7 @@
   function paintMods() {
     for (const el of document.querySelectorAll("[data-mod]")) {
       const bit = Number(el.dataset.mod);
-      el.classList.toggle("on", !!(sticky & bit));
+      el.setAttribute("aria-pressed", String(!!((sticky | locked) & bit)));
       el.classList.toggle("locked", !!(locked & bit));
     }
   }
@@ -478,8 +493,8 @@
 
   function setDirect(on) {
     direct = on;
-    $("kb-text").classList.toggle("on", !on);
-    $("kb-direct").classList.toggle("on", on);
+    $("kb-text").setAttribute("aria-checked", String(!on));
+    $("kb-direct").setAttribute("aria-checked", String(on));
     store.set("direct", on ? "1" : "0");
     releaseAll();
     canvas.focus();
@@ -495,15 +510,22 @@
     });
   }
 
-  $("type-send").addEventListener("click", () => {
-    const text = $("type-text").value;
-    if (text) send({ t: "text", s: text });
-    $("type-text").value = "";
-    canvas.focus();
+  $("type").addEventListener("click", () => {
+    $("type-dialog").showModal();
+    $("type-text").focus();
   });
 
   $("type-text").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) $("type-send").click();
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) $("type-dialog").close("type");
+  });
+
+  $("type-dialog").addEventListener("close", () => {
+    const text = $("type-text").value;
+    if ($("type-dialog").returnValue === "type" && text) {
+      send({ t: "text", s: text });
+      $("type-text").value = "";
+    }
+    canvas.focus();
   });
 
   // ---------------------------------------------------------------- view
@@ -538,14 +560,14 @@
     });
   });
 
-  function setCollapsed(on) {
-    document.body.classList.toggle("collapsed", on);
-    store.set("collapsed", on ? "1" : "0");
+  function setPanel(on) {
+    document.body.classList.toggle("no-panel", !on);
+    $("panel-toggle").setAttribute("aria-pressed", String(on));
+    store.set("panel", on ? "1" : "0");
     layout();
   }
 
-  $("collapse").addEventListener("click", () => setCollapsed(true));
-  $("expand").addEventListener("click", () => setCollapsed(false));
+  $("panel-toggle").addEventListener("click", () => setPanel(document.body.classList.contains("no-panel")));
 
   // ---------------------------------------------------------------- restart
 
@@ -585,7 +607,6 @@
   async function browse(path) {
     folderPath = path;
     $("folder").value = path;
-    $("crumbs").textContent = path;
     const list = $("folders");
     list.innerHTML = `<li class="note">${t("loading")}</li>`;
     try {
@@ -598,6 +619,7 @@
         const chip = document.createElement("button");
         chip.type = "button";
         chip.textContent = volume;
+        if (path.toLowerCase().startsWith(volume.toLowerCase())) chip.setAttribute("aria-current", "true");
         chip.addEventListener("click", () => browse(volume));
         chips.append(chip);
       }
@@ -616,8 +638,15 @@
   function folderItem(name, path, up = false) {
     const li = document.createElement("li");
     li.textContent = name;
+    li.tabIndex = 0;
     if (up) li.className = "up";
     li.addEventListener("click", () => browse(path));
+    li.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        browse(path);
+      }
+    });
     return li;
   }
 
@@ -726,7 +755,7 @@
   // ---------------------------------------------------------------- start
 
   if (store.get("direct", "0") === "1") setDirect(true);
-  if (store.get("collapsed", "0") === "1") setCollapsed(true);
+  if (store.get("panel", "1") === "0") setPanel(false);
   showState();
   layout();
   connect();

@@ -321,7 +321,7 @@ def amiga_viewer() -> str:
     global viewer
     if viewer is None:
         viewer = Viewer(HOST, screen=screen, lock=_screen_lock, ctl_port=CTL_PORT,
-                        restart=amiga_restart, flush_volumes=FLUSH_VOLUMES)
+                        restart=amiga_restart, flush_volumes=FLUSH_VOLUMES, remember=True)
     url = viewer.start(VIEWER_PORT)
     open_window(url)
     return f"viewer window opened: {url}"

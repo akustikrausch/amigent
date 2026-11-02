@@ -53,6 +53,7 @@ SD card, null modem, whatever you've got. Put it in `RAM:`.
     Clone it, run pip install -e . in it, then run amigent-setup. It finds my
     Amiga by itself and prints the address. Register the MCP server with
     claude mcp add amigent -e AMIGENT_HOST=<address> -- amigent-server
+    If I'm on Windows, also run amigent-viewer <address> --install.
     Tell me to restart Claude Code when you're done.
 
 That's all. `amigent-setup` finds the machine, pulls the latest
@@ -77,31 +78,41 @@ claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
 ## take the wheel
 
 Tell Claude "manual control", or "show me the Amiga", and the viewer opens as its
-own window. No plugin, no extra install: it's a page served by amigent on your
-own machine and shown by Edge or Chrome in app mode.
+own window. Or skip Claude and start **Amiga Remote** from the Start menu.
 
 - **the screen, live.** Only changed 64x64 tiles travel, the area around your
   pointer gets looked at first. Moving the mouse costs a few milliseconds.
 - **mouse and keyboard.** Click, drag, right button for menus, wheel. Text mode
   types through the Amiga's own keymap, so umlauts and AltGr just work. Direct
   mode sends raw key positions and holds keys for as long as you do. For games.
-- **the side panel.** Workbench to front, next screen, Open, Save, Quit, Copy,
-  Paste, Ctrl-C for the Shell, Help, Del, F1 to F10, and sticky Amiga, Ctrl, Alt
-  and Shift for anything else. Click once for the next key, double-click to lock.
-- **files.** Hit *Send file to Amiga*, or drop files on the screen. Pick a folder
-  on the Amiga in the little browser, `RAM:` is the default. Progress bar,
-  checksum at the end, and it asks before it overwrites something.
-- **clipboard.** Ctrl+V types your PC's clipboard on the Amiga.
+- **a slice of Amiga keyboard** on the right: Esc, Tab, Del, Help, Return, the
+  wide F-keys, and the two Amiga keys with their solid and hollow A. Click a
+  modifier once for the next key, double-click to lock it. Its LED tells you
+  which is which. Above that the usual combinations: Workbench to front, next
+  screen, Open, Save, Quit, Copy, Paste, Ctrl-C for the Shell.
+- **files.** *Send file* in the toolbar, or drop files on the screen. Pick a
+  folder on the Amiga in the little browser, `RAM:` is the default. Progress
+  bar, checksum at the end, and it asks before it overwrites something.
+- **text.** *Type text* sends a whole block, Ctrl+V sends your clipboard.
 - **the rest.** Fit to window or 1:1, full screen (there the Windows keys become
   the Amiga keys), screenshot to PNG, and a restart button that writes the disks
   first.
 
 Claude keeps working while the window is open, and you see every click it makes.
-Without Claude, the same window comes up with
+
+### as a Windows program
 
 ```bash
-amigent-viewer 192.168.1.50
+amigent-viewer 192.168.1.50 --install
 ```
+
+puts **Amiga Remote** with its own icon into the Start menu and on the desktop.
+It starts without a console, works from WSL as well as from a Windows Python,
+and quits by itself when you close the window. Started twice, it just brings up
+the window of the one that's running, and that includes the one Claude opened.
+`amigent-viewer --uninstall` takes it all away again.
+
+Elsewhere, or just once, `amigent-viewer 192.168.1.50` opens the window directly.
 
 ## how it works
 

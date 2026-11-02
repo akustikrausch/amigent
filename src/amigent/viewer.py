@@ -1,9 +1,12 @@
 """Live screen and manual control of the Amiga in a browser window.
 
-Usage: amigent-viewer [HOST] [--port N] [--no-window]
+Usage: amigent-viewer [HOST] [--port N] [--no-window] [--exit-when-closed]
+       amigent-viewer HOST --install     Start menu and desktop entry on Windows
+       amigent-viewer --uninstall
 
 HOST defaults to AMIGENT_HOST. Inside Claude Code the amiga_viewer tool opens
-the same window from the running amigent server.
+the same window from the running amigent server, and a second start of the
+viewer opens the window of the one that is already running.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,7 +38,9 @@ from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
 
 WEB = Path(__file__).with_name("web")
-STATIC = {"viewer.js": "text/javascript", "viewer.css": "text/css"}
+STATIC = {"viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
+          "icon.png": "image/png", "amigent.ico": "image/x-icon"}
+STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
 TILE = 64
 BAND = 4 * TILE  # rows per poll; an unchanged band costs the Amiga about 35 ms
 POINTER_BOX = 3 * TILE
@@ -141,7 +147,7 @@ class Viewer:
 
     def __init__(self, host: str, screen: Amigentd | None = None, lock=None,
                  ctl_port: int = 6800, screen_port: int = 6801, restart=None,
-                 flush_volumes=("SYS:",)):
+                 flush_volumes=("SYS:",), remember: bool = False):
         self.host = host
         self.screen = screen or Amigentd(host, screen_port)
         self._thread_lock = threading.Lock()
@@ -150,6 +156,7 @@ class Viewer:
         self.ctl_lock = threading.Lock()
         self.restart = restart
         self.flush_volumes = list(flush_volumes)
+        self.remember = remember
         self.token = secrets.token_urlsafe(18)
         self.url = ""
         self.httpd: ThreadingHTTPServer | None = None
@@ -160,6 +167,8 @@ class Viewer:
         self.wake = threading.Event()
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
+        self.ever_joined = False
+        self.alone_since = time.monotonic()
         self.pointer = (0, 0)
         self.last_input = 0.0
         self.received = 0
@@ -178,6 +187,14 @@ class Viewer:
             self.httpd = _Server(("127.0.0.1", 0), handler)
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
+        try:  # lets a second start open this window instead of fighting over the screen
+            if not self.remember:
+                raise OSError
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            STATE.write_text(json.dumps({"url": self.url, "host": self.host}))
+            STATE.chmod(0o600)
+        except OSError:
+            pass
         for target in (self.httpd.serve_forever, self._work, self._upload_worker, self._stats):
             threading.Thread(target=target, daemon=True).start()
         return self.url
@@ -195,11 +212,19 @@ class Viewer:
                 ws.send(b"\x02" + out.getvalue())
             with self.clients_lock:
                 self.clients.add(ws)
+                self.ever_joined = True
         self.wake.set()
 
     def leave(self, ws: WebSocket) -> None:
         with self.clients_lock:
             self.clients.discard(ws)
+            if not self.clients:
+                self.alone_since = time.monotonic()
+
+    def unused_for(self) -> float:
+        """Seconds without an open page, or 0 while one is open."""
+        with self.clients_lock:
+            return 0.0 if self.clients else time.monotonic() - self.alone_since
 
     def broadcast(self, data: bytes | str) -> None:
         with self.clients_lock:
@@ -508,13 +533,24 @@ class _Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
 
+def windows_exe(name: str) -> str:
+    """A Windows program by name; WSL started from a shortcut may lack the Windows PATH."""
+    if found := shutil.which(name):
+        return found
+    for folder in ("/mnt/c/Windows/System32", "/mnt/c/Windows/System32/WindowsPowerShell/v1.0",
+                   "/mnt/c/Windows"):
+        if os.path.exists(f"{folder}/{name}"):
+            return f"{folder}/{name}"
+    return name
+
+
 def open_window(url: str) -> None:
     """Show url as its own window (Edge or Chrome app mode), else in the default browser."""
     app = [f"--app={url}", "--window-size=1440,900", "--new-window"]
     wsl = "microsoft" in platform.release().lower()
     commands = []
     if wsl or sys.platform == "win32":
-        cmd = "cmd.exe" if wsl else "cmd"
+        cmd = windows_exe("cmd.exe") if wsl else "cmd"
         commands.append([cmd, "/c", "start", "", "msedge", *app])
     elif sys.platform == "darwin":
         for browser in ("Google Chrome", "Microsoft Edge", "Chromium"):
@@ -532,11 +568,23 @@ def open_window(url: str) -> None:
             return
         except OSError:
             continue
-    if wsl and shutil.which("explorer.exe"):
-        subprocess.Popen(["explorer.exe", url], cwd=cwd, stdout=subprocess.DEVNULL,
+    if wsl:
+        subprocess.Popen([windows_exe("explorer.exe"), url], cwd=cwd, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
         return
     webbrowser.open(url)
+
+
+def running_viewer(host: str) -> str | None:
+    """The address of a viewer for host that already runs on this PC, if any."""
+    try:
+        state = json.loads(STATE.read_text())
+        if state.get("host") != host:
+            return None
+        with urllib.request.urlopen(state["url"], timeout=2) as reply:
+            return state["url"] if reply.status == 200 else None
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def main() -> None:
@@ -544,21 +592,47 @@ def main() -> None:
     parser.add_argument("host", nargs="?", default=os.environ.get("AMIGENT_HOST", ""))
     parser.add_argument("--port", type=int, default=int(os.environ.get("AMIGENT_VIEWER_PORT", "6810")))
     parser.add_argument("--no-window", action="store_true", help="only print the address")
+    parser.add_argument("--exit-when-closed", action="store_true",
+                        help="stop once the window has been closed")
+    parser.add_argument("--install", action="store_true",
+                        help="add 'Amiga Remote' to the Windows Start menu and desktop")
+    parser.add_argument("--uninstall", action="store_true", help="remove those shortcuts again")
     args = parser.parse_args()
+    if args.uninstall:
+        from .desktop import uninstall
+        for path in uninstall():
+            print(f"removed {path}")
+        return
     if not args.host:
         parser.error("give the Amiga's address or set AMIGENT_HOST")
+    if args.install:
+        from .desktop import install
+        for path in install(args.host):
+            print(f"created {path}")
+        return
+    if url := running_viewer(args.host):
+        if not args.no_window:
+            open_window(url)
+        print(f"amigent viewer already running: {url}", flush=True)
+        return
     viewer = Viewer(
         args.host,
         ctl_port=int(os.environ.get("AMIGENT_CTL_PORT", "6800")),
         screen_port=int(os.environ.get("AMIGENT_SCREEN_PORT", "6801")),
         flush_volumes=os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split(),
+        remember=True,
     )
     url = viewer.start(args.port)
     print(f"amigent viewer: {url}\nCtrl+C to stop.", flush=True)
     if not args.no_window:
         open_window(url)
     try:
-        threading.Event().wait()
+        while True:
+            time.sleep(1)
+            if args.exit_when_closed:
+                idle = viewer.unused_for()
+                if idle > (15 if viewer.ever_joined else 90):
+                    break  # the window is gone; a reload comes back within seconds
     except KeyboardInterrupt:
         pass
 

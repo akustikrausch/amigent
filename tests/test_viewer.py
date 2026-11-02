@@ -104,3 +104,23 @@ def test_foreign_host_header_is_refused():
     sock = socket.create_connection(("127.0.0.1", viewer.port), 5)
     sock.sendall(f"GET /?t={viewer.token} HTTP/1.1\r\nHost: evil.example:{viewer.port}\r\n\r\n".encode())
     assert sock.recv(100).startswith(b"HTTP/1.1 403")
+
+
+def test_windows_launcher_quotes_for_vbs(monkeypatch):
+    from amigent import desktop
+
+    monkeypatch.setattr(desktop, "_wsl", lambda: True)
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Debian")
+    monkeypatch.setenv("AMIGENT_FLUSH_VOLUMES", "Work: SYS:")
+    name, text = desktop._launcher("192.168.1.50")
+    assert name == "Amiga Remote.vbs"
+    assert text.startswith('CreateObject("WScript.Shell").Run "wsl.exe -d Debian ')
+    assert '""AMIGENT_FLUSH_VOLUMES=Work: SYS:""' in text
+    assert text.rstrip().endswith('192.168.1.50 --exit-when-closed", 0, False')
+
+
+def test_no_running_viewer_without_state(monkeypatch, tmp_path):
+    import amigent.viewer as viewer
+
+    monkeypatch.setattr(viewer, "STATE", tmp_path / "viewer.json")
+    assert viewer.running_viewer("192.168.1.50") is None
