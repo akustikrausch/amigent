@@ -716,12 +716,19 @@
     size.textContent = sizeText(file.size);
     li.append(size);
     li.tabIndex = 0;
-    const get = () => {
-      const link = document.createElement("a");
-      link.href = api("/api/download", { path });
-      link.download = file.name;
-      link.click();
+    const get = async () => {
       toast(t("getting", { path }));
+      try {
+        const reply = await fetch(api("/api/download", { path }));
+        if (!reply.ok) throw new Error((await reply.json()).error);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(await reply.blob());
+        link.download = file.name;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      } catch (error) {
+        toast(t("failed", { path, error: error.message }), true);
+      }
     };
     li.addEventListener("click", get);
     li.addEventListener("keydown", (event) => {

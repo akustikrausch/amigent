@@ -9,18 +9,36 @@ AMIGENT_KEY overrides the files.
 from __future__ import annotations
 
 import os
+import re
 import secrets
+import socket
 from pathlib import Path
 
 FOLDER = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "amigent"
 
 
+def safe(host: str) -> str:
+    """host as part of a file name: IPv6 colons and path characters become _."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", host).strip(".") or "_"
+
+
 def key_file(host: str = "") -> Path:
-    """A key for one host if there is one, else the common key."""
+    """The key for this host: its own, the one kept under its address, or the common key.
+
+    The common key belongs to the first Amiga set up. Once there are keys for
+    several Amigas it is only used for a host that resolves to none of them.
+    """
     if host:
-        own = FOLDER / f"key-{host}"
+        own = FOLDER / f"key-{safe(host)}"
         if own.exists():
             return own
+        try:
+            address = socket.gethostbyname(host)
+        except OSError:
+            address = ""
+        by_address = FOLDER / f"key-{safe(address)}"
+        if address and by_address.exists():
+            return by_address
     return FOLDER / "key"
 
 
@@ -37,7 +55,7 @@ def load_key(host: str = "") -> str | None:
 def own_key(host: str) -> str | None:
     """The key kept for exactly this host, ignoring the common one."""
     try:
-        return (FOLDER / f"key-{host}").read_text().strip() or None
+        return (FOLDER / f"key-{safe(host)}").read_text().strip() or None
     except OSError:
         return None
 
@@ -51,7 +69,7 @@ def _write(path: Path, key: str) -> None:
 
 def save_key(key: str, host: str) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = FOLDER / f"key-{host}"
+    path = FOLDER / f"key-{safe(host)}"
     _write(path, key)
     if not (FOLDER / "key").exists():
         _write(FOLDER / "key", key)

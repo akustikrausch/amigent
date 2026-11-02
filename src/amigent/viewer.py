@@ -50,7 +50,8 @@ POINTER_BOX = 3 * TILE
 ACTIVE_SECS = 3  # after input, poll around the pointer between bands
 UPLOAD_CHUNK = 32 * 1024
 MAX_UPLOAD = 512 * 2**20
-MAX_DOWNLOAD = 128 * 2**20
+MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
+MAX_CLIP = 1 << 20
 CLIPBOARD = "CLIPS:0"  # clipboard.device keeps unit 0 there as IFF FTXT
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WHEEL_UP, WHEEL_DOWN = 0x7A, 0x7B  # NewMouse convention
@@ -393,6 +394,7 @@ class Viewer:
     def _work(self) -> None:
         regions = self._regions()
         quiet = 0
+        retried = False
         while True:
             with self.clients_lock:
                 watching = bool(self.clients)
@@ -411,14 +413,16 @@ class Viewer:
                     else:
                         changed = self.screen.poll(*region)
                 spent = time.perf_counter() - start
+                retried = False
                 self._set_online(True)
             except Exception as e:  # noqa: BLE001 - the worker must survive anything
                 with self.lock():
                     self.screen.close()
-                    if self.online:
+                    if self.online and not retried:
                         # Another program on the network may just have taken the screen
                         # over for a moment (amigentd serves one screen client): try again
-                        # at once before telling anyone.
+                        # at once, once, before telling anyone.
+                        retried = True
                         try:
                             self.screen.connect()
                             continue
@@ -527,11 +531,14 @@ class Viewer:
 
     def read_clipboard(self) -> str:
         try:
-            return ftxt_text(self._ctl(lambda: self.ctl.read_file(CLIPBOARD)))
+            size = int(self._ctl(lambda: self.ctl.stat(CLIPBOARD)).get("size", 0) or 0)
         except AmigaError as e:
             if e.code is None:
                 raise
             return ""  # nothing copied yet
+        if size > MAX_CLIP:
+            raise AmigaError("the Amiga's clipboard holds more than text")  # a picture, say
+        return ftxt_text(self._ctl(lambda: self.ctl.read_file(CLIPBOARD)))
 
     def write_clipboard(self, text: str) -> None:
         self._ctl(lambda: self.ctl.write_file(CLIPBOARD, ftxt(text)))
@@ -632,13 +639,13 @@ class _Handler(BaseHTTPRequestHandler):
         if url.path == "/api/folders":
             try:
                 return self._json(200, self.viewer.folders(query.get("path", [""])[0]))
-            except (AmigaError, OSError) as e:
+            except (AmigaError, OSError, ValueError) as e:
                 return self._json(502, {"error": str(e)})
         if url.path == "/api/download":
             path = query.get("path", [""])[0]
             try:
                 data = self.viewer.download(path)
-            except (AmigaError, OSError) as e:
+            except (AmigaError, OSError, ValueError) as e:
                 return self._json(502, {"error": str(e)})
             name = re.split(r"[:/]", path)[-1] or "file"
             self.send_response(200)
@@ -652,7 +659,7 @@ class _Handler(BaseHTTPRequestHandler):
         if url.path == "/api/clipboard":
             try:
                 return self._json(200, {"text": self.viewer.read_clipboard()})
-            except (AmigaError, OSError) as e:
+            except (AmigaError, OSError, ValueError) as e:
                 return self._json(502, {"error": str(e)})
         self._reply(404, b"not found", "text/plain")
 
@@ -673,7 +680,7 @@ class _Handler(BaseHTTPRequestHandler):
         if url.path == "/api/clipboard":
             try:
                 self.viewer.write_clipboard(data.decode("utf-8", "replace"))
-            except (AmigaError, OSError) as e:
+            except (AmigaError, OSError, ValueError) as e:
                 return self._json(502, {"error": str(e)})
             return self._json(200, {})
         try:

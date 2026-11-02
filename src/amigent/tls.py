@@ -16,11 +16,20 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .secret import FOLDER
+from .secret import FOLDER, safe
 
 
 def pinned(host: str) -> Path:
-    return FOLDER / f"tls-{host}.pem"
+    """The certificate pinned for host, also when host is a name for an address set up earlier."""
+    path = FOLDER / f"tls-{safe(host)}.pem"
+    if not path.exists():
+        try:
+            by_address = FOLDER / f"tls-{safe(socket.gethostbyname(host))}.pem"
+        except OSError:
+            return path
+        if by_address.exists():
+            return by_address
+    return path
 
 
 def wanted(host: str) -> bool:

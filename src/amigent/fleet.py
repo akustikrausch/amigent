@@ -15,6 +15,7 @@ import argparse
 import io
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -131,7 +132,7 @@ class _FleetHandler(BaseHTTPRequestHandler):
         if name in STATIC or name == "fleet.js":
             kind = STATIC.get(name, "text/javascript")
             return self._reply(200, (WEB / name).read_bytes(), kind)
-        if name.startswith("locales/") and name.endswith(".json") and (WEB / name).is_file():
+        if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
             return self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
         if not self._allowed(query):
             return self._reply(403, b"Open the overview through amigent-fleet.", "text/plain")
