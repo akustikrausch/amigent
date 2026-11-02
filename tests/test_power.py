@@ -37,3 +37,25 @@ def test_restart_that_answers_needs_nothing_else(monkeypatch):
     calls = restart_with(monkeypatch, answers=True, power=True)
     assert s.amiga_restart() == "Amiga restarted"
     assert calls == [("wait", s.RESTART_WAIT)]
+
+
+def test_the_lock_is_exclusive_across_threads():
+    import threading
+    import time
+
+    from amigent import locks
+
+    order = []
+
+    def hold(tag):
+        with locks.exclusive("amigent-test.lock"):
+            order.append(f"{tag} in")
+            time.sleep(0.2)
+            order.append(f"{tag} out")
+
+    first = threading.Thread(target=hold, args=("a",))
+    first.start()
+    time.sleep(0.05)
+    hold("b")
+    first.join()
+    assert order == ["a in", "a out", "b in", "b out"]

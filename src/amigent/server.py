@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import io
-import fcntl
 import json
 import os
 import re
 import time
-from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import inventory, machines, secret
+from . import inventory, locks, machines, secret
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands
@@ -26,7 +24,7 @@ CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
 SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
 MAX_EDGE = 1568  # larger images get downscaled by the model API anyway
-LOCK_FILE = "/tmp/amigent.lock"
+LOCK_FILE = "amigent.lock"  # lives in the temp folder, see locks.py
 VIEWER_PORT = int(os.environ.get("AMIGENT_VIEWER_PORT", "6810"))
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
@@ -41,12 +39,9 @@ ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld 
 screen = Amigentd(HOST, SCREEN_PORT)
 
 
-@contextmanager
 def _exclusive(name: str = LOCK_FILE):
     """Serialise access across all amigent processes and threads on this PC."""
-    with open(name, "a") as lock:  # "a": never truncates whatever the path points to
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    return locks.exclusive(name)
 
 
 def _screen_lock():
