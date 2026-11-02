@@ -78,9 +78,21 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
         return _dial(moved, host, port, timeout)
 
 
+def find_openssl() -> str | None:
+    """openssl on the PATH, else the one Git for Windows brings along."""
+    if tool := shutil.which("openssl"):
+        return tool
+    for root in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                 os.environ.get("LOCALAPPDATA", "") + r"\Programs"):
+        candidate = Path(root) / "Git" / "usr" / "bin" / "openssl.exe"
+        if os.name == "nt" and candidate.exists():
+            return str(candidate)
+    return None
+
+
 def make_certificate(host: str) -> tuple[bytes, bytes] | None:
     """(certificate + key for the Amiga, certificate for the PC), or None without openssl."""
-    tool = shutil.which("openssl")
+    tool = find_openssl()
     if not tool:
         return None
     with tempfile.TemporaryDirectory() as folder:
