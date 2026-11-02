@@ -395,6 +395,8 @@
   // ---------------------------------------------------------------- keys
 
   const Q = { lshift: 1, rshift: 2, caps: 4, ctrl: 8, lalt: 16, ralt: 32, lamiga: 64, ramiga: 128 };
+  // On a Mac, Cmd pastes and Option types characters such as @ and € on its own.
+  const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
 
   const SPECIAL = {
     Enter: 0x44, NumpadEnter: 0x43, Backspace: 0x41, Tab: 0x42, Escape: 0x45, Delete: 0x46,
@@ -483,6 +485,11 @@
     if (MODIFIERS[code]) {
       const [raw, bit] = MODIFIERS[code];
       held = isDown ? held | bit : held & ~bit;
+      if (MAC && !isDown && code.startsWith("Meta")) {
+        // macOS sends no keyup for keys let go while Cmd was held
+        for (const k of down) send({ t: "key", code: k, down: false, q: held });
+        down.clear();
+      }
       if (direct && !(isDown && event.repeat)) send({ t: "key", code: raw, down: isDown, q: held });
       event.preventDefault();
       return;
@@ -507,10 +514,11 @@
       return;
     }
     if (!isDown || event.key.length !== 1) return;
-    if (event.ctrlKey && !altGraph(event) && event.key.toLowerCase() === "v" && !(sticky | locked)) return; // paste below
+    const pasteKey = MAC ? event.metaKey : event.ctrlKey && !altGraph(event);
+    if (pasteKey && event.key.toLowerCase() === "v" && !(sticky | locked)) return; // paste below
     event.preventDefault();
     let q = useSticky();
-    if (!altGraph(event)) {
+    if (!altGraph(event) && !(MAC && event.altKey)) {
       if (event.ctrlKey) q |= Q.ctrl;
       if (event.altKey) q |= Q.lalt;
     }

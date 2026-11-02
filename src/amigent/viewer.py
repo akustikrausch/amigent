@@ -748,8 +748,10 @@ def open_window(url: str) -> None:
         commands.append([cmd, "/c", "start", "", "msedge", *app])
     elif sys.platform == "darwin":
         for browser in ("Google Chrome", "Microsoft Edge", "Chromium"):
-            if Path(f"/Applications/{browser}.app").exists():
-                commands.append(["open", "-na", browser, "--args", *app])
+            for folder in (Path("/Applications"), Path.home() / "Applications"):
+                if (folder / f"{browser}.app").exists():
+                    commands.append(["open", "-na", str(folder / f"{browser}.app"), "--args", *app])
+                    break
     else:
         for browser in ("google-chrome", "chromium", "chromium-browser", "microsoft-edge"):
             if shutil.which(browser):
