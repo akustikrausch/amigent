@@ -110,9 +110,6 @@ own window. Or skip Claude and start **Amigent** from the Start menu.
   memory in the status bar. The *i* shows the rest: Kickstart and Workbench
   versions, FPU, Chip and Fast RAM, network stack, every volume with its free
   space. All of it read in well under a second, memory kept fresh every 30 s.
-- **your language.** English, Deutsch, Polski, Français, Español, Italiano,
-  Suomi, Svenska, Dansk, Čeština, Slovenčina and Magyar, picked from your
-  system settings. Change it in the *i* dialog if you like.
 
 ![About Amigent: version, system, memory and volumes](docs/screenshots/about.png)
 
