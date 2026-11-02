@@ -172,7 +172,7 @@ class AmigaCtl:
         if self._line() != ".":
             raise AmigaError("missing sentinel")
 
-    def checksum(self, path: str) -> int:
+    def checksum(self, path: str, size: int = 0) -> int:  # size: AmigaChannel uses it for patience
         return int(dict(line.split("=", 1) for line in self._text(f"CHECKSUM {path}")[1])["crc32"], 16)
 
     def delete(self, path: str) -> None:
