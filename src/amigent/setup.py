@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import sys
 import time
 import urllib.request
-from pathlib import Path
 
 from . import lzh
 from .amigactl import AmigaCtl
@@ -25,9 +23,10 @@ from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from . import machines, tls
+from .net import lan_address
+from .paths import AMIGA
 from .secret import new_key, own_key, save_key
 
-AMIGA = Path(__file__).resolve().parent / "amiga"  # the Amiga half rides inside the package
 UPSTREAM = "https://api.github.com/repos/tbdye/amigactl/releases/latest"
 SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 
@@ -46,12 +45,6 @@ def fetch_amigactld() -> bytes:
     print(f"fetching amigactld {release['tag_name']}")
     with urllib.request.urlopen(url, timeout=120) as response:
         return lzh.extract(response.read(), "/amigactld")
-
-
-def own_address(host: str) -> str:
-    """The address the Amiga sees this PC under (NAT may disagree with the LAN)."""
-    with socket.create_connection((host, 6801), 5) as s:
-        return s.getsockname()[0]
 
 
 def same_network(a: str, b: str) -> bool:
@@ -218,7 +211,7 @@ def main() -> int:
     print(f"Amiga at {host}")
     allow = None if args.no_allow else args.allow
     if not allow and not args.no_allow:
-        mine = own_address(host)
+        mine = lan_address(host)
         if same_network(mine, host):
             allow = mine
         else:

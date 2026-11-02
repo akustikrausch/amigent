@@ -18,7 +18,8 @@ import sys
 from pathlib import Path, PureWindowsPath
 
 from . import __version__
-from .viewer import windows_exe
+from .platform_util import in_wsl as _wsl  # tests swap _wsl, so the alias stays
+from .platform_util import windows_exe
 
 NAME = "Amigent"
 OLD_NAMES = ("Amiga Remote",)  # shortcuts from older releases, swept away on install
@@ -27,10 +28,6 @@ HOMEPAGE = "https://github.com/akustikrausch/amigent"
 REGISTRY = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\amigent"
 ICON = Path(__file__).with_name("web") / "amigent.ico"
 SETTINGS = ("AMIGENT_CTL_PORT", "AMIGENT_SCREEN_PORT", "AMIGENT_VIEWER_PORT", "AMIGENT_FLUSH_VOLUMES")
-
-
-def _wsl() -> bool:
-    return "microsoft" in platform.release().lower()
 
 
 def _powershell(script: str) -> str:

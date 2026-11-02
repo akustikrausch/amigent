@@ -28,7 +28,7 @@ import struct
 import threading
 import time
 
-from . import secret
+from . import net, secret
 
 GREETING_PORT = 6801
 SEARCH_EVERY = 30.0  # seconds between two sweeps for the same Amiga; a /24 scan is no free lunch
@@ -188,22 +188,14 @@ def forget(name: str) -> bool:
 def local_networks() -> list[ipaddress.IPv4Network]:
     """The /24 this PC sits in (the one its default route leaves from)."""
     try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.connect(("192.0.2.1", 9))  # UDP connect sends nothing, it just picks the interface
-        mine = probe.getsockname()[0]
-        probe.close()
+        mine = net.lan_address()
     except OSError:
         return []
     return [ipaddress.ip_network(f"{mine}/24", strict=False)]
 
 
 def _greets(host: str) -> bool:
-    try:
-        with socket.create_connection((host, GREETING_PORT), 1) as s:
-            s.settimeout(2)
-            return s.recv(4) == b"AMGT"
-    except OSError:
-        return False
+    return net.greet(host, GREETING_PORT, 2, connect_timeout=1)[:4] == b"AMGT"
 
 
 def scan() -> list[str]:

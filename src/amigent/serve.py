@@ -8,31 +8,19 @@ LAN can't reach servers inside WSL.
 
 from __future__ import annotations
 
-import platform
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from .setup import AMIGA
-from .viewer import windows_exe
+from .net import lan_address
+from .paths import AMIGA
+from .platform_util import in_wsl, windows_exe
 
 AMIGA_BIN = AMIGA / "bin"
 
 FILES = ("amigentd", "amigentd.000")
-
-
-def lan_address() -> str:
-    """The address the rest of the LAN reaches this PC at."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("192.0.2.1", 9))  # not a single byte leaves; UDP connect just picks the interface
-        return s.getsockname()[0]
-
-
-def in_wsl() -> bool:
-    return "microsoft" in platform.release().lower()
 
 
 def _windows_folder() -> tuple[Path, str]:

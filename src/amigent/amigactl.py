@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import socket
 
+from .machines import address
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
 
@@ -30,7 +31,6 @@ class AmigaCtl(VolumeFlush):
     def connect(self) -> None:
         self.close()
         try:
-            from .machines import address
             self._sock = socket.create_connection((address(self.host), self.port), self.timeout)
             self.banner = self._line()
         except OSError as e:

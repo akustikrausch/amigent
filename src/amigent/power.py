@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import os
 import shlex
-import socket
 import subprocess
 import time
 
 from .errors import AmigaError
+from .machines import address
+from .net import greet
 
 OFF_SECONDS = 30
 BOOT_WAIT = 300
@@ -38,14 +39,8 @@ def wait_for_port(host: str, port: int, wait: float) -> bool:
     """True once the service says hello; polls every 10 s until wait runs out."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
-        try:
-            from .machines import address
-            with socket.create_connection((address(host), port), 5) as s:
-                s.settimeout(8)
-                if s.recv(8):
-                    return True
-        except OSError:
-            pass
+        if greet(address(host), port, 8, connect_timeout=5):
+            return True
         time.sleep(10)
     return False
 
