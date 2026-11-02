@@ -1,7 +1,9 @@
 # amigentd protocol
 
 TCP port 6801. The client sends commands, the service answers each one once.
-All numbers are big endian.
+All numbers are big endian. One connection shows the screen and takes mouse and
+keyboard; up to four more run commands and move files, see
+[command channels](#command-channels).
 
 ## starting
 
@@ -19,23 +21,34 @@ through `graphics.library`, `cybergraphics.library` is only used when it is ther
 
 ## connections
 
-One client at a time. A new connection always wins: the old one is reset at once,
-even in the middle of a frame, and whatever was still queued for it is thrown
-away. Mouse buttons still held by the old client are let go.
+A new connection first gets the hello. It may send AUTH, and then decides what it
+is with its next command:
 
-A client that sends nothing for 120 seconds is dropped. A single send or receive
-that stalls for 30 seconds drops it too.
+- CHANNEL (20) makes it a [command channel](#command-channels).
+- Any other command makes it the screen client. There is one screen client at a
+  time, and the newcomer always wins: the old one is reset at once, even in the
+  middle of a frame, and whatever was still queued for it is thrown away. Mouse
+  buttons still held by the old client are let go. The command that decided it
+  is then carried out as usual.
+
+So a connection that only sends its key, or asks for a command channel, leaves
+the screen client alone. Up to four connections can wait undecided; a fifth
+pushes out the one waiting longest. One that stays undecided for 120 seconds is
+dropped, and so is a key that takes longer than 5 seconds to arrive.
+
+A screen client that sends nothing for 120 seconds is dropped. A single send or
+receive that stalls for 30 seconds drops it too.
 
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
-the protocol version, currently `2`. Flags: `1` when a key is required (see
+the protocol version, currently `3`. Flags: `1` when a key is required (see
 [key](#key)), otherwise `0`.
 
 ## key
 
 If the key file exists and its first line is not empty, every connection has to
-send AUTH before anything else. The key is that first line, at most 64 bytes,
+send AUTH before anything else, command channels included. The key is that first line, at most 64 bytes,
 with trailing spaces and tabs cut. The file is read again for every new
 connection, so a key that arrives by PUT during SETUP counts from the next
 connection on.
@@ -73,6 +86,8 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 16 | MENUS | | | text |
 | 17 | AUTH | | x = key length | ok |
 | 18 | CLIENT | | x = id high word, y = id low word | ok |
+| 20 | CHANNEL | | | ok |
+| 21-31 | | | | see [command channels](#command-channels) |
 
 ok is a single byte, `0` for success and `1` for failure. Unknown commands get a
 `1` as well. PUT sends the path and then the data right after the command, RUN
@@ -222,6 +237,73 @@ real mouse and keyboard.
   menu is open Intuition holds back every new window and screen, so programs
   seem to hang on opening. Esc (rawkey `0x45`) closes it. For menus, hold the
   right button, move, and let go over the item.
+
+## command channels
+
+A connection that sends CHANNEL (after AUTH, if a key is set) becomes a command
+channel. It gets `0` and from then on runs in a process of its own on the Amiga:
+it never takes over or holds up the screen client, a new screen client doesn't
+drop it, and a long command on one channel doesn't stop the others. Up to four
+channels can be open. A fifth pushes out the one that has been idle longest; if
+all four are busy it gets `1` and is closed. Channels have no idle limit.
+
+Requests use the same 10 byte header, followed by their payload. Every reply
+starts with `u8 status`: `0` for success, followed by what the command returns;
+otherwise `u16 length` and a Latin-1 error text, and nothing else. The text is
+the AmigaDOS one for the error where there is one (in the Amiga's language, so
+`Objekt nicht gefunden` on a German system). Status `2` means a timeout, `1`
+everything else.
+
+| nr | command | arg | fields | payload | success returns |
+|---|---|---|---|---|---|
+| 21 | EXEC | | x = command length, y = directory length, w = timeout in seconds, 0 = none | command, directory | `i32 return code`, `u32 length`, output |
+| 22 | READ | | x = path length | path | `u32 size`, data |
+| 23 | WRITE | 1 = append | x = path length, w/h = size high/low | path, data | |
+| 24 | DIR | | x = path length | path | text |
+| 25 | STAT | | x = path length | path | text |
+| 26 | DELETE | | x = path length | path | |
+| 27 | RENAME | | x = old length, y = new length | old, new | |
+| 28 | MAKEDIR | | x = path length | path | |
+| 29 | CHECKSUM | | x = path length | path | `u32 CRC-32` |
+| 30 | SYSINFO | | | | text |
+| 31 | VOLUMES | | | | text |
+
+PING answers `0` on a channel too. Screen commands (1-18 but PING) get status `1`
+and the text `not on a command channel`; for PUT, RUN and AUTH the service first
+takes the data they carry.
+
+Text is `u32 length`, then Latin-1 lines ending in a line feed, fields
+separated by tabs.
+
+- EXEC runs the line like a Shell would, through `SystemTags` in a process of
+  its own, with input from `NIL:` and output and errors collected in a file in
+  `T:`, which goes away afterwards. The directory is the current directory for
+  the command; without one it is the one amigentd was started in. The output
+  comes after the command has finished, all at once. Return code `-1` with a
+  failure status: the line could not run at all. When the timeout runs out the
+  command gets Ctrl-C and the reply is status `2`, text `timeout`; the command
+  may keep running if it ignores the break, and its output is lost.
+- READ sends the size first. If the file can't be read to the end after that,
+  the channel is closed.
+- WRITE takes all the data before it answers, even after an error. A new file
+  (arg 0) is written under a temporary name in the same directory and only
+  renamed when everything is there, so a broken transfer never leaves half a
+  file; a file of the same name is replaced and its protection bits with it.
+  Append (arg 1) creates the file if needed. A directory of that name is never
+  touched.
+- DIR lists the directory, one line per entry:
+  `FILE` or `DIR`, name, size (`0` for directories), protection as 8 hex
+  digits, date as `YYYY-MM-DD HH:MM:SS`. Soft links count as files. STAT is
+  the same line for the object itself; for a volume the name is the volume's.
+- DELETE removes one file or an empty directory. RENAME also moves between
+  directories of one volume.
+- CHECKSUM is the zlib CRC-32 of the whole file.
+- SYSINFO has `key=value` lines: `chip_free`, `chip_total`, `chip_largest`,
+  `fast_free`, `fast_total`, `fast_largest`, `total_free` in bytes, and
+  `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
+  as `47.115`) and `bsdsocket` as `version.revision`.
+- VOLUMES has one line per mounted volume: name with colon, used, free,
+  capacity in bytes (also past 4 GB), block size.
 
 ## setup
 

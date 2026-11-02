@@ -1,5 +1,6 @@
 /*
- * amigentd: the front screen as 64x64 tiles, plus mouse and keyboard, over TCP.
+ * amigentd: the front screen as 64x64 tiles, mouse and keyboard, and command
+ * channels for command lines and files, over TCP.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
  *   amigentd [PORT <n>] [SETUP] [KEY <file>]
@@ -9,8 +10,10 @@
 
 #include <exec/types.h>
 #include <exec/memory.h>
+#include <exec/execbase.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
+#include <dos/dosextens.h>
 #include <intuition/intuitionbase.h>
 #include <intuition/screens.h>
 #include <intuition/classes.h>
@@ -43,7 +46,7 @@ extern struct Library *CyberGfxBase;
 #define RECTFMT_RGB 0
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 3
 #define DEFAULT_PORT 6801
 #define TILE 64
 #define RGB_MAX (512L * 512)  /* FRAME_RGB: most pixels at once */
@@ -60,15 +63,25 @@ extern struct Library *CyberGfxBase;
 #define SEND_BUFFER 16384  /* little queued, so a takeover is not stuck behind it */
 #define SEND_STEP 2048  /* send low water mark: writable means this much room */
 #define CHUNK 32768
+#define PENDING 4  /* connections that have not said yet what they are */
+#define CHANNELS 4  /* command channels next to the screen client */
+#define HELLO_SECONDS 5  /* a newcomer's key has to arrive this fast */
+
+#ifndef UNIQUE_ID
+#define UNIQUE_ID (-1)
+#endif
 
 enum {
     CMD_INFO = 1, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING,
     CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END, CMD_SCREENS, CMD_SCREEN_FRONT,
-    CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT
+    CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT,
+    CMD_CHANNEL = 20, CMD_EXEC, CMD_READ_FILE, CMD_WRITE_FILE, CMD_DIR, CMD_STAT, CMD_DELETE,
+    CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
 };
 
 const char version[] = "$VER: amigentd 1.0.0 (02.11.2026)";
 
+extern struct ExecBase *SysBase;
 struct Device *TimerBase;
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
@@ -100,29 +113,57 @@ static UBYTE prev_code[2], prev_qual[2];
 static UBYTE *ref, *cur, *valid, *rgb;
 static LONG ref_w, ref_h, cols, rows;
 
+/* Connections that have not yet asked for the screen or a command channel. */
+static struct newcomer {
+    LONG fd, have;
+    UBYTE cmd[10];
+    BOOL authed, screen;
+    ULONG since;
+} pend[PENDING];
+
+/* Command channels run in processes of their own, see channel_main. */
+static struct channel {
+    struct Process *proc;
+    LONG id;
+    volatile BOOL busy;
+    volatile ULONG last;
+} chans[CHANNELS];
+static BYTE chan_gone = -1;  /* a channel or exec runner ended */
+static LONG children;  /* channel and runner processes alive, changed under Forbid */
+static ULONG runs;  /* numbers temporary names, under Forbid */
+
+static LONG watch(fd_set *r, LONG top);
+static BOOL newcomers(fd_set *r);
+
 static UBYTE out[OUT_SIZE];
 static LONG out_len;
 static UBYTE tile_buf[12 + TILE * TILE * 2];
 
 /* ---- network ---------------------------------------------------------- */
 
-/* Waits until the client can take data or has some. FALSE when a newcomer wants
- * to take over, on Ctrl-C, or after IO_SECONDS without progress. */
+/* Waits until the client can take data or has some. FALSE when a newcomer asks
+ * for the screen, on Ctrl-C, or after IO_SECONDS without progress. Newcomers
+ * that only send their key or want a command channel are served meanwhile. */
 static BOOL ready(BOOL writing)
 {
-    fd_set r, w;
-    struct timeval tv = {IO_SECONDS, 0};
-    ULONG sigs = SIGBREAKF_CTRL_C;
-    LONG n;
+    for (;;) {
+        fd_set r, w;
+        struct timeval tv = {IO_SECONDS, 0};
+        ULONG sigs = SIGBREAKF_CTRL_C;
+        LONG n, top;
 
-    FD_ZERO(&r);
-    FD_ZERO(&w);
-    FD_SET(listener, &r);
-    FD_SET(client, writing ? &w : &r);
-    n = WaitSelect((client > listener ? client : listener) + 1, &r, &w, NULL, &tv, &sigs);
-    if (sigs & SIGBREAKF_CTRL_C)
-        quit = TRUE;
-    return n > 0 && !quit && !FD_ISSET(listener, &r);
+        FD_ZERO(&r);
+        FD_ZERO(&w);
+        FD_SET(client, writing ? &w : &r);
+        top = watch(&r, client);
+        n = WaitSelect(top + 1, &r, &w, NULL, &tv, &sigs);
+        if (sigs & SIGBREAKF_CTRL_C)
+            quit = TRUE;
+        if (n <= 0 || quit || newcomers(&r))
+            return FALSE;
+        if (FD_ISSET(client, writing ? &w : &r))
+            return TRUE;
+    }
 }
 
 static BOOL flush(void)
@@ -1326,44 +1367,1035 @@ static BOOL refuse(void)
     return FALSE;
 }
 
+static BOOL key_matches(const UBYTE *got, UWORD len)
+{
+    UBYTE diff = len != secret_len;
+    LONG i;
+
+    for (i = 0; i < KEY_MAX; i++)  /* the same work whatever matches */
+        diff |= got[i] ^ secret[i];
+    return !secret_len || !diff;
+}
+
 static BOOL auth(UWORD len)
 {
-    UBYTE got[KEY_MAX], diff;
-    LONG i;
+    UBYTE got[KEY_MAX];
 
     memset(got, 0, sizeof(got));
     if (!receive(got, len < KEY_MAX ? len : KEY_MAX) || (len > KEY_MAX && !skip(len - KEY_MAX)))
         return FALSE;
-    diff = len != secret_len;
-    for (i = 0; i < KEY_MAX; i++)  /* the same work whatever matches */
-        diff |= got[i] ^ secret[i];
-    if (secret_len && diff)
+    if (!key_matches(got, len))
         return refuse();
     authed = TRUE;
     return reply(0);
 }
 
-static void take_client(void)
+/* ---- links: small blocking transfers on any socket, from any process ---- */
+
+struct link {
+    struct Library *base;  /* each process has its own bsdsocket.library */
+    LONG fd;
+};
+
+/* secs 0 waits for ever. A Ctrl-C ends the wait and stays set for the caller. */
+static BOOL l_wait(struct link *l, BOOL writing, LONG secs)
+{
+    struct Library *SocketBase = l->base;
+    struct timeval tv;
+    ULONG sigs = SIGBREAKF_CTRL_C;
+    fd_set s;
+
+    tv.tv_sec = secs;
+    tv.tv_usec = 0;
+    FD_ZERO(&s);
+    FD_SET(l->fd, &s);
+    if (WaitSelect(l->fd + 1, writing ? NULL : &s, writing ? &s : NULL, NULL,
+                   secs ? &tv : NULL, &sigs) > 0)
+        return TRUE;
+    if (sigs & SIGBREAKF_CTRL_C)
+        SetSignal(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+    return FALSE;
+}
+
+static BOOL l_send(struct link *l, const void *data, ULONG len, LONG secs)
+{
+    struct Library *SocketBase = l->base;
+    const UBYTE *p = data;
+    LONG n;
+
+    while (len > 0) {
+        if (!l_wait(l, TRUE, secs))
+            return FALSE;
+        n = send(l->fd, (UBYTE *)p, len, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
+        if (n <= 0)
+            return FALSE;
+        p += n;
+        len -= n;
+    }
+    return TRUE;
+}
+
+static BOOL l_recv(struct link *l, void *data, ULONG len, LONG secs)
+{
+    struct Library *SocketBase = l->base;
+    UBYTE *p = data;
+    LONG n;
+
+    while (len > 0) {
+        if (!l_wait(l, FALSE, secs))
+            return FALSE;
+        n = recv(l->fd, p, len, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
+        if (n <= 0)
+            return FALSE;
+        p += n;
+        len -= n;
+    }
+    return TRUE;
+}
+
+static BOOL l_skip(struct link *l, ULONG len, LONG secs)
+{
+    UBYTE scratch[512];
+
+    while (len > 0) {
+        ULONG n = len > sizeof(scratch) ? sizeof(scratch) : len;
+        if (!l_recv(l, scratch, n, secs))
+            return FALSE;
+        len -= n;
+    }
+    return TRUE;
+}
+
+/* ---- newcomers --------------------------------------------------------- */
+
+/* A connection only becomes the screen client with its first screen command, so
+ * one that sends its key or asks for a command channel leaves the screen alone. */
+
+static void close_fd(LONG fd)
+{
+    struct linger now = {1, 0};
+
+    setsockopt(fd, SOL_SOCKET, SO_LINGER, &now, sizeof(now));
+    CloseSocket(fd);
+}
+
+static void close_pending(LONG i)
+{
+    close_fd(pend[i].fd);
+    pend[i].fd = -1;
+}
+
+static void accept_pending(void)
 {
     struct sockaddr_in addr;
-    LONG len = sizeof(addr), fd, one = 1, low = SEND_STEP, buffer = SEND_BUFFER;
+    LONG len = sizeof(addr), fd, one = 1, low = SEND_STEP, buffer = SEND_BUFFER, i, old = 0;
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
+    struct link l;
 
     fd = accept(listener, (struct sockaddr *)&addr, &len);
     if (fd < 0)
         return;
-    drop_client();  /* the newcomer wins */
-    client = fd;
+    for (i = 0; i < PENDING && pend[i].fd >= 0; i++)
+        if (pend[i].since < pend[old].since)
+            old = i;
+    if (i == PENDING) {  /* no room: the one waiting longest goes */
+        close_pending(old);
+        i = old;
+    }
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through ready() */
+    IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through WaitSelect */
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
     load_key();
-    authed = secret_len == 0;
-    client_id = 0;
     hello[7] = secret_len ? 1 : 0;
-    if (!put(hello, 8) || !flush())
-        drop_client();
+    l.base = SocketBase;
+    l.fd = fd;
+    if (!l_send(&l, hello, 8, HELLO_SECONDS)) {
+        close_fd(fd);
+        return;
+    }
+    pend[i].fd = fd;
+    pend[i].have = 0;
+    pend[i].authed = secret_len == 0;
+    pend[i].screen = FALSE;
+    pend[i].since = now_ms();
+}
+
+static void start_channel(LONG i);
+
+/* The newcomer has sent something: a key, a channel request, or a screen command. */
+static void step(LONG i)
+{
+    struct newcomer *p = &pend[i];
+    struct link l;
+    LONG n;
+
+    l.base = SocketBase;
+    l.fd = p->fd;
+    n = recv(p->fd, p->cmd + p->have, sizeof(p->cmd) - p->have, 0);
+    if (n < 0 && Errno() == EWOULDBLOCK)
+        return;
+    if (n <= 0) {
+        close_pending(i);
+        return;
+    }
+    if ((p->have += n) < sizeof(p->cmd))
+        return;
+    if (p->cmd[0] == CMD_AUTH) {
+        UWORD len = p->cmd[2] << 8 | p->cmd[3];
+        UBYTE got[KEY_MAX];
+
+        memset(got, 0, sizeof(got));
+        if (!l_recv(&l, got, len < KEY_MAX ? len : KEY_MAX, HELLO_SECONDS) ||
+            (len > KEY_MAX && !l_skip(&l, len - KEY_MAX, HELLO_SECONDS))) {
+            close_pending(i);
+            return;
+        }
+        p->have = 0;
+        if (key_matches(got, len)) {
+            p->authed = TRUE;
+            if (!l_send(&l, "\0", 1, HELLO_SECONDS))
+                close_pending(i);
+            return;
+        }
+    } else if (p->authed) {
+        if (p->cmd[0] == CMD_CHANNEL)
+            start_channel(i);
+        else
+            p->screen = TRUE;  /* serve() hands it the screen */
+        return;
+    }
+    l_send(&l, "\1", 1, HELLO_SECONDS);
+    Delay(50);  /* as refuse() */
+    close_pending(i);
+}
+
+/* Adds the listener and the newcomers to r; drops those silent for too long. */
+static LONG watch(fd_set *r, LONG top)
+{
+    LONG i;
+
+    FD_SET(listener, r);
+    if (listener > top)
+        top = listener;
+    for (i = 0; i < PENDING; i++) {
+        if (pend[i].fd < 0 || pend[i].screen)
+            continue;
+        if (now_ms() - pend[i].since > IDLE_SECONDS * 1000) {
+            close_pending(i);
+            continue;
+        }
+        FD_SET(pend[i].fd, r);
+        if (pend[i].fd > top)
+            top = pend[i].fd;
+    }
+    return top;
+}
+
+/* Serves what watch() found ready. TRUE if a newcomer wants the screen. */
+static BOOL newcomers(fd_set *r)
+{
+    LONG i;
+    BOOL wants = FALSE;
+
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0 && !pend[i].screen && FD_ISSET(pend[i].fd, r))
+            step(i);
+    if (FD_ISSET(listener, r))
+        accept_pending();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0 && pend[i].screen)
+            wants = TRUE;
+    return wants;
+}
+
+/* ---- command channels -------------------------------------------------- */
+
+/* Every reply starts with a status: 0, or an error with u16 length and text. */
+static BOOL c_ok(struct link *l)
+{
+    return l_send(l, "\0", 1, IO_SECONDS);
+}
+
+static BOOL c_fail(struct link *l, UBYTE status, const char *text)
+{
+    UBYTE head[3];
+    UWORD n = strlen(text);
+
+    head[0] = status;
+    be16(head + 1, n);
+    return l_send(l, head, 3, IO_SECONDS) && l_send(l, text, n, IO_SECONDS);
+}
+
+/* The AmigaDOS text for an error code. */
+static BOOL c_fault(struct link *l, LONG code)
+{
+    char buf[100];
+
+    if (!code)
+        return c_fail(l, 1, "failed");
+    Fault(code, NULL, buf, sizeof(buf));
+    return c_fail(l, 1, buf);
+}
+
+static BOOL c_text(struct link *l, struct text *t)
+{
+    UBYTE head[5];
+    BOOL ok;
+
+    if (t->broke) {
+        FreeVec(t->buf);
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    }
+    head[0] = 0;
+    be32(head + 1, t->len);
+    ok = l_send(l, head, 5, IO_SECONDS) && l_send(l, t->buf, t->len, IO_SECONDS);
+    FreeVec(t->buf);
+    return ok;
+}
+
+/* A name of len bytes from the request. NULL with *alive still set: no memory. */
+static char *c_name(struct link *l, UWORD len, BOOL *alive)
+{
+    char *name = AllocVec(len + 1, MEMF_ANY);
+
+    *alive = name ? l_recv(l, name, len, IO_SECONDS) : l_skip(l, len, IO_SECONDS);
+    if (name && !*alive) {
+        FreeVec(name);
+        return NULL;
+    }
+    if (name)
+        name[len] = 0;
+    return name;
+}
+
+static ULONG next_run(void)
+{
+    ULONG n;
+
+    Forbid();
+    n = ++runs;
+    Permit();
+    return n;
+}
+
+/* Decimal into p, with a 0 at the end. */
+static void dec(char *p, ULONG v)
+{
+    char d[12];
+    LONG n = 0;
+
+    do
+        d[n++] = '0' + v % 10;
+    while (v /= 10);
+    while (n)
+        *p++ = d[--n];
+    *p = 0;
+}
+
+static void t_pad(struct text *t, LONG v, LONG digits)
+{
+    char d[12];
+    LONG n;
+
+    dec(d, v);
+    for (n = strlen(d); n < digits; n++)
+        t_chr(t, '0');
+    t_str(t, (const UBYTE *)d, FALSE);
+}
+
+/* YYYY-MM-DD HH:MM:SS */
+static void t_date(struct text *t, const struct DateStamp *ds)
+{
+    static const UBYTE month_days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    LONG days = ds->ds_Days, y = 1978, m = 0, len;
+    BOOL leap;
+
+    for (;;) {
+        leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        if (days < (len = leap ? 366 : 365))
+            break;
+        days -= len;
+        y++;
+    }
+    while (days >= (len = month_days[m] + (m == 1 && leap))) {
+        days -= len;
+        m++;
+    }
+    t_pad(t, y, 4);
+    t_chr(t, '-');
+    t_pad(t, m + 1, 2);
+    t_chr(t, '-');
+    t_pad(t, days + 1, 2);
+    t_chr(t, ' ');
+    t_pad(t, ds->ds_Minute / 60, 2);
+    t_chr(t, ':');
+    t_pad(t, ds->ds_Minute % 60, 2);
+    t_chr(t, ':');
+    t_pad(t, ds->ds_Tick / TICKS_PER_SECOND, 2);
+}
+
+/* FILE|DIR, name, size, protection, date; one line. */
+static void t_entry(struct text *t, struct FileInfoBlock *fib)
+{
+    BOOL dir = fib->fib_DirEntryType > 0 && fib->fib_DirEntryType != ST_SOFTLINK;
+
+    t_str(t, (const UBYTE *)(dir ? "DIR" : "FILE"), FALSE);
+    t_tab(t);
+    t_str(t, (const UBYTE *)fib->fib_FileName, FALSE);
+    t_tab(t);
+    t_num(t, dir ? 0 : fib->fib_Size);
+    t_tab(t);
+    t_hex(t, fib->fib_Protection);
+    t_tab(t);
+    t_date(t, &fib->fib_Date);
+    t_chr(t, '\n');
+}
+
+static BOOL c_dir(struct link *l, UWORD len, BOOL itself)
+{
+    struct text t = {0};
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    BPTR lock = 0;
+    LONG err = 0;
+    BOOL alive;
+    char *path = c_name(l, len, &alive);
+
+    if (!alive) {
+        FreeDosObject(DOS_FIB, fib);
+        return FALSE;
+    }
+    if (!path || !fib)
+        err = ERROR_NO_FREE_STORE;
+    else if (!(lock = Lock(path, SHARED_LOCK)) || !Examine(lock, fib))
+        err = IoErr();
+    else if (itself)
+        t_entry(&t, fib);
+    else if (fib->fib_DirEntryType <= 0)
+        err = ERROR_OBJECT_WRONG_TYPE;
+    else {
+        while (ExNext(lock, fib))
+            t_entry(&t, fib);
+        if (IoErr() != ERROR_NO_MORE_ENTRIES)
+            err = IoErr();
+    }
+    if (lock)
+        UnLock(lock);
+    FreeDosObject(DOS_FIB, fib);
+    FreeVec(path);
+    if (err) {
+        FreeVec(t.buf);
+        return c_fault(l, err);
+    }
+    return c_text(l, &t);
+}
+
+static BOOL c_read(struct link *l, UWORD len)
+{
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    UBYTE *buf = AllocVec(CHUNK, MEMF_ANY), head[5];
+    BPTR fh = 0;
+    LONG err = 0, n;
+    ULONG size = 0;
+    BOOL alive;
+    char *path = c_name(l, len, &alive);
+
+    if (alive) {
+        if (!path || !fib || !buf)
+            err = ERROR_NO_FREE_STORE;
+        else if (!(fh = Open(path, MODE_OLDFILE)) || !ExamineFH(fh, fib))
+            err = IoErr();
+        else
+            size = fib->fib_Size;
+        if (err)
+            alive = c_fault(l, err);
+        else {
+            head[0] = 0;
+            be32(head + 1, size);
+            alive = l_send(l, head, 5, IO_SECONDS);
+            /* The size is out, so a read error can only end the link. */
+            while (alive && size > 0) {
+                n = Read(fh, buf, size > CHUNK ? CHUNK : size);
+                alive = n > 0 && l_send(l, buf, n, IO_SECONDS);
+                size -= n;
+            }
+        }
+    }
+    if (fh)
+        Close(fh);
+    FreeDosObject(DOS_FIB, fib);
+    FreeVec(buf);
+    FreeVec(path);
+    return alive;
+}
+
+static BOOL is_dir(const char *path)
+{
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    BPTR lock = Lock(path, SHARED_LOCK);
+    BOOL dir = FALSE;
+
+    if (lock && fib && Examine(lock, fib))
+        dir = fib->fib_DirEntryType > 0;
+    if (lock)
+        UnLock(lock);
+    FreeDosObject(DOS_FIB, fib);
+    return dir;
+}
+
+/* A new file is written under a temporary name next to it and renamed at the
+ * end, so a broken transfer never leaves half a file. */
+static BOOL c_write(struct link *l, BOOL append, UWORD len, ULONG size)
+{
+    UBYTE *buf = AllocVec(CHUNK, MEMF_ANY);
+    char *tmp = NULL, name[24];
+    BPTR fh = 0;
+    LONG err = 0, n;
+    BOOL alive;
+    char *path = c_name(l, len, &alive);
+
+    if (!alive) {
+        FreeVec(buf);
+        return FALSE;
+    }
+    if (!path || !buf || (!append && !(tmp = AllocVec(len + sizeof(name) + 2, MEMF_ANY))))
+        err = ERROR_NO_FREE_STORE;
+    else if (is_dir(path))
+        err = ERROR_OBJECT_WRONG_TYPE;
+    else if (append) {
+        if ((fh = Open(path, MODE_READWRITE)))
+            Seek(fh, 0, OFFSET_END);
+    } else {
+        n = (char *)PathPart(path) - path;
+        CopyMem(path, tmp, n);
+        tmp[n] = 0;
+        strcpy(name, "amigentd-");
+        dec(name + strlen(name), next_run());
+        strcat(name, ".tmp");
+        AddPart(tmp, name, len + sizeof(name) + 2);
+        fh = Open(tmp, MODE_NEWFILE);
+    }
+    if (!err && !fh)
+        err = IoErr();
+    while (size > 0) {  /* takes all the data even after an error */
+        n = size > CHUNK ? CHUNK : size;
+        if (!(alive = l_recv(l, buf, n, IO_SECONDS)))
+            break;
+        if (fh && !err && Write(fh, buf, n) != n)
+            err = IoErr() ? IoErr() : ERROR_DISK_FULL;
+        size -= n;
+    }
+    if (fh && !Close(fh) && !err)
+        err = IoErr();
+    if (fh && tmp) {
+        if (alive && !err) {
+            DeleteFile(path);  /* Rename doesn't replace */
+            if (!Rename(tmp, path))
+                err = IoErr();
+        }
+        if (!alive || err)
+            DeleteFile(tmp);
+    }
+    FreeVec(tmp);
+    FreeVec(path);
+    FreeVec(buf);
+    if (!alive)
+        return FALSE;
+    return err ? c_fault(l, err) : c_ok(l);
+}
+
+/* The zlib CRC-32. */
+static BOOL c_checksum(struct link *l, const char *path)
+{
+    ULONG table[256], crc = 0xFFFFFFFF, c;
+    UBYTE *buf = AllocVec(CHUNK, MEMF_ANY), head[5];
+    BPTR fh = 0;
+    LONG n, i, k, err = 0;
+
+    for (i = 0; i < 256; i++) {
+        for (c = i, k = 0; k < 8; k++)
+            c = c & 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+        table[i] = c;
+    }
+    if (!buf)
+        err = ERROR_NO_FREE_STORE;
+    else if (!(fh = Open(path, MODE_OLDFILE)))
+        err = IoErr();
+    else {
+        while ((n = Read(fh, buf, CHUNK)) > 0)
+            for (i = 0; i < n; i++)
+                crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >> 8);
+        if (n < 0)
+            err = IoErr();
+        Close(fh);
+    }
+    FreeVec(buf);
+    if (err)
+        return c_fault(l, err);
+    head[0] = 0;
+    be32(head + 1, ~crc);
+    return l_send(l, head, 5, IO_SECONDS);
+}
+
+/* DELETE, MAKEDIR and CHECKSUM: one name, then status. */
+static BOOL c_path_cmd(struct link *l, UBYTE cmd, UWORD len)
+{
+    LONG err = 0;
+    BPTR lock;
+    BOOL alive, ok;
+    char *path = c_name(l, len, &alive);
+
+    if (!alive)
+        return FALSE;
+    if (!path)
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    if (cmd == CMD_CHECKSUM) {
+        ok = c_checksum(l, path);
+        FreeVec(path);
+        return ok;
+    }
+    if (cmd == CMD_DELETE) {
+        if (!DeleteFile(path))
+            err = IoErr();
+    } else if ((lock = CreateDir(path)))
+        UnLock(lock);
+    else
+        err = IoErr();
+    FreeVec(path);
+    return err ? c_fault(l, err) : c_ok(l);
+}
+
+static BOOL c_rename(struct link *l, UWORD old_len, UWORD new_len)
+{
+    LONG err = 0;
+    BOOL alive, alive2 = FALSE;
+    char *from = c_name(l, old_len, &alive), *to = alive ? c_name(l, new_len, &alive2) : NULL;
+
+    if (alive && alive2) {
+        if (!from || !to)
+            err = ERROR_NO_FREE_STORE;
+        else if (!Rename(from, to))
+            err = IoErr();
+    }
+    FreeVec(from);
+    FreeVec(to);
+    if (!alive || !alive2)
+        return FALSE;
+    return err ? c_fault(l, err) : c_ok(l);
+}
+
+static void t_pair(struct text *t, const char *key, ULONG v)
+{
+    char d[12];
+
+    dec(d, v);
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_chr(t, '=');
+    t_str(t, (const UBYTE *)d, FALSE);
+    t_chr(t, '\n');
+}
+
+static void t_version(struct text *t, const char *key, UWORD v, UWORD r)
+{
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_chr(t, '=');
+    t_num(t, v);
+    t_chr(t, '.');
+    t_num(t, r);
+    t_chr(t, '\n');
+}
+
+static BOOL c_sysinfo(struct link *l)
+{
+    struct Library *SocketBase = l->base;
+    struct text t = {0};
+
+    t_pair(&t, "chip_free", AvailMem(MEMF_CHIP));
+    t_pair(&t, "chip_total", AvailMem(MEMF_CHIP | MEMF_TOTAL));
+    t_pair(&t, "chip_largest", AvailMem(MEMF_CHIP | MEMF_LARGEST));
+    t_pair(&t, "fast_free", AvailMem(MEMF_FAST));
+    t_pair(&t, "fast_total", AvailMem(MEMF_FAST | MEMF_TOTAL));
+    t_pair(&t, "fast_largest", AvailMem(MEMF_FAST | MEMF_LARGEST));
+    t_pair(&t, "total_free", AvailMem(MEMF_ANY));
+    t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
+    t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
+    t_version(&t, "bsdsocket", SocketBase->lib_Version, SocketBase->lib_Revision);
+    return c_text(l, &t);
+}
+
+/* Blocks times block size, which may pass 4 GB. */
+static void t_bytes(struct text *t, ULONG blocks, ULONG size)
+{
+    unsigned long long v = (unsigned long long)blocks * size;
+    char d[24];
+    LONG n = 0;
+
+    do
+        d[n++] = '0' + (int)(v % 10);
+    while (v /= 10);
+    while (n)
+        t_chr(t, d[--n]);
+}
+
+static BOOL c_volumes(struct link *l)
+{
+    struct text t = {0}, names = {0};
+    struct DosList *dl;
+    struct InfoData *info = AllocVec(sizeof(*info), MEMF_ANY);
+    const UBYTE *name;
+    BPTR lock;
+    ULONG at;
+
+    if (!info)
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    /* Names first: asking a handler while holding the list could hang. */
+    dl = LockDosList(LDF_VOLUMES | LDF_READ);
+    while ((dl = NextDosEntry(dl, LDF_VOLUMES)))
+        if (dl->dol_Task) {  /* mounted */
+            name = BADDR(dl->dol_Name);
+            t_add(&names, name + 1, name[0]);
+            t_add(&names, ":", 2);
+        }
+    UnLockDosList(LDF_VOLUMES | LDF_READ);
+    for (at = 0; !names.broke && at < names.len; at += strlen((char *)names.buf + at) + 1) {
+        name = names.buf + at;
+        if (!(lock = Lock((STRPTR)name, SHARED_LOCK)))
+            continue;
+        if (Info(lock, info)) {
+            t_str(&t, name, FALSE);
+            t_tab(&t);
+            t_bytes(&t, info->id_NumBlocksUsed, info->id_BytesPerBlock);
+            t_tab(&t);
+            t_bytes(&t, info->id_NumBlocks - info->id_NumBlocksUsed, info->id_BytesPerBlock);
+            t_tab(&t);
+            t_bytes(&t, info->id_NumBlocks, info->id_BytesPerBlock);
+            t_tab(&t);
+            t_num(&t, info->id_BytesPerBlock);
+            t_chr(&t, '\n');
+        }
+        UnLock(lock);
+    }
+    FreeVec(names.buf);
+    FreeVec(info);
+    return c_text(l, &t);
+}
+
+/* EXEC: a runner process calls SystemTags, so the channel can watch the clock
+ * and break the command. Whoever finishes last frees the run. */
+struct run {
+    struct Task *chan;
+    BYTE sig;
+    volatile BOOL done, orphan;
+    LONG rc, err;
+    BPTR dir;
+    char *line;
+    char name[32], out[48];
+};
+
+static void __saveds runner_main(void)
+{
+    struct run *r;
+    BPTR in, out, old = 0;
+    BOOL orphan;
+
+    Wait(SIGBREAKF_CTRL_F);
+    r = FindTask(NULL)->tc_UserData;
+    if (r->dir)
+        old = CurrentDir(r->dir);  /* the shell starts in a copy of it */
+    in = Open("NIL:", MODE_OLDFILE);
+    out = Open(r->out, MODE_NEWFILE);
+    r->rc = -1;
+    if (in && out) {
+        r->rc = SystemTags(r->line, SYS_Input, in, SYS_Output, out,
+                           NP_Error, out, NP_CloseError, FALSE, NP_Name, (ULONG)r->name,
+                           NP_StackSize, 65536, NP_Priority, 0, TAG_END);
+        if (r->rc == -1)
+            r->err = IoErr();
+    } else
+        r->err = IoErr();
+    if (in) Close(in);
+    if (out) Close(out);
+    if (r->dir)
+        CurrentDir(old);
+    Forbid();
+    orphan = r->orphan;
+    r->done = TRUE;
+    if (!orphan)
+        Signal(r->chan, 1UL << r->sig);
+    Permit();
+    if (orphan) {  /* the channel has given up on it */
+        DeleteFile(r->out);
+        if (r->dir)
+            UnLock(r->dir);
+        FreeVec(r);
+    }
+    Forbid();
+    children--;
+    Signal(server, 1UL << chan_gone);
+}
+
+static void free_run(struct run *r)
+{
+    DeleteFile(r->out);
+    if (r->dir)
+        UnLock(r->dir);
+    FreeVec(r);
+}
+
+/* status, i32 return code, u32 length, output */
+static BOOL send_output(struct link *l, struct run *r)
+{
+    UBYTE head[9], *buf = AllocVec(CHUNK, MEMF_ANY);
+    BPTR fh = Open(r->out, MODE_OLDFILE);
+    LONG n, err = 0;
+    ULONG size;
+    BOOL alive;
+
+    if (r->rc == -1 && r->err)
+        err = r->err;
+    else if (!fh)
+        err = IoErr();
+    else if (!buf)
+        err = ERROR_NO_FREE_STORE;
+    if (err)
+        alive = c_fault(l, err);
+    else {
+        Seek(fh, 0, OFFSET_END);
+        size = Seek(fh, 0, OFFSET_BEGINNING);
+        head[0] = 0;
+        be32(head + 1, r->rc);
+        be32(head + 5, size);
+        alive = l_send(l, head, 9, IO_SECONDS);
+        while (alive && size > 0) {
+            n = Read(fh, buf, size > CHUNK ? CHUNK : size);
+            alive = n > 0 && l_send(l, buf, n, IO_SECONDS);
+            size -= n;
+        }
+    }
+    if (fh)
+        Close(fh);
+    FreeVec(buf);
+    return alive;
+}
+
+static BOOL c_exec(struct link *l, UWORD len, UWORD dir_len, UWORD secs)
+{
+    struct Library *SocketBase = l->base;
+    struct run *r = AllocVec(sizeof(*r) + len + dir_len + 2, MEMF_CLEAR);
+    struct Process *proc;
+    struct Task *shell;
+    char *dir;
+    ULONG start = now_ms(), n;
+    LONG left;
+    BOOL quitting = FALSE, alive;
+
+    if (!r)
+        return l_skip(l, len + dir_len, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
+    r->line = (char *)(r + 1);
+    dir = r->line + len + 1;
+    if (!l_recv(l, r->line, len, IO_SECONDS) || !l_recv(l, dir, dir_len, IO_SECONDS)) {
+        FreeVec(r);
+        return FALSE;
+    }
+    r->line[len] = 0;
+    dir[dir_len] = 0;
+    if (dir_len && !(r->dir = Lock(dir, SHARED_LOCK))) {
+        left = IoErr();
+        FreeVec(r);
+        return c_fault(l, left);
+    }
+    r->chan = FindTask(NULL);
+    n = next_run();
+    strcpy(r->name, "amigentd exec ");
+    dec(r->name + strlen(r->name), n);
+    strcpy(r->out, "T:amigentd-exec-");
+    dec(r->out + strlen(r->out), n);
+    if ((r->sig = AllocSignal(-1)) < 0) {
+        free_run(r);
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    }
+    Forbid();
+    children++;
+    Permit();
+    proc = CreateNewProcTags(NP_Entry, (ULONG)runner_main, NP_Name, (ULONG)"amigentd runner",
+                             NP_StackSize, 8192, NP_Priority, 0, TAG_END);
+    if (!proc) {
+        Forbid();
+        children--;
+        Permit();
+        FreeSignal(r->sig);
+        free_run(r);
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    }
+    proc->pr_Task.tc_UserData = r;
+    Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
+
+    while (!r->done) {
+        struct timeval tv;
+        ULONG sigs = (1UL << r->sig) | SIGBREAKF_CTRL_C;
+
+        if (secs) {
+            if ((left = secs * 1000L - (LONG)(now_ms() - start)) <= 0)
+                break;
+            tv.tv_sec = left / 1000;
+            tv.tv_usec = left % 1000 * 1000;
+        }
+        WaitSelect(0, NULL, NULL, NULL, secs ? &tv : NULL, &sigs);
+        if (sigs & SIGBREAKF_CTRL_C) {
+            quitting = TRUE;
+            break;
+        }
+    }
+    Forbid();
+    if (!r->done) {
+        r->orphan = TRUE;  /* the runner frees it */
+        if ((shell = FindTask(r->name)))
+            Signal(shell, SIGBREAKF_CTRL_C);
+    }
+    Permit();
+    FreeSignal(r->sig);
+    if (r->orphan)
+        return quitting ? FALSE : c_fail(l, 2, "timeout");
+    alive = send_output(l, r);
+    free_run(r);
+    return alive;
+}
+
+static BOOL chan_command(struct link *l, const UBYTE *c)
+{
+    UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
+    UWORD w = c[6] << 8 | c[7], h = c[8] << 8 | c[9];
+
+    switch (c[0]) {
+    case CMD_PING:
+    case CMD_CHANNEL:
+        return c_ok(l);
+    case CMD_EXEC:
+        return c_exec(l, x, y, w);
+    case CMD_READ_FILE:
+        return c_read(l, x);
+    case CMD_WRITE_FILE:
+        return c_write(l, c[1] & 1, x, (ULONG)w << 16 | h);
+    case CMD_DIR:
+    case CMD_STAT:
+        return c_dir(l, x, c[0] == CMD_STAT);
+    case CMD_DELETE:
+    case CMD_MAKEDIR:
+    case CMD_CHECKSUM:
+        return c_path_cmd(l, c[0], x);
+    case CMD_RENAME:
+        return c_rename(l, x, y);
+    case CMD_SYSINFO:
+        return c_sysinfo(l);
+    case CMD_VOLUMES:
+        return c_volumes(l);
+    case CMD_PUT:  /* these carry data; take it so the next request lines up */
+        if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
+            return FALSE;
+        /* fall through */
+    case CMD_RUN:
+    case CMD_AUTH:
+        if (!l_skip(l, x, IO_SECONDS))
+            return FALSE;
+    }
+    return c_fail(l, 1, "not on a command channel");
+}
+
+static void __saveds channel_main(void)
+{
+    struct channel *c;
+    struct link l;
+    UBYTE cmd[10];
+    BOOL ok;
+
+    Wait(SIGBREAKF_CTRL_F);
+    c = FindTask(NULL)->tc_UserData;
+    if ((l.base = OpenLibrary("bsdsocket.library", 4))) {
+        struct Library *SocketBase = l.base;
+        LONG one = 1, buffer = 32768;
+
+        l.fd = ObtainSocket(c->id, AF_INET, SOCK_STREAM, 0);
+        if (l.fd < 0)
+            l.fd = ObtainSocket(c->id, AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (l.fd >= 0) {
+            IoctlSocket(l.fd, FIONBIO, (char *)&one);
+            setsockopt(l.fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
+            ok = c_ok(&l);
+            while (ok && l_recv(&l, cmd, sizeof(cmd), 0)) {
+                c->busy = TRUE;
+                ok = chan_command(&l, cmd);
+                c->last = now_ms();
+                c->busy = FALSE;
+            }
+            CloseSocket(l.fd);
+        }
+        CloseLibrary(l.base);
+    }
+    Forbid();
+    c->proc = NULL;
+    children--;
+    Signal(server, 1UL << chan_gone);
+}
+
+/* A free slot, or the one idle longest when all are taken. */
+static struct channel *free_channel(void)
+{
+    struct channel *c, *old = NULL;
+    LONG k;
+
+    for (c = chans; c < chans + CHANNELS; c++) {
+        if (!c->proc)
+            return c;
+        if (!c->busy && (!old || c->last < old->last))
+            old = c;
+    }
+    if (!old)
+        return NULL;
+    Signal(&old->proc->pr_Task, SIGBREAKF_CTRL_C);
+    for (k = 0; k < 100 && old->proc; k++)
+        Delay(1);
+    return old->proc ? NULL : old;
+}
+
+/* The channel process answers the CHANNEL request once it has the socket. */
+static void start_channel(LONG i)
+{
+    struct newcomer *p = &pend[i];
+    struct channel *c = free_channel();
+    struct Process *proc;
+    struct link l;
+
+    if (c && (c->id = ReleaseSocket(p->fd, UNIQUE_ID)) != -1) {
+        c->busy = FALSE;
+        c->last = now_ms();
+        Forbid();
+        children++;
+        Permit();
+        proc = CreateNewProcTags(NP_Entry, (ULONG)channel_main, NP_Name, (ULONG)"amigentd channel",
+                                 NP_Priority, 0, NP_StackSize, 16384, TAG_END);
+        if (proc) {
+            c->proc = proc;
+            proc->pr_Task.tc_UserData = c;
+            Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
+            p->fd = -1;
+            return;
+        }
+        Forbid();
+        children--;
+        Permit();
+        if ((p->fd = ObtainSocket(c->id, AF_INET, SOCK_STREAM, 0)) < 0) {  /* take it back */
+            p->fd = -1;
+            return;
+        }
+    }
+    l.base = SocketBase;
+    l.fd = p->fd;
+    l_send(&l, "\1", 1, HELLO_SECONDS);
+    close_pending(i);
 }
 
 static BOOL command(const UBYTE *c)
@@ -1428,41 +2460,42 @@ static BOOL command(const UBYTE *c)
 static void serve(void)
 {
     UBYTE cmd[10];
-    LONG have = 0, n;
+    LONG have = 0, n, top, i;
     ULONG heard = 0;
 
     while (!quit) {
         fd_set r;
-        struct timeval tv = {0, 0};
+        struct timeval tv = {1, 0};
         ULONG sigs = SIGBREAKF_CTRL_C;
-        LONG top = listener, left;
 
-        FD_ZERO(&r);
-        FD_SET(listener, &r);
-        if (client >= 0) {
-            FD_SET(client, &r);
-            if (client > top)
-                top = client;
-            left = IDLE_SECONDS * 1000 - (LONG)(now_ms() - heard);
-            if (left <= 0) {
-                drop_client();  /* idle */
-                have = 0;
-                continue;
-            }
-            tv.tv_sec = left / 1000;
-            tv.tv_usec = left % 1000 * 1000;
+        for (i = 0; i < PENDING && !(pend[i].fd >= 0 && pend[i].screen); i++)
+            ;
+        if (i < PENDING) {  /* the newcomer wins */
+            drop_client();
+            client = pend[i].fd;
+            pend[i].fd = -1;
+            authed = TRUE;
+            client_id = 0;
+            have = 0;
+            heard = now_ms();
+            if (!command(pend[i].cmd))
+                drop_client();
+            continue;
         }
-        n = WaitSelect(top + 1, &r, NULL, NULL, client >= 0 ? &tv : NULL, &sigs);
+        if (client >= 0 && now_ms() - heard > IDLE_SECONDS * 1000) {
+            drop_client();  /* idle */
+            have = 0;
+        }
+        FD_ZERO(&r);
+        top = watch(&r, client);
+        if (client >= 0)
+            FD_SET(client, &r);
+        n = WaitSelect(top + 1, &r, NULL, NULL, &tv, &sigs);
         if (sigs & SIGBREAKF_CTRL_C)
             return;
         if (n <= 0)
             continue;
-        if (FD_ISSET(listener, &r)) {
-            take_client();
-            heard = now_ms();
-            have = 0;
-            continue;
-        }
+        newcomers(&r);
         if (client < 0 || !FD_ISSET(client, &r))
             continue;
         n = recv(client, cmd + have, sizeof(cmd) - have, 0);
@@ -1534,6 +2567,7 @@ int main(void)
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     int rc = RETURN_FAIL;
+    LONG i, n;
 
     rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K", args, NULL);
     if (!rda) {
@@ -1551,6 +2585,8 @@ int main(void)
 
     server = FindTask(NULL);
     SetTaskPri(server, 2);
+    for (i = 0; i < PENDING; i++)
+        pend[i].fd = -1;
     InitSemaphore(&picture);
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
@@ -1579,7 +2615,7 @@ int main(void)
         input_io = NULL;
         goto out;
     }
-    if ((reader_gone = AllocSignal(-1)) < 0)
+    if ((chan_gone = AllocSignal(-1)) < 0 || (reader_gone = AllocSignal(-1)) < 0)
         goto out;
     reader = (struct Task *)CreateNewProcTags(NP_Entry, (ULONG)reader_main,
                                               NP_Name, (ULONG)"amigentd reader",
@@ -1598,8 +2634,25 @@ int main(void)
 out:
     if (client >= 0 || input_io)
         drop_client();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0)
+            close_pending(i);
     if (listener >= 0)
         CloseSocket(listener);
+    /* Channels and runners run our code: wait until the last one is gone. */
+    for (;;) {
+        Forbid();
+        for (i = 0; i < CHANNELS; i++)
+            if (chans[i].proc)
+                Signal(&chans[i].proc->pr_Task, SIGBREAKF_CTRL_C);
+        n = children;
+        Permit();
+        if (!n)
+            break;
+        Wait(1UL << chan_gone);
+    }
+    if (chan_gone >= 0)
+        FreeSignal(chan_gone);
     if (reader) {
         reader_quit = TRUE;
         Signal(reader, SIGBREAKF_CTRL_C);
