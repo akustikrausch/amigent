@@ -21,21 +21,40 @@ from amigent.channel import Commands  # noqa: E402
 
 README = f"""Amigent {__version__}
 
-Remote control for a real Amiga from a PC: by an AI agent over MCP, or by
-hand in a remote desktop window. https://github.com/akustikrausch/amigent
+A remote desktop for your real Amiga, like TeamViewer or VNC, and an AI agent
+that can work on it, both from a PC or Mac over the home network.
+https://github.com/akustikrausch/amigent
 
-amigentd is the small service that runs on the Amiga. To install everything:
+This drawer is the Amiga half. The PC or Mac half comes from the internet.
+
+On the Amiga
 
 1. Copy this drawer to the Amiga, for example to RAM:.
-2. Double-click amigentd (or run "amigentd SETUP" in a Shell).
-   amigentd.000 is the same for a plain 68000.
-3. On the PC, run amigent-setup. It finds the Amiga, copies amigentd to C:,
-   adds it to S:User-Startup and gives it a key.
+2. Double-click amigentd, or run "amigentd SETUP" in a Shell.
+   On a plain 68000 take amigentd.000 instead.
 
-Requirements: AmigaOS 2.04 or newer (TLS needs OS 3 and AmiSSL), any CPU from
-the 68000 on (amigentd.000
-on a plain 68000; a Vampire's 68080 runs the plain amigentd), a TCP/IP stack
-with bsdsocket.library.
+On the PC or Mac
+
+3. Paste this into your AI agent (Claude, Codex or any other MCP client):
+
+     Install Amigent from https://github.com/akustikrausch/amigent for me.
+
+   The agent installs the Python package with "pipx install amigent", runs
+   amigent-setup, which finds the Amiga on the network, copies amigentd to
+   C:, adds it to S:User-Startup and gives it a key, and sets up the
+   remote desktop as a program.
+
+   Without an AI agent, in a terminal:
+
+     pipx install amigent
+     amigent-setup
+     amigent-viewer --install
+
+   The full guide is on the project page above.
+
+Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
+any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
+TCP/IP stack with bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
 
 Tool types of the icon: SETUP (accept the first install from the PC),
 KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
