@@ -20,7 +20,8 @@ import urllib.request
 from pathlib import Path
 
 from . import lzh
-from .amigactl import AmigaCtl, AmigaError
+from .amigactl import AmigaCtl
+from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from . import machines, tls
@@ -212,7 +213,7 @@ def main() -> int:
         print("No Amiga in sight. Is `amigentd SETUP` running over there?")
         return 1
     known = machines.find(host)
-    name = args.name or (known["name"] if known else machines._unique("Amiga", machines.load()))
+    name = args.name or (known["name"] if known else machines.unique_name("Amiga", machines.load()))
     host = machines.address(host)
     print(f"Amiga at {host}")
     allow = None if args.no_allow else args.allow

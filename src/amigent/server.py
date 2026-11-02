@@ -11,7 +11,8 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import files, inventory, locks, machines, pictures, secret, watch
-from .amigactl import AmigaError, join_path
+from .client import join_path
+from .errors import AmigaError
 from .amigentd import Amigentd
 from .channel import Commands, Request, perform
 from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port
@@ -52,7 +53,7 @@ def _screen_lock():
 def _with_ctl(fn):
     """Run fn against amigactld, reconnecting once after a dropped link."""
     with _exclusive():
-        if not ctl._sock:
+        if not ctl.connected:
             ctl.connect()
         try:
             return fn()
@@ -107,7 +108,7 @@ def amiga_find(address: str = "") -> str:
         machines.move(HOST, address.strip())
         found = address.strip()
     else:
-        machines._searched.pop(HOST, None)
+        machines.forget_search(HOST)
         found = machines.relocate(HOST)
     ctl.close()
     screen.close()

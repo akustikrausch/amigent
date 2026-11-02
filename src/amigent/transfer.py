@@ -11,7 +11,7 @@ import time
 import zlib
 from pathlib import Path
 
-from .amigactl import AmigaError
+from .errors import AmigaError
 from .channel import Commands
 
 BLOCK = 256 * 1024

@@ -107,7 +107,8 @@ def stems(host: str) -> list[str]:
     return list(dict.fromkeys(n for n in names if n))
 
 
-def _unique(name: str, amigas: list[dict]) -> str:
+def unique_name(name: str, amigas: list[dict]) -> str:
+    """name, or name 2, name 3... whichever the roll call has not handed out yet."""
     taken = {a["name"].lower() for a in amigas}
     if name.lower() not in taken:
         return name
@@ -143,10 +144,15 @@ def move(host: str, new: str) -> dict:
     """The Amiga known as host now lives at new."""
     entry = find(host)
     if not entry:  # pre-name address: keep it as an alias so its key/cert files still match
-        entry = remember(_unique("Amiga", load()), host)
+        entry = remember(unique_name("Amiga", load()), host)
+    forget_search(host)
+    return remember(entry["name"], new)
+
+
+def forget_search(host: str) -> None:
+    """Lift the cool-down: the next relocate(host) sweeps at once."""
     with _lock:
         _searched.pop(host, None)
-    return remember(entry["name"], new)
 
 
 def rename(old: str, new: str) -> bool:
@@ -213,11 +219,6 @@ def _pin(host: str):
     return path if path.exists() else None
 
 
-def _key(host: str) -> str | None:
-    from .secret import load_key
-    return load_key(host)
-
-
 def _proves_certificate(candidate: str, pin) -> bool:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
@@ -266,7 +267,7 @@ def relocate(host: str) -> str | None:
     _busy.on = True
     try:
         current = address(host)
-        pin, key = _pin(host), _key(host)
+        pin, key = _pin(host), secret.load_key(host)
         found = [h for h in scan() if h != current]
         if pin:
             match = next((h for h in found if _proves_certificate(h, pin)), None)

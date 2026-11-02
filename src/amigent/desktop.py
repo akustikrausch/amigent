@@ -55,7 +55,7 @@ def _quote(arg: str) -> str:
 
 def _script(name: str, args: list[str]) -> tuple[str, str]:
     """File name and body of a script that runs amigent-viewer with args, console-free."""
-    settings = {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
+    settings = _settings()
     package_root = str(Path(__file__).resolve().parents[1])
     if _wsl():
         command = ["wsl.exe", "-d", os.environ.get("WSL_DISTRO_NAME", "Ubuntu"), "-u", getpass.getuser(),

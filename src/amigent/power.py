@@ -12,7 +12,7 @@ import socket
 import subprocess
 import time
 
-from .amigactl import AmigaError
+from .errors import AmigaError
 
 OFF_SECONDS = 30
 BOOT_WAIT = 300

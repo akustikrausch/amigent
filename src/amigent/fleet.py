@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import machines
-from .amigactl import AmigaError
+from .errors import AmigaError
 from .amigentd import AmigentdError
 from .channel import Commands
 from .power import reboot
@@ -38,14 +38,6 @@ RUN_TIMEOUT = 120  # one command for the whole fleet: generous, plipboxes are no
 OUTPUT_LIMIT = 8000  # chars per Amiga, tail end only; the page is no log viewer
 FLEET_STATIC = {"fleet.js": "text/javascript", "fleet.css": "text/css"}
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
-
-
-def load_amigas() -> list[dict]:
-    return machines.load()
-
-
-def save_amigas(amigas: list[dict]) -> None:
-    machines.save(amigas)
 
 
 class Fleet:
@@ -226,7 +218,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.environ.get("AMIGENT_FLEET_PORT", "6820")))
     parser.add_argument("--no-window", action="store_true")
     args = parser.parse_args()
-    amigas = load_amigas()
+    amigas = machines.load()
     if args.add:
         name, host = args.add
         known = machines.find(host)
