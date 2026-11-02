@@ -487,7 +487,7 @@ the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
 |---|---|
 | STATUS | `key=value` lines, see below |
 | CLIENTS | a line per connection: kind, address, seconds connected, tab separated |
-| VERSION | `amigentd 1.1.0 (02.11.2026)` |
+| VERSION | `amigentd 1.1.1 (03.11.2026)` |
 | HELP | the command names |
 | QUIT | `bye`, then amigentd ends as on Ctrl-C |
 

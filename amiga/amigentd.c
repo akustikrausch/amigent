@@ -97,7 +97,7 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
 };
 
-const char version[] = "$VER: amigentd 1.1.0 (02.11.2026)";
+const char version[] = "$VER: amigentd 1.1.1 (03.11.2026)";
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
