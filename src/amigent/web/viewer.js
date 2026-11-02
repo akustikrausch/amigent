@@ -808,14 +808,14 @@
 
   // ---------------------------------------------------------------- start
 
+  if (store.get("direct", "0") === "1") setDirect(true);
+  if (store.get("panel", "1") === "0") setPanel(false);
+  layout();
+  canvas.focus();
+  // Texts first: state messages before that would show their keys.
   loadLanguage().then(() => {
     applyLanguage();
     showState();
+    connect();
   });
-  if (store.get("direct", "0") === "1") setDirect(true);
-  if (store.get("panel", "1") === "0") setPanel(false);
-  showState();
-  layout();
-  connect();
-  canvas.focus();
 })();

@@ -53,7 +53,8 @@ or 68030/040/060 cards.
 Amiga: AmigaOS 3.0 or newer, a 68020 or faster, a TCP/IP stack with
 `bsdsocket.library` such as Roadshow, and a network connection. A plipbox on the
 parallel port is enough. An RTG graphics card is optional: chipset screens,
-HAM included, are read too, but so far everything was tested with RTG. A fast
+HAM included, are read too, though a machine without any RTG card has not been
+tried yet. A fast
 CPU makes the screen noticeably quicker, so a PiStorm or a 68040/060 card is
 recommended.
 
