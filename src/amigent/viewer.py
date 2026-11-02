@@ -36,8 +36,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .amigactl import AmigaCtl, AmigaError, join_path
+from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, AmigentdError
+from .channel import Commands
 
 WEB = Path(__file__).with_name("web")
 STATIC = {"viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
@@ -176,7 +177,7 @@ class Viewer:
         self.screen = screen or Amigentd(host, screen_port)
         self._thread_lock = threading.Lock()
         self.lock = lock or (lambda: self._thread_lock)
-        self.ctl = AmigaCtl(host, ctl_port)
+        self.ctl = Commands(host, ctl_port, screen_port)
         self.ctl_lock = threading.Lock()
         self.restart = restart
         self.flush_volumes = list(flush_volumes)

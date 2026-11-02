@@ -8,7 +8,8 @@ from __future__ import annotations
 import sys
 import time
 
-from .amigactl import AmigaCtl, AmigaError
+from .amigactl import AmigaError
+from .channel import Commands
 from .amigentd import Amigentd, AmigentdError
 
 
@@ -19,7 +20,7 @@ def main() -> int:
     host = sys.argv[1]
     failed = False
 
-    ctl = AmigaCtl(host)
+    ctl = Commands(host)
     try:
         ctl.connect()
         print(f"amigactld  OK   {ctl.banner}")

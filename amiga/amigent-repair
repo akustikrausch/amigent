@@ -1,12 +1,15 @@
 ; amigent-repair: restores Amigent after a system update. Safe to run twice.
 FailAt 21
 Set SRC Stuff:amigent
-If NOT EXISTS Stuff:amigent/amigactld
+If NOT EXISTS Stuff:amigent/amigentd
   Set SRC FAT:amigent
 EndIf
-If NOT EXISTS C:amigactld
-  Copy $SRC/amigactld C: CLONE
-  Protect C:amigactld rwed
+; amigactld only where an older setup installed it
+If EXISTS $SRC/amigactld
+  If NOT EXISTS C:amigactld
+    Copy $SRC/amigactld C: CLONE
+    Protect C:amigactld rwed
+  EndIf
 EndIf
 If NOT EXISTS C:amigentd
   Copy $SRC/amigentd C: CLONE
@@ -23,17 +26,21 @@ If NOT EXISTS S:amigactld.conf
   EndIf
 EndIf
 Delete >NIL: S:amigent-start QUIET
-Search >NIL: S:User-Startup "C:amigactld" QUIET
-If WARN
-  Echo >>S:User-Startup "RUN >NIL: C:amigactld"
+If EXISTS $SRC/amigactld
+  Search >NIL: S:User-Startup "C:amigactld" QUIET
+  If WARN
+    Echo >>S:User-Startup "RUN >NIL: C:amigactld"
+  EndIf
 EndIf
 Search >NIL: S:User-Startup "C:amigentd" QUIET
 If WARN
   Echo >>S:User-Startup "RUN >NIL: C:amigentd"
 EndIf
-Status >NIL: COMMAND=C:amigactld
-If WARN
-  Run >NIL: C:amigactld
+If EXISTS C:amigactld
+  Status >NIL: COMMAND=C:amigactld
+  If WARN
+    Run >NIL: C:amigactld
+  EndIf
 EndIf
 Status >NIL: COMMAND=C:amigentd
 If WARN

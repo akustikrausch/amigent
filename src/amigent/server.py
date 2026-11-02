@@ -14,8 +14,9 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import inventory
-from .amigactl import AmigaCtl, AmigaError, join_path
+from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
+from .channel import Commands
 from .power import power_cycle, set_power, wait_for_port
 from .viewer import Viewer, open_window
 
@@ -31,7 +32,7 @@ SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
 INVENTORY_DIR = Path(__file__).resolve().parents[2] / "inventory"
 
 mcp = FastMCP("amigent")
-ctl = AmigaCtl(HOST, CTL_PORT)
+ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld on older installs
 screen = Amigentd(HOST, SCREEN_PORT)
 
 
@@ -256,8 +257,13 @@ def _makedirs(path: str, made: set | None = None) -> None:
         try:
             _with_ctl(lambda: ctl.makedir(current))
         except AmigaError as e:
-            if e.code != 202:  # already exists
+            if e.code is None:
                 raise
+            try:  # already there is fine; anything else is a real error
+                if _with_ctl(lambda: ctl.stat(current))["type"].lower() != "dir":
+                    raise e
+            except AmigaError:
+                raise e from None
 
 
 @mcp.tool()

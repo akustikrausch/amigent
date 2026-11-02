@@ -11,13 +11,14 @@ import time
 import zlib
 from pathlib import Path
 
-from .amigactl import AmigaCtl, AmigaError
+from .amigactl import AmigaError
+from .channel import Commands
 
 BLOCK = 256 * 1024
 RETRY_SECONDS = 30
 
 
-def remote_size(ctl: AmigaCtl, path: str) -> int:
+def remote_size(ctl: Commands, path: str) -> int:
     try:
         return int(ctl.stat(path)["size"])
     except AmigaError as e:
@@ -29,7 +30,7 @@ def remote_size(ctl: AmigaCtl, path: str) -> int:
 def upload(host: str, local: Path, target: str) -> None:
     total = local.stat().st_size
     while True:
-        ctl = AmigaCtl(host, timeout=60)
+        ctl = Commands(host, timeout=60)
         try:
             ctl.connect()
             done = remote_size(ctl, target)

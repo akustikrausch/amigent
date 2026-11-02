@@ -1,11 +1,12 @@
 """One-shot installer, run from the PC once amigentd is up on the Amiga.
 
-Usage: amigent-setup [HOST] [--home DIR] [--allow IP | --no-allow]
+Usage: amigent-setup [HOST] [--home DIR] [--with-amigactld [--allow IP | --no-allow]]
 
-Start `amigentd SETUP` on the Amiga first. This finds the machine, fetches
-amigactld from its project page, puts everything in place, adds the two
-services to S:User-Startup, gives amigentd a key and lets amigactld accept
-only this PC.
+Start `amigentd SETUP` on the Amiga first. This finds the machine, puts
+amigentd and the scripts in place, adds it to S:User-Startup and gives it a
+key. amigentd handles commands and files itself; older versions of it, or
+--with-amigactld, also install amigactld from its project page and let it
+accept only this PC.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 from . import lzh
 from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
+from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from .secret import load_key, new_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
@@ -125,10 +127,11 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
-def install(link: Amigentd, home: str, key: str, allow: str | None) -> None:
-    binary = fetch_amigactld()
-    print("uploading amigactld")
-    link.put("C:amigactld", binary)
+def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
+    if with_actld:
+        binary = fetch_amigactld()
+        print("uploading amigactld")
+        link.put("C:amigactld", binary)
     print("uploading amigentd")
     link.put("C:amigentd.new", (AMIGA / "bin" / "amigentd").read_bytes())
     run(link, f"MakeDir >NIL: {home}")
@@ -140,26 +143,28 @@ def install(link: Amigentd, home: str, key: str, allow: str | None) -> None:
     print("setting the key")
     link.put("S:amigent.key", (key + "\n").encode())
     link.put(f"{home}/amigent.key", (key + "\n").encode())
-    if allow:
+    if with_actld and allow:
         print(f"amigactld will accept only {allow}")
         run_script(link, allow_script(allow, home))
     script = f"""FailAt 21
-Protect C:amigactld rwed
 Protect {home}/amigent-repair +s
 Copy C:amigentd.new C:amigentd QUIET
 Protect C:amigentd rwed
 Delete >NIL: C:amigentd.new QUIET
-Copy C:amigactld {home}/ QUIET
 Copy C:amigentd {home}/ QUIET
 MakeDir >NIL: {home}/repair.d
 MakeDir >NIL: {home}/apps
-Search >NIL: S:User-Startup "C:amigactld" QUIET
-If WARN
-  Echo >>S:User-Startup "RUN >NIL: C:amigactld"
-EndIf
 Search >NIL: S:User-Startup "C:amigentd" QUIET
 If WARN
   Echo >>S:User-Startup "RUN >NIL: C:amigentd"
+EndIf
+"""
+    if with_actld:
+        script += f"""Protect C:amigactld rwed
+Copy C:amigactld {home}/ QUIET
+Search >NIL: S:User-Startup "C:amigactld" QUIET
+If WARN
+  Echo >>S:User-Startup "RUN >NIL: C:amigactld"
 EndIf
 Status >NIL: COMMAND=C:amigactld
 If WARN
@@ -174,6 +179,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("host", nargs="?")
     parser.add_argument("--home", default="SYS:amigent", help="folder for the Amigent scripts")
+    parser.add_argument("--with-amigactld", action="store_true",
+                        help="also install amigactld (automatic for amigentd before protocol 3)")
     parser.add_argument("--allow", help="the PC address amigactld should accept (default: this PC)")
     parser.add_argument("--no-allow", action="store_true", help="let amigactld accept any address")
     args = parser.parse_args()
@@ -195,7 +202,18 @@ def main() -> int:
     link = Amigentd(host, timeout=60, key=key)
     try:
         link.connect()
-        install(link, args.home, key, allow)
+        with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
+        install(link, args.home, key, allow, with_actld)
+        if not with_actld:
+            channel = AmigaChannel(host, key=key)
+            channel.connect()
+            channel.sysinfo()
+            link.end_setup()
+            path = save_key(key)
+            print("Done. amigentd handles screen, commands and files, and starts with the machine.")
+            print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
+            print(f"AMIGENT_HOST={host}")
+            return 0
         ctl = reach_amigactld(host)
         if ctl is None and allow:
             # The Amiga sees us under another address: undo the restriction while we still can.
@@ -206,7 +224,7 @@ def main() -> int:
             print("amigactld does not answer yet. A reboot of the Amiga should sort that out.")
             return 1
         link.end_setup()
-    except AmigentdError as e:
+    except (AmigentdError, AmigaError) as e:
         print(f"{e}\nStart `amigentd SETUP` on the Amiga and try again.")
         return 1
     path = save_key(key)
