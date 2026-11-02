@@ -17,6 +17,7 @@ from . import inventory
 from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd
 from .power import power_cycle, set_power, wait_for_port
+from .viewer import Viewer, open_window
 
 HOST = os.environ.get("AMIGENT_HOST", "")
 CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
@@ -24,6 +25,7 @@ SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
 MAX_EDGE = 1568  # larger images get downscaled by the model API anyway
 LOCK_FILE = "/tmp/amigent.lock"
+VIEWER_PORT = int(os.environ.get("AMIGENT_VIEWER_PORT", "6810"))
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
 INVENTORY_DIR = Path(__file__).resolve().parents[2] / "inventory"
@@ -34,11 +36,16 @@ screen = Amigentd(HOST, SCREEN_PORT)
 
 
 @contextmanager
-def _exclusive():
-    """Serialise access across all amigent processes on this PC."""
-    with open(LOCK_FILE, "w") as lock:
+def _exclusive(name: str = LOCK_FILE):
+    """Serialise access across all amigent processes and threads on this PC."""
+    with open(name, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
+
+
+def _screen_lock():
+    """The screen service has its own lock, so the viewer keeps running during commands."""
+    return _exclusive(LOCK_FILE + ".screen")
 
 
 def _with_ctl(fn):
@@ -64,7 +71,7 @@ def _with_ctl(fn):
 
 def _with_screen(fn):
     """Run fn against amigentd; the client reconnects by itself."""
-    with _exclusive():
+    with _screen_lock():
         return fn()
 
 
@@ -300,28 +307,42 @@ def amiga_key(combo: str) -> str:
     return f"pressed {combo}"
 
 
+viewer: Viewer | None = None
+
+
+@mcp.tool()
+def amiga_viewer() -> str:
+    """Open a live window of the Amiga screen on the user's desktop for manual control.
+
+    Use when the user wants to see the Amiga or drive it themselves: mouse,
+    keyboard, Amiga key shortcuts, file upload. Claude's own screenshots and
+    clicks keep working meanwhile and show up in the window.
+    """
+    global viewer
+    if viewer is None:
+        viewer = Viewer(HOST, screen=screen, lock=_screen_lock, ctl_port=CTL_PORT,
+                        restart=amiga_restart, flush_volumes=FLUSH_VOLUMES)
+    url = viewer.start(VIEWER_PORT)
+    open_window(url)
+    return f"viewer window opened: {url}"
+
+
 @mcp.tool()
 def amiga_restart() -> str:
     """Restart cleanly through the system and wait until the Amiga answers."""
     with _exclusive():
-        _flush_disks()
+        ctl.flush(FLUSH_VOLUMES)
         try:
             ctl.exec("Run >NIL: C:Reboot", timeout=5)
         except (OSError, AmigaError):
             pass  # the machine went down before it could answer
         ctl.close()
-        screen.close()
+        with _screen_lock():
+            screen.close()
         time.sleep(10)
         if not wait_for_port(HOST, CTL_PORT, 300):
             raise AmigaError("no answer after restart; amiga_power('cycle') may be needed")
     return "Amiga restarted"
-
-
-def _flush_disks() -> None:
-    """Write-protecting a volume makes its file system commit pending changes."""
-    for volume in FLUSH_VOLUMES:
-        ctl.exec(f"Lock {volume} ON")
-        ctl.exec(f"Lock {volume} OFF")
 
 
 @mcp.tool()
@@ -334,7 +355,8 @@ def amiga_power(action: str) -> str:
     if action == "cycle":
         with _exclusive():
             ctl.close()
-            screen.close()
+            with _screen_lock():
+                screen.close()
             attempts = power_cycle(HOST, CTL_PORT)
         return f"Amiga is back after {attempts} power cycle(s)"
     set_power(action == "on")

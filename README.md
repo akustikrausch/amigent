@@ -14,9 +14,14 @@ It opens a Shell, moves files around, looks at the screen, clicks the requester
 away, types into the tracker, puts the new game where it belongs and adds it to
 the start menu. No emulator. The real thing, over your LAN.
 
+And when you want the wheel back, say so. A window pops up on your desktop with
+the Amiga's screen live in it, your mouse and keyboard drive the machine, and
+files go over by drag and drop. Remote desktop, Amiga style.
+
     "check what's outdated on the Amiga"
     "the game in my Downloads folder: install it, sort it in, clean up"
     "put that demo on the desktop and run it"
+    "I want to drive myself"
 
 code and madness by **Akustikrausch**
 
@@ -26,7 +31,8 @@ Amiga side: AmigaOS 3.x, 68040 or better (PiStorm is perfect), an RTG graphics
 card, a TCP/IP stack such as Roadshow, and a network connection of any kind.
 Yes, a plipbox on the parallel port is enough.
 
-PC side: Python 3.10 or newer and [Claude Code](https://claude.com/claude-code).
+PC side: Python 3.10 or newer and [Claude Code](https://claude.com/claude-code). For
+the viewer, Edge or Chrome. Windows has Edge anyway.
 
 ## get it running
 
@@ -68,19 +74,50 @@ amigent-setup 192.168.1.50
 claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
 ```
 
+## take the wheel
+
+Tell Claude "manual control", or "show me the Amiga", and the viewer opens as its
+own window. No plugin, no extra install: it's a page served by amigent on your
+own machine and shown by Edge or Chrome in app mode.
+
+- **the screen, live.** Only changed 64x64 tiles travel, the area around your
+  pointer gets looked at first. Moving the mouse costs a few milliseconds.
+- **mouse and keyboard.** Click, drag, right button for menus, wheel. Text mode
+  types through the Amiga's own keymap, so umlauts and AltGr just work. Direct
+  mode sends raw key positions and holds keys for as long as you do. For games.
+- **the side panel.** Workbench to front, next screen, Open, Save, Quit, Copy,
+  Paste, Ctrl-C for the Shell, Help, Del, F1 to F10, and sticky Amiga, Ctrl, Alt
+  and Shift for anything else. Click once for the next key, double-click to lock.
+- **files.** Hit *Send file to Amiga*, or drop files on the screen. Pick a folder
+  on the Amiga in the little browser, `RAM:` is the default. Progress bar,
+  checksum at the end, and it asks before it overwrites something.
+- **clipboard.** Ctrl+V types your PC's clipboard on the Amiga.
+- **the rest.** Fit to window or 1:1, full screen (there the Windows keys become
+  the Amiga keys), screenshot to PNG, and a restart button that writes the disks
+  first.
+
+Claude keeps working while the window is open, and you see every click it makes.
+Without Claude, the same window comes up with
+
+```bash
+amigent-viewer 192.168.1.50
+```
+
 ## how it works
 
 Two small services on the Amiga, one MCP server on the PC.
 
 ```
   Claude Code --- MCP --- amigent-server ---+--- :6800 --- amigactld   commands, files
-                                            +--- :6801 --- amigentd    screen, mouse, keys
+                                |           +--- :6801 --- amigentd    screen, mouse, keys
+  your browser window --- :6810-+  (viewer, local only)
 ```
 
 `amigentd` is ours, a tiny native daemon in C. It keeps the last frame around and
 sends only the 64x64 tiles that changed, run-length packed in 256 colours. So a full
 screen takes seconds even on a slow link, and looking again takes a fraction of a
-second. Nothing is streamed. Claude looks when it needs to look.
+second. Claude looks when it needs to look. The viewer keeps looking while it's
+open, in stripes, and backs off when nothing moves, so the Amiga keeps its CPU.
 
 `amigactld` by tbdye does the Shell and file work. Great little program, and the
 reason this project didn't have to write that part.
@@ -97,6 +134,7 @@ reason this project didn't have to write that part.
 | `amiga_click`, `amiga_drag` | the mouse, including menus and icons |
 | `amiga_type`, `amiga_key` | the keyboard, through your own keymap |
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed versions |
+| `amiga_viewer` | the live window for you, see above |
 | `amiga_restart`, `amiga_power` | reboot, and mains power if you wired that up |
 
 Huge files? `python -m amigent.transfer` resumes where it stopped.
@@ -120,6 +158,7 @@ entry. See [`amiga/repair.d/example.repair.txt`](amiga/repair.d/example.repair.t
 | `AMIGENT_AMIGA_DIR` | `SYS:amigent` | where the scripts live |
 | `AMIGENT_FLUSH_VOLUMES` | `SYS:` | volumes to commit before a reboot |
 | `AMIGENT_POWER_CMD` | | a command taking `on` or `off`, for your smart plug |
+| `AMIGENT_VIEWER_PORT` | `6810` | where the viewer listens, on 127.0.0.1 only |
 
 ## one word of warning
 
@@ -127,7 +166,8 @@ Whoever reaches these ports owns your Amiga. Keep it on your home network, never
 forward them to the internet. `amigactld` takes `ALLOW` lines in
 `S:amigactld.conf` if you want it locked to your PC. `amigentd` only takes files
 and commands while it runs in `SETUP` mode, and `amigent-setup` switches that off
-when it's done.
+when it's done. The viewer only listens on your own PC and wants the secret in
+its address, so other machines and random web pages can't get in.
 
 More in the [FAQ](docs/FAQ.md), the wire format is in
 [docs/PROTOCOL.md](docs/PROTOCOL.md).

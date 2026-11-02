@@ -12,6 +12,7 @@ dependencies = ["mcp>=1.2", "pillow>=10"]
 amigent-server = "amigent.server:main"
 amigent-doctor = "amigent.doctor:main"
 amigent-setup = "amigent.setup:main"
+amigent-viewer = "amigent.viewer:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -19,6 +20,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+amigent = ["web/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -56,6 +56,8 @@ class Amigentd:
         self.height = 0
         self._frame: Image.Image | None = None
         self._buttons = 0
+        self._last_used = 0.0
+        self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
 
     def connect(self) -> None:
         self.close()
@@ -66,14 +68,32 @@ class Amigentd:
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
-            self._send(CMD_INFO)
-            width, height = struct.unpack(">HH", self._exact(8)[:4])
+            size = self._info()
         except OSError as e:
             self.close()
             raise AmigentdError(f"amigentd at {self.host}:{self.port} not answering: {e}") from e
+        self._apply_size(*size)
+
+    def _info(self) -> tuple[int, int]:
+        self._send(CMD_INFO)
+        return struct.unpack(">HH", self._exact(8)[:4])
+
+    def _apply_size(self, width: int, height: int) -> None:
         if (width, height) != (self.width, self.height):
             self._frame = None
-        self.width, self.height = width, height
+            self.width, self.height = width, height
+            self._notify("size", (width, height))
+
+    def _notify(self, event: str, payload) -> None:
+        for listener in self.listeners:
+            try:
+                listener(event, payload)
+            except Exception:
+                pass  # a broken viewer must not break the client
+
+    def check_size(self) -> None:
+        """Ask for the front screen's size again; a new size starts a fresh picture."""
+        self._apply_size(*self._retry(self._info))
 
     def close(self) -> None:
         if self._sock:
@@ -99,10 +119,16 @@ class Amigentd:
         if not self._sock:
             self.connect()
         try:
-            return fn()
+            result = fn()
         except (OSError, AmigentdError):
+            if time.monotonic() - self._last_used < 100:
+                # Not the idle timeout, so another client took over and may have
+                # received tiles our picture is missing.
+                self._frame = None
             self.connect()
-            return fn()
+            result = fn()
+        self._last_used = time.monotonic()
+        return result
 
     def _ok(self, *args) -> None:
         def call():
@@ -135,34 +161,63 @@ class Amigentd:
     def end_setup(self) -> None:
         self._ok(CMD_SETUP_END)
 
-    def capture(self, x: int = 0, y: int = 0, w: int | None = None,
-                h: int | None = None) -> Image.Image:
-        """Return a region, transferring only tiles changed since the last call."""
+    def poll(self, x: int = 0, y: int = 0, w: int | None = None, h: int | None = None) -> int:
+        """Fetch the changed tiles of a region into the picture; returns how many.
+
+        Listeners get the tiles as (x, y, w, h, data) with data as sent.
+        """
 
         def call():
+            region = (x, y, w or self.width, h or self.height)
             force = self._frame is None
             if force:
                 self._frame = Image.new("RGB", (self.width, self.height))
-            self._send(CMD_FRAME, int(force), 0, 0, self.width, self.height)
-            count = struct.unpack(">I", self._exact(4))[0]
-            for _ in range(count):
-                tx, ty, tw, th, size = struct.unpack(">HHHHI", self._exact(12))
-                self._frame.paste(decode_tile(self._exact(size), tw, th), (tx, ty))
+                region = (0, 0, self.width, self.height)  # a new picture needs everything
+            try:
+                self._send(CMD_FRAME, int(force), *region)
+                tiles = []
+                for _ in range(struct.unpack(">I", self._exact(4))[0]):
+                    tx, ty, tw, th, size = struct.unpack(">HHHHI", self._exact(12))
+                    data = self._exact(size)
+                    self._frame.paste(decode_tile(data, tw, th), (tx, ty))
+                    tiles.append((tx, ty, tw, th, data))
+            except (OSError, AmigentdError):
+                self._frame = None  # the service has moved on, ours is incomplete
+                raise
+            if tiles:
+                self._notify("tiles", tiles)
+            return len(tiles)
 
-        try:
-            self._retry(call)
-        except (OSError, AmigentdError):
-            self._frame = None
-            raise
+        return self._retry(call)
+
+    def capture(self, x: int = 0, y: int = 0, w: int | None = None,
+                h: int | None = None) -> Image.Image:
+        """Return a region, transferring only tiles changed since the last call."""
+        self.poll()
         return self._frame.crop((x, y, x + (w or self.width - x), y + (h or self.height - y)))
+
+    def snapshot(self) -> Image.Image | None:
+        """The picture as of the last poll, without asking the Amiga."""
+        return self._frame
 
     def move(self, x: int, y: int) -> None:
         self._ok(CMD_MOVE, 0, x, y)
 
     def button(self, name: str, down: bool) -> None:
         mask = BUTTONS[name]
-        self._buttons = self._buttons | mask if down else self._buttons & ~mask
+        self.set_buttons(self._buttons | mask if down else self._buttons & ~mask)
+
+    def set_buttons(self, mask: int) -> None:
+        self._buttons = mask & 7
         self._ok(CMD_BUTTON, self._buttons)
+
+    def rawkey(self, code: int, down: bool, qualifier: int = 0) -> None:
+        self._ok(CMD_RAWKEY, int(down), code & 0x7F, qualifier)
+
+    def char(self, ch: str, qualifier: int = 0) -> None:
+        """Type one character through the Amiga's keymap; others than Latin-1 are skipped."""
+        if ord(ch) < 256:
+            self._ok(CMD_CHAR, 0, ord(ch), qualifier)
 
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         self.move(x, y)
@@ -187,7 +242,7 @@ class Amigentd:
             if ch == "\n":
                 self.press("return")
             else:
-                self._ok(CMD_CHAR, 0, ord(ch), 0)
+                self.char(ch)
 
     def press(self, combo: str) -> None:
         """Press a combination such as 'lamiga+n', 'return' or 'shift+f1'."""
@@ -196,7 +251,7 @@ class Amigentd:
         for mod in mods:
             qualifier |= QUALIFIERS[mod]
         if key in RAWKEYS:
-            self._ok(CMD_RAWKEY, 1, RAWKEYS[key], qualifier)
-            self._ok(CMD_RAWKEY, 0, RAWKEYS[key], qualifier)
+            self.rawkey(RAWKEYS[key], True, qualifier)
+            self.rawkey(RAWKEYS[key], False, qualifier)
         else:
-            self._ok(CMD_CHAR, 0, ord(key), qualifier)
+            self.char(key, qualifier)

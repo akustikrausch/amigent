@@ -6,3 +6,4 @@ inventory/
 private/
 CLAUDE.local.md
 .mcp.json
+build/

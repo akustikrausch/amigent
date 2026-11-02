@@ -189,6 +189,12 @@ class AmigaCtl:
         info, data = self._binary(f"EXEC {prefix}{command}", timeout)
         return ExecResult(int(info.split("=", 1)[1]), data.decode(ENCODING))
 
+    def flush(self, volumes) -> None:
+        """Write-protecting a volume makes its file system commit pending changes."""
+        for volume in volumes:
+            self.exec(f"Lock {volume} ON")
+            self.exec(f"Lock {volume} OFF")
+
     def exec_async(self, command: str) -> int:
         """Start without output capture; returns the daemon's process id."""
         return int(self._text(f"EXEC ASYNC {command}")[0])

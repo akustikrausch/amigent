@@ -33,3 +33,29 @@ link free.
 **A game doesn't show up in the screenshot.**
 `amigentd` reads the frontmost Intuition screen. Software that takes over the
 hardware won't be in there.
+
+**The viewer window doesn't show up.**
+Claude prints the address as well. Open it in any browser on the same PC. Under
+WSL the window is started on the Windows side, which needs Edge (it's always
+there) and localhost forwarding, which WSL does by default.
+
+**How do I press the Amiga keys in the viewer?**
+The side panel has them as sticky buttons, plus the usual combinations ready to
+click. In full screen the browser hands over the Windows keys: left Windows is
+left Amiga, right Windows or the menu key is right Amiga.
+
+**Ctrl+W closed the viewer.**
+Browsers keep a few shortcuts for themselves outside full screen. Go full screen,
+or use the sticky Ctrl button.
+
+**The mouse pointer in the viewer is my PC's.**
+That's on purpose. The Amiga's pointer is a sprite and not part of the screen
+picture, and your own pointer reacts without waiting for the network.
+
+**Can I run `amigent-viewer` while Claude is working?**
+Better not. Both would fight over the screen service. While Claude Code is open,
+ask Claude for the viewer instead: it shares one connection with Claude.
+
+**Keys in a game don't work.**
+Switch the keyboard to *Direct*. Text mode presses and releases every character
+at once, which is right for typing and wrong for games.
