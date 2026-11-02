@@ -21,8 +21,9 @@ off. When it can't start (no OS 3.0, port taken, out of memory) it says so in a
 requester, unless `QUIET` is set. A port that is taken is tried for a minute
 first, as at boot.
 
-What it needs: a 68020 or better (the code also builds for a 68000 with
-`build-amigentd CPU 68000`), OS 3.0 or newer, and a TCP stack with
+What it needs: a 68020 or better for `bin/amigentd`, any 68000 for
+`bin/amigentd.000` (built with `build-amigentd CPU 68000 TO amigentd.000`; no
+68020 instructions, no word or long access at odd addresses), OS 3.0 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read
 through `graphics.library`, `cybergraphics.library` is only used when it is there.
 
