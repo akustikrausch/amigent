@@ -1,20 +1,19 @@
-"""Which Amiga is which: names, addresses, and finding one again after its address changed.
+"""Which Amiga is which: names, addresses, and tracking one down after DHCP moved it.
 
-~/.config/amigent/amigas.json lists the known Amigas (it is also the fleet's list):
+~/.config/amigent/amigas.json is the roll call (the fleet reads it too):
 
     [{"name": "A1200", "host": "192.168.1.50", "seen": ["192.168.1.50"], "default": true}]
 
-Every client takes a name or an address. A name stands for its last known
-address. Key and certificate are found under the name and under every address
-the Amiga had (key-<name>, key-<address>, tls-<name>.pem, tls-<address>.pem),
-so installations from before names keep working.
+Every client takes a name or an address; a name means its last known address.
+Key and certificate are looked up under the name and every address the Amiga
+ever had (key-<name>, key-<address>, tls-<name>.pem, tls-<address>.pem), so
+installs from the pre-name era keep working.
 
-When the address stops answering, the local network is searched for amigentd
-and the Amiga that proves to be this one is taken: its pinned certificate must
-match, or, without TLS, its key must be accepted. A stranger's Amiga on the same
-network is never mistaken for yours. The new address is remembered. An address
-that nobody knows yet is added under the name "Amiga" the first time it is
-found again this way.
+When the address goes silent, the local network is swept for amigentd and only
+the Amiga that proves it is ours gets picked: its pinned certificate must match,
+or, without TLS, it must accept our key. A neighbour's Amiga on the same wire is
+never mistaken for yours. The new address is remembered; an address nobody knew
+yet is filed under the name "Amiga" the first time it is found this way.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ import time
 from . import secret
 
 GREETING_PORT = 6801
-SEARCH_EVERY = 30.0  # seconds between two searches for the same Amiga
+SEARCH_EVERY = 30.0  # seconds between two sweeps for the same Amiga; a /24 scan is no free lunch
 _lock = threading.RLock()
 _searched: dict[str, float] = {}
 _busy = threading.local()
@@ -61,7 +60,7 @@ def save(amigas: list[dict]) -> None:
 
 
 def find(host: str) -> dict | None:
-    """The entry for a name or for one of the addresses an Amiga had."""
+    """The entry for a name, or for any address an Amiga ever answered at."""
     if not host:
         return None
     amigas = load()
@@ -75,7 +74,7 @@ def find(host: str) -> dict | None:
 
 
 def default() -> str:
-    """The name of the Amiga to use when none is given: the marked one, or the only one."""
+    """The Amiga to use when nobody says: the marked one, or the only one."""
     amigas = load()
     for amiga in amigas:
         if amiga.get("default"):
@@ -84,7 +83,7 @@ def default() -> str:
 
 
 def pick(host: str = "") -> str:
-    """What to connect to: the given name or address, else AMIGENT_HOST, else the default."""
+    """Who to dial: the given name or address, else AMIGENT_HOST, else the default."""
     return host or os.environ.get("AMIGENT_HOST", "") or default()
 
 
@@ -100,7 +99,7 @@ def address(host: str) -> str:
 
 
 def stems(host: str) -> list[str]:
-    """Names the key and certificate files of this Amiga may carry, best first."""
+    """Name tags this Amiga's key and certificate files may wear, best first."""
     entry = find(host)
     if not entry:
         return [host] if host else []
@@ -119,7 +118,7 @@ def _unique(name: str, amigas: list[dict]) -> str:
 
 
 def remember(name: str, host: str, make_default: bool = False) -> dict:
-    """Add an Amiga or give a known one its new address."""
+    """Sign up a new Amiga, or hand a known one its new address."""
     with _lock:
         amigas = load()
         entry = next((a for a in amigas if a["name"].lower() == name.lower()), None)
@@ -141,9 +140,9 @@ def remember(name: str, host: str, make_default: bool = False) -> dict:
 
 
 def move(host: str, new: str) -> dict:
-    """The Amiga known as host now answers at new."""
+    """The Amiga known as host now lives at new."""
     entry = find(host)
-    if not entry:  # an address from before names: keep it as an alias, so its files still apply
+    if not entry:  # pre-name address: keep it as an alias so its key/cert files still match
         entry = remember(_unique("Amiga", load()), host)
     with _lock:
         _searched.pop(host, None)
@@ -156,7 +155,7 @@ def rename(old: str, new: str) -> bool:
         entry = next((a for a in amigas if a["name"].lower() == old.lower()), None)
         if entry is None or any(a["name"].lower() == new.lower() for a in amigas if a is not entry):
             return False
-        for stem in ("key-", "tls-"):  # files under the old name follow it
+        for stem in ("key-", "tls-"):  # key and cert move house with the name
             suffix = ".pem" if stem == "tls-" else ""
             path = secret.FOLDER / f"{stem}{secret.safe(entry['name'])}{suffix}"
             if path.exists():
@@ -184,7 +183,7 @@ def local_networks() -> list[ipaddress.IPv4Network]:
     """The /24 this PC sits in (the one its default route leaves from)."""
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.connect(("192.0.2.1", 9))
+        probe.connect(("192.0.2.1", 9))  # UDP connect sends nothing, it just picks the interface
         mine = probe.getsockname()[0]
         probe.close()
     except OSError:
@@ -202,7 +201,7 @@ def _greets(host: str) -> bool:
 
 
 def scan() -> list[str]:
-    """Addresses on the local network where amigentd answers."""
+    """Every address on the local /24 where amigentd says AMGT; 64 knocks at a time."""
     hosts = [str(h) for net in local_networks() for h in net.hosts()]
     with concurrent.futures.ThreadPoolExecutor(64) as pool:
         return [h for h, ok in zip(hosts, pool.map(_greets, hosts)) if ok]
@@ -234,7 +233,7 @@ def _proves_certificate(candidate: str, pin) -> bool:
 
 
 def _proves_key(candidate: str, key: str) -> bool:
-    """amigentd accepts this key (command 17, see docs/PROTOCOL.md)."""
+    """amigentd swallows this key (command 17, see docs/PROTOCOL.md)."""
     try:
         with socket.create_connection((candidate, GREETING_PORT), 3) as s:
             s.settimeout(3)
@@ -247,7 +246,7 @@ def _proves_key(candidate: str, key: str) -> bool:
             if hello[:4] != b"AMGT":
                 return False
             if not struct.unpack(">H", hello[6:8])[0] & 1:
-                return False  # no key asked for, so nothing is proven
+                return False  # no key asked for: any Amiga would pass, so this proves nothing
             raw = key.encode()
             s.sendall(struct.pack(">BBHHHH", 17, 0, len(raw), 0, 0, 0) + raw)
             return s.recv(1) == b"\0"
@@ -256,8 +255,8 @@ def _proves_key(candidate: str, key: str) -> bool:
 
 
 def relocate(host: str) -> str | None:
-    """Search the network for this Amiga; returns and remembers its new address, if found."""
-    if getattr(_busy, "on", False) or not host:
+    """Sweep the network for this Amiga; returns and remembers its new address, if any."""
+    if getattr(_busy, "on", False) or not host:  # this thread is mid-sweep already: no nesting
         return None
     now = time.monotonic()
     with _lock:

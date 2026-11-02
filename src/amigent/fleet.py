@@ -5,10 +5,9 @@ Usage: amigent-fleet                       open the overview
        amigent-fleet --remove NAME
        amigent-fleet --list
 
-Every Amiga gets a Viewer in this one process, so the overview's previews and
-the remote desktop windows share one screen connection per Amiga. Commands for
-the whole fleet ride on a command channel of their own, so a long one never
-freezes a preview.
+Every Amiga gets a Viewer in this one process, so previews and remote desktop
+windows share one screen connection per Amiga. Fleet-wide commands ride a
+command channel of their own, so a long one never freezes a preview.
 """
 
 from __future__ import annotations
@@ -33,10 +32,10 @@ from .power import reboot
 from .secret import FOLDER
 from .viewer import STATIC, WEB, Viewer, _Server, open_window
 
-PREVIEW_EVERY = 20  # seconds between previews of one Amiga
+PREVIEW_EVERY = 20  # seconds between previews of one Amiga; the link has no cycles to waste
 PREVIEW_WIDTH = 480
 RUN_TIMEOUT = 120  # one command for the whole fleet: generous, plipboxes are no T1 lines
-OUTPUT_LIMIT = 8000  # per Amiga, the page is no log viewer
+OUTPUT_LIMIT = 8000  # chars per Amiga, tail end only; the page is no log viewer
 FLEET_STATIC = {"fleet.js": "text/javascript", "fleet.css": "text/css"}
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 
@@ -54,7 +53,7 @@ class Fleet:
         self.token = secrets.token_urlsafe(18)
         self.entries = []
         for amiga in amigas:
-            viewer = Viewer(amiga["name"])  # by name, so a new address is found again
+            viewer = Viewer(amiga["name"])  # by name, so DHCP can't shake it off
             self.entries.append({"name": amiga["name"], "host": amiga["host"], "viewer": viewer,
                                  "commands": Commands(amiga["name"]), "busy": threading.Lock(),
                                  "online": None, "info": {}, "preview": None, "seen": 0.0})
@@ -75,7 +74,7 @@ class Fleet:
         return self.url
 
     def _watch(self, entry: dict) -> None:
-        """Keep one Amiga's status and preview fresh, at a pace a slow link can take."""
+        """Keep one Amiga's status and preview fresh, at a pace a slow link can stomach."""
         viewer = entry["viewer"]
         while True:
             try:
@@ -108,7 +107,7 @@ class Fleet:
         return rows
 
     def _command(self, entry: dict, job) -> dict:
-        """One Amiga, one job, its own channel: errors come back as text, never as a crash."""
+        """One Amiga, one job, its own channel: errors come back as text, never as a guru."""
         commands = entry["commands"]
         with entry["busy"]:
             try:
@@ -118,7 +117,7 @@ class Fleet:
                 return {"ok": False, "error": str(e) or type(e).__name__}
 
     def run(self, command: str, ids: list[int] | None = None) -> list[dict]:
-        """The same AmigaDOS line on every chosen Amiga at once; slow ones don't hold up fast ones."""
+        """One AmigaDOS line on every chosen Amiga at once; the A500 doesn't hold up the 060."""
         chosen = [i for i in range(len(self.entries)) if ids is None or i in ids]
 
         def one(i: int) -> dict:
@@ -133,7 +132,7 @@ class Fleet:
             return list(pool.map(one, chosen))
 
     def restart(self, index: int) -> dict:
-        """Disks flushed, then a warm restart; the preview finds it again once it is back."""
+        """Disks flushed, then a warm restart; the preview picks it up once it's back."""
         return self._command(self.entries[index], lambda commands: reboot(commands, FLUSH_VOLUMES))
 
     def open_viewer(self, index: int) -> str:

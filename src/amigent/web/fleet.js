@@ -1,5 +1,5 @@
-// Amigent fleet: one tile per Amiga, a click opens its remote desktop,
-// one command line drives them all.
+// Amigent fleet: one tile per Amiga, one click to its remote desktop,
+// one command line to drive the whole party.
 (() => {
   "use strict";
 
@@ -35,7 +35,7 @@
   const tiles = new Map();
   const api = (path) => `${path}?t=${encodeURIComponent(token)}`;
 
-  // the facts behind a tile, folded away until someone asks
+  // the specs behind a tile, folded away until someone asks
   function details(a) {
     const i = a.info || {};
     const rows = [
@@ -103,7 +103,7 @@
     el.classList.toggle("offline", a.online === false);
   }
 
-  // one line for the whole fleet; answers stack up per Amiga
+  // one line for the whole fleet; answers stack up per Amiga, rc > 5 glows red
   $("run").addEventListener("submit", async (event) => {
     event.preventDefault();
     const command = $("command").value.trim();
@@ -142,7 +142,7 @@
       list.forEach(tile);
       const up = list.filter((a) => a.online).length;
       $("summary").textContent = t("fleet_summary", { up, total: list.length });
-    } catch { /* the fleet process went away; keep the last view */ }
+    } catch { /* fleet process gone; freeze the last frame */ }
   }
 
   (async () => {

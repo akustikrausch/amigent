@@ -1,4 +1,4 @@
-"""Check the connection to the Amiga and measure what the link can carry.
+"""Check the link to the Amiga and clock what it can carry.
 
 Usage: python -m amigent.doctor [NAME OR ADDRESS]
 
@@ -33,7 +33,7 @@ def main() -> int:
         print(f"           {ctl.sysinfo()}")
         for volume in ctl.volumes():
             print(f"           {volume['name'].rstrip(':')}: {volume['free'] // 2**20} MB free")
-        payload = bytes(512 * 1024)
+        payload = bytes(512 * 1024)  # half a meg up and back through RAM: is the stopwatch
         start = time.monotonic()
         ctl.write_file("RAM:amigent-speedtest", payload)
         up = len(payload) / (time.monotonic() - start)

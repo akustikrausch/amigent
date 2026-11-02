@@ -1,4 +1,4 @@
-/* the fleet's own bits; tiles and colours come from viewer.css */
+/* the fleet's own bitplanes; tiles and palette come from viewer.css */
 
 body.fleet { grid-template-rows: auto auto auto 1fr auto; }
 

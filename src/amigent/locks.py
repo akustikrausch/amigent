@@ -1,8 +1,7 @@
-"""One Amiga, many hands: a lock every Amigent process on this machine respects.
+"""One lock to rule them all: MCP, viewer and fleet take turns on the same Amiga.
 
-The MCP server, the remote desktop and the fleet may all talk to the same
-Amiga at once. A file lock in the temp folder keeps them taking turns; it works
-on Windows (msvcrt) as well as on macOS and Linux (fcntl).
+Every Amigent process on this PC honours it. A file lock in the temp folder
+does the arbitration, msvcrt on Windows, fcntl on macOS and Linux.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ def path(name: str) -> Path:
 
 @contextmanager
 def exclusive(name: str):
-    """Hold the named lock for the with-block; waits as long as someone else has it."""
-    with open(path(name), "a+b") as handle:  # append: never truncates whatever sits there
+    """Hold the named lock for the with-block; blocks for as long as someone else has it."""
+    with open(path(name), "a+b") as handle:  # append mode: never clobbers what's in there
         if os.name == "nt":
             handle.seek(0)
             while True:
@@ -34,7 +33,7 @@ def exclusive(name: str):
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:
-                    time.sleep(0.05)  # Windows has no blocking flock, so we knock politely
+                    time.sleep(0.05)  # no blocking flock on Windows: knock every 50 ms, politely
             try:
                 yield
             finally:
@@ -42,4 +41,4 @@ def exclusive(name: str):
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             fcntl.flock(handle, fcntl.LOCK_EX)
-            yield  # closing the file drops the lock
+            yield  # closing the file drops the lock, no explicit unlock needed

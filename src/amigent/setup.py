@@ -2,10 +2,10 @@
 
 Usage: amigent-setup [HOST] [--home DIR] [--with-amigactld [--allow IP | --no-allow]]
 
-Start `amigentd SETUP` on the Amiga first. This finds the machine, puts
-amigentd and the scripts in place, adds it to S:User-Startup and gives it a
-key. amigentd handles commands and files itself; older versions of it, or
---with-amigactld, also install amigactld from its project page and let it
+Start `amigentd SETUP` on the Amiga first. This finds the machine, drops
+amigentd and the scripts in place, hooks it into S:User-Startup and hands it a
+key. amigentd does commands and files on its own; older versions of it, or
+--with-amigactld, also pull amigactld from its project page and let it
 accept only this PC.
 """
 
@@ -32,7 +32,7 @@ SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 
 
 def find_amiga() -> str | None:
-    """Look for amigentd on the local /24."""
+    """Sweep the local /24 for amigentd; first one to say hello wins."""
     hits = machines.scan()
     return hits[0] if hits else None
 
@@ -48,7 +48,7 @@ def fetch_amigactld() -> bytes:
 
 
 def own_address(host: str) -> str:
-    """The address this PC uses towards the Amiga."""
+    """The address the Amiga sees this PC under (NAT may disagree with the LAN)."""
     with socket.create_connection((host, 6801), 5) as s:
         return s.getsockname()[0]
 
@@ -58,7 +58,7 @@ def same_network(a: str, b: str) -> bool:
 
 
 def allow_script(address: str, home: str) -> str:
-    """Add ALLOW for address to S:amigactld.conf, keeping whatever is in there."""
+    """AmigaDOS script: ALLOW address in S:amigactld.conf, old lines untouched, backup first."""
     return f"""FailAt 21
 If EXISTS S:amigactld.conf
   Copy S:amigactld.conf S:amigactld.conf.amigent-bak QUIET
@@ -88,7 +88,7 @@ Run >NIL: C:amigactld
 
 
 def reach_amigactld(host: str, wait: float = 40) -> AmigaCtl | None:
-    """A working amigactld connection, or None if it stays silent or turns us away."""
+    """A live amigactld link, or None if it stays mute or shows us the door."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         try:
@@ -101,7 +101,7 @@ def reach_amigactld(host: str, wait: float = 40) -> AmigaCtl | None:
 
 
 def offer_tls(link: Amigentd, host: str, home: str) -> None:
-    """Give amigentd a certificate and pin it here once its TLS port answers with it."""
+    """Hand amigentd a certificate; keep the pin only if its TLS port answers with it in 30 s."""
     made = tls.make_certificate(host)
     if not made:
         print("No openssl on this PC, so the connection stays unencrypted.")
@@ -134,7 +134,7 @@ def run(link: Amigentd, command: str) -> None:
 
 
 def amigentd_build(link: Amigentd) -> str:
-    """amigentd.000 for a plain 68000 or 68010, amigentd for everything from the 68020 on."""
+    """amigentd.000 for a stock 68000/68010, amigentd for 68020 and up."""
     code = link.run("CPU CHECK 68020")
     if code not in (0, 5):
         raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
@@ -226,7 +226,7 @@ def main() -> int:
     link = Amigentd(host, timeout=60)
     try:
         link.connect()
-        # An Amiga that asks for a key was set up before, with the key that just worked.
+        # Asks for a key? Then it was set up before, and the key that just got us in stays.
         key = link.key if link.flags & 1 else own_key(host) or new_key()
         link.key = key
         with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
@@ -244,7 +244,7 @@ def main() -> int:
             return _named(name, host)
         ctl = reach_amigactld(host)
         if ctl is None and allow:
-            # The Amiga sees us under another address: undo the restriction while we still can.
+            # The Amiga sees us under another address: pull the ALLOW while the door is still open.
             print("amigactld turns this PC away; removing the ALLOW line again")
             run_script(link, UNDO_ALLOW)
             ctl = reach_amigactld(host)
