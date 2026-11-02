@@ -562,6 +562,9 @@ static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UB
     memset(pal, 0, sizeof(pal));
     for (i = 0; i < 3 * colours; i++)
         pal[i] = table[i] >> 24;
+    if ((GetVPModeID(&scr->ViewPort) & EXTRAHALFBRITE_KEY) && depth == 6)
+        for (i = 3 * 32; i < 3 * 64; i++)  /* EHB: the top 32 are the bottom 32 at half */
+            pal[i] = pal[i - 3 * 32] >> 1;
     tmp = scr->RastPort;
     tmp.Layer = NULL;
     tmp.BitMap = line;
