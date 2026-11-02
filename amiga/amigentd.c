@@ -68,6 +68,10 @@ extern struct Library *CyberGfxBase;
 #define OUT_SIZE 16384
 #define SEND_BUFFER 16384  /* little queued, so a takeover is not stuck behind it */
 #define SEND_STEP 2048  /* send low water mark: writable means this much room */
+/* A frame starts going out once this much is packed: early enough that the
+ * line works while the CPU packs, late enough for full packets. Plipbox and
+ * serial pay per packet, not per byte. */
+#define SEND_EARLY 8192
 #define CHUNK 32768
 #define PENDING 4  /* connections that have not said yet what they are */
 #define CHANNELS 4  /* command channels next to the screen client */
@@ -1071,7 +1075,8 @@ static LONG tile_bytes(const UBYTE *planes, LONG tx, LONG ty, LONG bw, LONG th, 
 }
 
 /* Pointer's neighbourhood first: that is where the eye is. */
-static LONG order_tiles(LONG tx0, LONG ty0, LONG tx1, LONG ty1, LONG mx, LONG my)
+static LONG order_tiles(const UBYTE *marks, LONG ncols, UWORD *out,
+                        LONG tx0, LONG ty0, LONG tx1, LONG ty1, LONG mx, LONG my)
 {
     LONG pass, tx, ty, n = 0, ptx = mx / TILE, pty = my / TILE;
 
@@ -1079,33 +1084,40 @@ static LONG order_tiles(LONG tx0, LONG ty0, LONG tx1, LONG ty1, LONG mx, LONG my
         for (ty = ty0; ty <= ty1; ty++)
             for (tx = tx0; tx <= tx1; tx++) {
                 BOOL near = tx >= ptx - 1 && tx <= ptx + 1 && ty >= pty - 1 && ty <= pty + 1;
-                if (near == (pass == 0) && (pvalid[ty * pcols + tx] & SEND))
-                    ((UWORD *)porder)[n++] = ty * pcols + tx;
+                if (near == (pass == 0) && (marks[ty * ncols + tx] & SEND))
+                    out[n++] = ty * ncols + tx;
             }
     return n;
 }
 
-/* Each row XORed with the one above, per plane: text and window borders turn
- * into zeros, which PackBits eats for breakfast. */
-static void row_xor(const UBYTE *src, UBYTE *dst, LONG bw, LONG th)
+/* Each row XORed with the one above: text and window borders turn into zeros,
+ * which PackBits eats for breakfast. Rows of rb bytes; longs when they fit. */
+static void xor_rows(const UBYTE *src, UBYTE *dst, LONG rb, LONG rows)
 {
-    LONG p, y, i;
+    const UBYTE *up = src;
+    LONG y, i;
 
-    for (p = 0; p < pdepth; p++) {
-        const UBYTE *up = src;
-
-        memcpy(dst, src, bw);
-        src += bw, dst += bw;
-        for (y = 1; y < th; y++, up += bw, src += bw, dst += bw) {
-            if (bw == 8) {  /* a full tile row: two longs */
-                ((ULONG *)dst)[0] = ((const ULONG *)src)[0] ^ ((const ULONG *)up)[0];
-                ((ULONG *)dst)[1] = ((const ULONG *)src)[1] ^ ((const ULONG *)up)[1];
-            } else {
-                for (i = 0; i < bw; i++)
-                    dst[i] = src[i] ^ up[i];
-            }
+    memcpy(dst, src, rb);
+    src += rb, dst += rb;
+    for (y = 1; y < rows; y++, up += rb, src += rb, dst += rb) {
+        if (!(rb & 3)) {
+            const ULONG *s = (const ULONG *)src, *u = (const ULONG *)up;
+            ULONG *d = (ULONG *)dst;
+            for (i = rb >> 2; i > 0; i--)
+                *d++ = *s++ ^ *u++;
+        } else {
+            for (i = 0; i < rb; i++)
+                dst[i] = src[i] ^ up[i];
         }
     }
+}
+
+static void row_xor(const UBYTE *src, UBYTE *dst, LONG bw, LONG th)
+{
+    LONG p;
+
+    for (p = 0; p < pdepth; p++, src += bw * th, dst += bw * th)
+        xor_rows(src, dst, bw, th);
 }
 
 /* The old picture, dy rows further down, where this tile sits: what a scrolled
@@ -1187,6 +1199,8 @@ static LONG find_dy(LONG n)
     return 0;
 }
 
+static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h);
+
 /* FRAME with arg 2: planar tiles for chipset screens, else the classic ones.
  * See "planar" in docs/PROTOCOL.md. */
 static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
@@ -1201,11 +1215,13 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
     scr = IntuitionBase->FirstScreen;
     if (!planar_ok(scr) || !fit_planar(scr)) {
         UnlockIBase(lock);
-        head[0] = 0;  /* classic tiles follow */
-        if (!put(head, 1))
-            return FALSE;
         ObtainSemaphore(&picture);
-        ok = frame_locked(force, x, y, w, h);
+        if (ext) {  /* format 2: chunky with all the tricks */
+            ok = frame_chunky(force, x, y, w, h);
+        } else {
+            head[0] = 0;  /* classic tiles follow */
+            ok = put(head, 1) && frame_locked(force, x, y, w, h);
+        }
         ReleaseSemaphore(&picture);
         if (wanted)
             Signal(reader, SIGBREAKF_CTRL_F);
@@ -1269,7 +1285,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         if (!put(head, 2) || !put(ppal, 3 * pcolours))
             return FALSE;
     }
-    n = count ? order_tiles(x / TILE, y / TILE, tx1, ty1, mx, my) : 0;
+    n = count ? order_tiles(pvalid, pcols, (UWORD *)porder, x / TILE, y / TILE, tx1, ty1, mx, my) : 0;
     be32(head, n);
     if (!put(head, 4))
         return FALSE;
@@ -1321,7 +1337,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         /* Out the door as soon as there is a packet's worth, and a look for
          * input between tiles: the pointer must not wait for the picture. */
         if (!put(tile_buf, 13) || !put(penc(b), best) ||
-            (out_len >= SEND_STEP && !flush()) ||
+            (out_len >= SEND_EARLY && !flush()) ||
             !sneak_input()) {
             /* Half a frame out: no telling what the client holds. Start over. */
             for (p = 0; p < pcols * prows; p++)
@@ -1344,6 +1360,238 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
     pconn = conn_serial;
     powner = client_id;
     return flush();
+}
+
+/* ---- chunky frames ---------------------------------------------------- */
+
+/* Format 2, for graphics cards and everything else that isn't planar: the
+ * RGB332 picture the classic frame keeps (cur, ref), with the tricks of the
+ * planar tiles, plus a palette per tile. Most of a desktop is a handful of
+ * colours a tile; 1, 2 or 4 bits a pixel say that in a quarter of the bytes. */
+static ULONG cconn;  /* connection whose picture ref is, as pconn for planar */
+
+/* The tile's RGB332 bytes from pic (cur or ref), rows of tw. */
+static LONG chunky_bytes(const UBYTE *pic, LONG px, LONG py, LONG tw, LONG th, UBYTE *dst)
+{
+    const UBYTE *src = pic + py * ref_w + px;
+    LONG y;
+
+    for (y = 0; y < th; y++, src += ref_w, dst += tw)
+        memcpy(dst, src, tw);
+    return tw * th;
+}
+
+/* Up to 16 colours: u8 k, k colours, then rows of indices, 1/2/4 bits, top
+ * bits first, each row on a byte. Returns the index rows' size, 0 if the tile
+ * has too many colours; *head gets 1 + k. */
+static LONG index_tile(const UBYTE *px, LONG tw, LONG th, UBYTE *dst, LONG *head)
+{
+    UBYTE slot[256], *rows;
+    LONG k = 0, i, y, bits, rb;
+
+    memset(slot, 0xFF, sizeof(slot));
+    for (i = 0; i < tw * th; i++)
+        if (slot[px[i]] == 0xFF) {
+            if (k == 16)
+                return 0;
+            slot[px[i]] = k;
+            dst[1 + k++] = px[i];
+        }
+    dst[0] = k;
+    *head = 1 + k;
+    bits = k <= 2 ? 1 : k <= 4 ? 2 : 4;
+    rb = (tw * bits + 7) >> 3;
+    rows = dst + *head;
+    memset(rows, 0, rb * th);
+    for (y = 0; y < th; y++, px += tw, rows += rb) {
+        LONG x, shift = 8 - bits;
+        UBYTE *o = rows;
+        for (x = 0; x < tw; x++) {
+            *o |= slot[px[x]] << shift;
+            if ((shift -= bits) < 0)
+                shift = 8 - bits, o++;
+        }
+    }
+    return rb * th;
+}
+
+/* Did the client have every tile the shifted rows come from? */
+static BOOL chunky_shift_ok(LONG tx, LONG py, LONG th, LONG dy)
+{
+    LONG top = py + dy, bottom = top + th - 1, r;
+
+    if (top < 0) top = 0;
+    if (bottom >= ref_h) bottom = ref_h - 1;
+    for (r = top / TILE; r <= bottom / TILE && top <= bottom; r++)
+        if (!(valid[r * cols + tx] & 1))
+            return FALSE;
+    return TRUE;
+}
+
+/* The scroll, as find_dy, on RGB332 rows; a row of one colour tells nothing. */
+static LONG chunky_find_dy(const UWORD *order, LONG n)
+{
+    LONG i, r, s, k, tries = 0;
+
+    for (i = 0; i < n && tries < 4; i++) {
+        LONG t = order[i], tx = t % cols, py = (t / cols) * TILE;
+        LONG tw = tx * TILE + TILE < ref_w ? TILE : ref_w - tx * TILE;
+        LONG th = py + TILE < ref_h ? TILE : ref_h - py;
+
+        if (!(valid[t] & 1))
+            continue;
+        tries++;
+        for (r = 0; r + SHIFT_ROWS <= th; r++) {
+            const UBYTE *row = cur + (py + r) * ref_w + tx * TILE;
+            for (k = 1; k < tw && row[k] == row[0]; k++)
+                ;
+            if (k == tw || !memcmp(row, ref + (py + r) * ref_w + tx * TILE, tw))
+                continue;
+            for (s = 1; s <= SHIFT_MAX; s++) {
+                LONG d, q;
+                for (d = s; d >= -s; d -= 2 * s) {
+                    for (q = 0; q < SHIFT_ROWS; q++) {
+                        LONG sy = py + r + q + d;
+                        if (sy < 0 || sy >= ref_h ||
+                            memcmp(row + q * ref_w, ref + sy * ref_w + tx * TILE, tw))
+                            break;
+                    }
+                    if (q == SHIFT_ROWS)
+                        return d;
+                }
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
+{
+    struct Screen *scr;
+    ULONG lock;
+    LONG sw, sh, x1, y1, tx, ty, tx1, ty1, n = 0, i, dy, mx, my;
+    UBYTE head[12], *v;
+    UWORD *order = NULL;
+    BOOL known = cconn == conn_serial || (client_id && owner == client_id);
+
+    if (!known)
+        force = TRUE;
+    x1 = w ? x + w : 0x7FFF;
+    y1 = h ? y + h : 0x7FFF;
+    head[0] = 2, head[1] = 8, head[2] = 0, head[3] = 0;
+    if (!grab(force, x, y, x1, y1, &sw, &sh) ||
+        !(order = AllocVec(cols * rows * sizeof(UWORD), MEMF_ANY))) {
+        be16(head + 4, 0), be16(head + 6, 0), be32(head + 8, 0);
+        return put(head, 12) && flush();
+    }
+    if (x1 > sw) x1 = sw;
+    if (y1 > sh) y1 = sh;
+    want_region(x, y, x1, y1);  /* the reader gets them fresh for next time */
+    tx1 = (x1 - 1) / TILE, ty1 = (y1 - 1) / TILE;
+    for (ty = y / TILE; ty <= ty1 && x < x1 && y < y1; ty++)
+        for (tx = x / TILE; tx <= tx1; tx++) {
+            v = valid + ty * cols + tx;
+            if (force || !(*v & 1) || (*v & DIFF))
+                *v |= SEND;
+        }
+    lock = LockIBase(0);
+    scr = IntuitionBase->FirstScreen;
+    mx = scr->MouseX, my = scr->MouseY;
+    UnlockIBase(lock);
+    if (x < x1 && y < y1)
+        n = order_tiles(valid, cols, order, x / TILE, y / TILE, tx1, ty1, mx, my);
+    be16(head + 4, sw), be16(head + 6, sh), be32(head + 8, n);
+    if (!put(head, 12))
+        goto fail;
+    dy = force ? 0 : chunky_find_dy(order, n);
+    for (i = 0; i < n; i++) {
+        LONG t = order[i], ttx = t % cols, px = ttx * TILE, py = (t / cols) * TILE;
+        LONG tw = px + TILE < sw ? TILE : sw - px, th = py + TILE < sh ? TILE : sh - py;
+        LONG raw, best, size, method, k, b = 0, ihead, irows;
+        BOOL had = !force && (valid[t] & 1);
+
+        raw = chunky_bytes(cur, px, py, tw, th, ptile);
+        if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
+            /* A few colours: indices win nine times out of ten, so the full
+             * bytes don't even get a PackBits pass. Saves the slow CPUs half. */
+            UBYTE *o = penc(0);
+            memcpy(o, pold, ihead);
+            best = ihead + packbits(pold + ihead, irows, o + ihead);
+            method = 1 | 16;
+            o = penc(1 - b);
+            memcpy(o, pold, ihead);
+            xor_rows(pold + ihead, pwork, irows / th, th);
+            if ((size = ihead + packbits(pwork, irows, o + ihead)) < best)
+                best = size, method = 1 | 4 | 16, b = 1 - b;
+        } else {
+            best = packbits(ptile, raw, penc(0));
+            method = 1;
+            xor_rows(ptile, pwork, tw, th);
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 1 | 4, b = 1 - b;
+        }
+        if (had) {  /* the client has the old tile */
+            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+            chunky_bytes(ref, px, py, tw, th, pold);
+            for (k = (raw + 3) >> 2; k > 0; k--)
+                *a++ = *c++ ^ *o++;
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 2, b = 1 - b;
+        }
+        if (had && dy && chunky_shift_ok(ttx, py, th, dy)) {  /* scrolled */
+            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile;
+            UBYTE *o = pold;
+            LONG yy;
+            for (yy = 0; yy < th; yy++, o += tw) {
+                LONG sy = py + yy + dy;
+                if (sy < 0 || sy >= sh)
+                    memset(o, 0, tw);
+                else
+                    memcpy(o, ref + sy * ref_w + px, tw);
+            }
+            {
+                ULONG *ol = (ULONG *)pold;
+                for (k = (raw + 3) >> 2; k > 0; k--)
+                    *a++ = *c++ ^ *ol++;
+            }
+            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+                be16(penc(1 - b), (UWORD)dy);
+                best = size, method = 2 | 8, b = 1 - b;
+            }
+        }
+        if (best >= raw) {
+            memcpy(penc(b), ptile, raw);
+            best = raw, method = 0;
+        }
+        be16(tile_buf, px);
+        be16(tile_buf + 2, py);
+        be16(tile_buf + 4, tw);
+        be16(tile_buf + 6, th);
+        tile_buf[8] = method;
+        be32(tile_buf + 9, best);
+        if (!put(tile_buf, 13) || !put(penc(b), best) ||
+            (out_len >= SEND_EARLY && !flush()) || !sneak_input())
+            goto fail;
+    }
+    /* All out: ref becomes the client's picture, now and not earlier, so the
+     * shifted rows came from the old one. */
+    for (i = 0; i < n; i++) {
+        LONG t = order[i], px = (t % cols) * TILE, py = (t / cols) * TILE, at;
+        LONG tw = px + TILE < sw ? TILE : sw - px, th = py + TILE < sh ? TILE : sh - py;
+        for (at = py * ref_w + px; at < (py + th) * ref_w; at += ref_w)
+            memcpy(ref + at, cur + at, tw);
+        valid[t] = (valid[t] & ~(SEND | DIFF)) | 1;
+    }
+    cconn = conn_serial;
+    owner = client_id;
+    FreeVec(order);
+    return flush();
+fail:
+    clear_marks();
+    cconn = owner = 0;  /* half a frame out: start over next time */
+    FreeVec(order);
+    return FALSE;
 }
 
 static BOOL info(void)
