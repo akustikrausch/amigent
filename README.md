@@ -40,10 +40,13 @@ On a plain 68000, take `amigentd.000` instead.
 **3.** Paste this into your AI agent on the PC:
 
     Install Amigent from https://github.com/akustikrausch/amigent for me.
-    Clone it, run pip install -e . in it, then run amigent-setup. It finds my
-    Amiga by itself and remembers it. Register the MCP server "amigent" with
-    the command amigent-server. Then run amigent-viewer --install so the
-    remote desktop shows up as a program. Tell me if you need to be restarted.
+    If git or Python 3.10 or newer is missing on this computer, install it
+    first (Windows: winget, macOS: Homebrew or python.org, Linux: the package
+    manager). Clone the repository, run pip install -e . in it, then run
+    amigent-setup. It finds my Amiga by itself and remembers it. Register the
+    MCP server "amigent" with the command amigent-server. Then run
+    amigent-viewer --install so the remote desktop shows up as a program.
+    Tell me if you need to be restarted.
 
 That's it. The Amiga is set up from the PC and Amigent starts with it from now
 on. You'll find **Amigent** in the Start menu or the Applications folder.
