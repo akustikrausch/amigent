@@ -28,16 +28,11 @@ any moment.
 
 ### On the Amiga
 
-**1.** Copy [`amigentd`](amiga/bin/amigentd) to your Amiga, for example to
-`RAM:`. A browser, USB stick or SD card all work, or the PC offers it on the
-network (see the [FAQ](docs/FAQ.md)). Or take the archive with icons from the
+**1.** Copy [`amigentd`](amiga/bin/amigentd) to the Amiga (`amigentd.000` on a
+68000), or unpack the archive from the
 [releases](https://github.com/akustikrausch/amigent/releases).
 
-**2.** Start it in a Shell, or double-click its icon:
-
-    RAM:amigentd SETUP
-
-On a plain 68000, take `amigentd.000` instead.
+**2.** Start it with `amigentd SETUP` in a Shell, or double-click its icon.
 
 ### On the PC
 
@@ -53,36 +48,20 @@ On a plain 68000, take `amigentd.000` instead.
     --install so the remote desktop shows up as a program. Tell me if you
     need to be restarted.
 
-That's it. The Amiga is set up from the PC, and Amigent starts with it from
-now on. The agent may ask you to confirm a few steps, and you may have to
-restart it once so it sees the new tools.
+The agent sets up the Amiga over the network; from then on amigentd starts
+with it.
 
-#### Windows
+**Windows:** Amigent appears in the Start menu. For an encrypted connection
+`openssl` is needed, which comes with Git for Windows.
 
-- Any AI agent with MCP works, for example the Claude desktop app with Claude
-  Code, or Codex. Amigent runs with Python for Windows or inside WSL.
-- Afterwards **Amigent** is in the Start menu, on the desktop and in
-  *Installed apps*, where it can be uninstalled like any program.
-- The connection is encrypted when `openssl` is available. Git for Windows,
-  which the agent installs anyway, brings it along.
+**macOS:** Amigent appears in `~/Applications`. On its first start, allow it
+access to the local network, or it cannot reach the Amiga. Cmd is the right
+Amiga key.
 
-#### macOS
+**Linux:** there is no program entry; start the remote desktop with
+`amigent-viewer`.
 
-- The agent installs Python through Homebrew or from python.org if needed;
-  git comes with the Xcode command line tools.
-- Afterwards **Amigent** is in `~/Applications`, signed and notarized, so
-  Spotlight and the Launchpad find it.
-- On its first start macOS asks whether Amigent may find devices on your local
-  network. Click *Allow*; without it Amigent cannot reach the Amiga.
-- In the remote desktop the Cmd key is the right Amiga key, and Cmd+V pastes.
-
-#### Linux
-
-Everything works the same, except that there is no program entry: the remote
-desktop opens as a Chrome or Edge window when you run `amigent-viewer`.
-
-No AI agent? The [guide](docs/GUIDE.md#installation-by-hand) has the same steps
-by hand, for each system.
+Without an AI agent: see [installation by hand](docs/GUIDE.md#installation-by-hand).
 
 ## What you need
 
