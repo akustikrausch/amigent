@@ -7,8 +7,9 @@ Everything the [README](../README.md) leaves out. The measurements behind the sp
 
 Amiga: AmigaOS 3.0 or newer, a TCP/IP stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
-`amigentd` comes in two builds, one for the 68020 and up and `amigentd.000` for a
-plain 68000. An RTG graphics card is optional: chipset screens, HAM included, are
+`amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
+plain 68000; `amigent-setup` picks the right one. `amigentd.080` in the archive is
+a build for the Vampire's 68080, which runs the plain `amigentd` as well. An RTG graphics card is optional: chipset screens, HAM included, are
 read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
 about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 
