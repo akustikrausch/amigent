@@ -332,7 +332,9 @@ clients: the client pins the certificate.
 The file is looked at every 10 seconds: when it appears the TLS port opens, when
 it changes it is loaded again (connections already open keep the old one), and
 when it goes the port closes. Without AmiSSL, or with a file that doesn't load,
-there is simply no TLS port. Up to eight TLS connections at once.
+there is simply no TLS port; a file that doesn't load is tried again every 10
+seconds. It may be written during SETUP: the port opens within about 10 seconds.
+Up to eight TLS connections at once.
 
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
 an ordinary connection there. TLS 1.2 and 1.3, as AmiSSL offers them.

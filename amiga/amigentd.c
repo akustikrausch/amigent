@@ -2897,7 +2897,9 @@ static void __saveds tls_main(void)
                     fd_set r;
 
                     tls_stamp(now);
-                    if (memcmp(now, seen, sizeof(now))) {
+                    /* A file that failed to load is tried again: it may have been
+                     * caught half written, with the stamp it ends up with. */
+                    if (memcmp(now, seen, sizeof(now)) || (now[0] && !ctx)) {
                         memcpy(seen, now, sizeof(now));
                         if (ctx)
                             SSL_CTX_free(ctx);  /* pumps hold their own reference */
