@@ -242,17 +242,31 @@
     }
   }
 
+  // One ImageData per tile shape, reused: no garbage per tile, the collector stays in its cave.
+  const scratch = new Map();
+
+  function tileImage(w, h) {
+    const key = w << 16 | h;
+    let entry = scratch.get(key);
+    if (!entry) {
+      const image = ctx.createImageData(w, h);
+      entry = { image, pixels: new Uint32Array(image.data.buffer) };
+      scratch.set(key, entry);
+    }
+    return entry;
+  }
+
   function drawTiles(buffer) {
     const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
     let at = 1;
     while (at < buffer.byteLength) {
       const x = view.getUint16(at), y = view.getUint16(at + 2);
       const w = view.getUint16(at + 4), h = view.getUint16(at + 6);
       const size = view.getUint32(at + 8);
-      const data = new Uint8Array(buffer, at + 12, size);
+      const data = bytes.subarray(at + 12, at + 12 + size);
       at += 12 + size;
-      const image = ctx.createImageData(w, h);
-      const pixels = new Uint32Array(image.data.buffer);
+      const { image, pixels } = tileImage(w, h);
       if (size === w * h && size !== 0) {
         for (let i = 0; i < size; i++) pixels[i] = LUT[data[i]];
       } else {
@@ -538,7 +552,8 @@
       if (event.altKey) q |= Q.lalt;
     }
     q |= amigaKeys(event);
-    send({ t: "char", c: event.key, q });
+    // repeats are marked so a thin wire can drop them instead of queueing a runaway cursor
+    send({ t: "char", c: event.key, q, repeat: event.repeat });
   }
 
   window.addEventListener("keydown", (event) => onKey(event, true));
