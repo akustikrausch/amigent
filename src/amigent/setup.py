@@ -103,6 +103,8 @@ def main() -> int:
     parser.add_argument("--serve", nargs="?", const=8001, type=int, metavar="PORT",
                         help="first step: offer amigentd to the Amiga over the network (port 8001)")
     parser.add_argument("--name", help="what to call this Amiga (default: Amiga, or the name it has)")
+    parser.add_argument("--allow-plain", action="store_true",
+                        help="keep unencrypted connections from other computers even when TLS works")
     args = parser.parse_args()
     if args.serve:
         from .serve import serve
@@ -132,12 +134,14 @@ def main() -> int:
         link.key = key
         with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
         install(link, args.home, key, allow, with_actld)
-        if link.flags & 2:
-            tls.provision(link, host, args.home)
+        encrypted = bool(link.flags & 2) and tls.provision(link, host, args.home)
         if not with_actld:
             channel = AmigaChannel(host, key=key)
             channel.connect()
             channel.sysinfo()
+            if encrypted and not args.allow_plain and tls.lock_plain(channel, args.home):
+                print("From the next start amigentd takes only encrypted connections from other "
+                      "computers (--allow-plain keeps the plain port open).")
             link.end_setup()
             path = save_key(key, host)
             print("Done. amigentd handles screen, commands and files, and starts with the machine.")

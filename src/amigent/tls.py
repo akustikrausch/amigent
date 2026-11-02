@@ -107,13 +107,13 @@ def remember(host: str, certificate: bytes) -> Path:
     return path
 
 
-def provision(link, host: str, home: str) -> None:
+def provision(link, host: str, home: str) -> bool:
     """Hand amigentd (an open setup link) a certificate; keep the pin only if its TLS port
     answers with it within 30 s. No openssl, no crypto: plain it stays, and we say so."""
     made = make_certificate(host)
     if not made:
         print("No openssl on this PC, so the connection stays unencrypted.")
-        return
+        return False
     for_amiga, certificate = made
     link.put("S:amigent-tls.pem", for_amiga)
     link.put(f"{home}/amigent-tls.pem", for_amiga)
@@ -123,8 +123,28 @@ def provision(link, host: str, home: str) -> None:
         try:
             connect(host, link.port, 10).close()
             print("Connections to amigentd are encrypted from now on.")
-            return
+            return True
         except OSError:
             time.sleep(3)
     pin.unlink()
     print("amigentd did not open its TLS port; the connection stays unencrypted.")
+    return False
+
+
+STARTUP = "RUN >NIL: C:amigentd"
+
+
+def lock_plain(channel, home: str) -> bool:
+    """TLS works, so bolt the plain door: amigentd starts with TLSONLY from the next boot.
+
+    Only the bare startup line gets the switch, whatever else lives in
+    S:User-Startup stays byte for byte. A marker in home tells amigent-repair to
+    keep it that way after an OS update."""
+    text = channel.read_file("S:User-Startup").decode("iso-8859-1")
+    lines = text.split("\n")
+    if not any(line.strip() == STARTUP for line in lines):
+        return any(line.strip() == STARTUP + " TLSONLY" for line in lines)
+    fixed = "\n".join(STARTUP + " TLSONLY" if line.strip() == STARTUP else line for line in lines)
+    channel.write_file("S:User-Startup", fixed.encode("iso-8859-1"))
+    channel.write_file(f"{home}/amigent.tlsonly", b"plain is closed, see S:User-Startup\n")
+    return True

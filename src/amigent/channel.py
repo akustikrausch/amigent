@@ -22,6 +22,10 @@ ENCODING = "iso-8859-1"
 CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 CHANNEL_PROTOCOL = 3
+PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost only
+PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
+                     "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
+                     "to this one, or run amigent-setup again.")
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
@@ -160,6 +164,8 @@ class AmigaChannel(VolumeFlush):
             if self.protocol < CHANNEL_PROTOCOL:
                 raise AmigaError(f"amigentd speaks protocol {self.protocol}, commands need "
                                  f"{CHANNEL_PROTOCOL}")
+            if flags & PLAIN_CLOSED and not hasattr(self._sock, "version"):
+                raise AmigaError(PLAIN_CLOSED_TEXT)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
