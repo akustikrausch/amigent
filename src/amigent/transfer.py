@@ -34,6 +34,8 @@ def upload(host: str, local: Path, target: str) -> None:
         try:
             ctl.connect()
             done = remote_size(ctl, target)
+            if done > total:
+                done = 0  # a longer leftover isn't a head start, it's a different file
             started, begin = time.monotonic(), done
             with local.open("rb") as f:
                 f.seek(done)
@@ -46,9 +48,8 @@ def upload(host: str, local: Path, target: str) -> None:
             with local.open("rb") as f:
                 while block := f.read(2**20):
                     crc = zlib.crc32(block, crc)
-            ctl.timeout = 600
-            ctl._sock.settimeout(600)
-            if ctl.checksum(target) != crc:
+            # the CRC takes the Amiga a while; its patience grows with the size, not a magic 600
+            if ctl.checksum(target, total) != crc:
                 raise SystemExit("checksum mismatch, file on the Amiga is damaged")
             print("verified", flush=True)
             return

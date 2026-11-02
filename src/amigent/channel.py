@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import socket
 import struct
+from dataclasses import dataclass, field
+from typing import Callable
 
-from .amigactl import AmigaCtl, AmigaError, ExecResult
+from .amigactl import AmigaCtl, AmigaError, ExecResult, join_path
 from . import tls
 from .secret import load_key
 
@@ -18,6 +20,116 @@ ENCODING = "iso-8859-1"
 CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 CHANNEL_PROTOCOL = 3
+SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
+WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
+CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
+DISK_RATE = 20_000  # bytes/s for the far end to settle a READ/WRITE, pessimistic on purpose
+
+
+def budget(size: int, rate: float, base: float = 30.0) -> float:
+    """Seconds to wait for an answer that costs the Amiga size bytes of work at rate."""
+    return base + size / rate
+
+
+def parse_entry(line: str) -> dict:
+    kind, name, size, protection, stamp = line.split("\t")
+    return {"type": kind, "name": name, "size": int(size), "protection": protection, "date": stamp}
+
+
+def _read_text(ch) -> list[str]:
+    size = struct.unpack(">I", ch._exact(4))[0]
+    return ch._exact(size).decode(ENCODING).splitlines()
+
+
+def _read_blob(ch) -> bytes:
+    return ch._exact(struct.unpack(">I", ch._exact(4))[0])
+
+
+def _read_crc(ch) -> int:
+    return struct.unpack(">I", ch._exact(4))[0]
+
+
+def _nothing(ch) -> None:
+    return None
+
+
+@dataclass
+class Request:
+    """One channel request: header fields, payload, how to read a success, and patience."""
+    cmd: int
+    path: str = ""
+    arg: int = 0
+    y: int = 0
+    w: int = 0
+    h: int = 0
+    payload: bytes = b""
+    read: Callable = field(default=_nothing)
+    wait: float = 0.0  # seconds the Amiga may chew on it before it answers
+
+    @classmethod
+    def write(cls, path: str, data: bytes, append: bool = False) -> "Request":
+        return cls(WRITE, path, int(append), 0, len(data) >> 16, len(data) & 0xFFFF, data,
+                   wait=budget(len(data), DISK_RATE))
+
+    @classmethod
+    def read_file(cls, path: str, size: int = 0) -> "Request":
+        return cls(READ, path, read=_read_blob, wait=budget(size, DISK_RATE))
+
+    @classmethod
+    def checksum(cls, path: str, size: int = 0) -> "Request":
+        return cls(CHECKSUM, path, read=_read_crc, wait=budget(size, CRC_RATE))
+
+    @classmethod
+    def listing(cls, path: str) -> "Request":
+        return cls(DIR, path, read=lambda ch: [parse_entry(x) for x in _read_text(ch)])
+
+    @classmethod
+    def stat(cls, path: str) -> "Request":
+        return cls(STAT, path, read=lambda ch: parse_entry(_read_text(ch)[0]))
+
+    @classmethod
+    def makedir(cls, path: str) -> "Request":
+        return cls(MAKEDIR, path)
+
+    @classmethod
+    def exec(cls, command: str, cd: str | None = None, timeout: float | None = None) -> "Request":
+        where = (cd or "").encode(ENCODING)
+        seconds = min(int(timeout), 0xFFFF) if timeout else 0
+        return cls(EXEC, command, 0, len(where), seconds, 0, where, read=_read_exec,
+                   wait=(timeout + 10) if timeout else 0.0)
+
+
+def _read_exec(ch) -> ExecResult:
+    rc = struct.unpack(">i", ch._exact(4))[0]
+    return ExecResult(rc, _read_blob(ch).decode(ENCODING))
+
+
+def perform(ctl, requests: list[Request]) -> list:
+    """Requests as one pipelined batch where the backend can, one by one where it can't.
+
+    Answers line up with requests: a result or the AmigaError the Amiga gave.
+    amigactld has no pipeline, so it walks through them with the plain methods."""
+    backend = getattr(ctl, "backend", ctl)
+    if isinstance(backend, AmigaChannel):
+        return backend.pipeline(requests)
+    calls = {
+        EXEC: lambda r: ctl.exec(r.path, r.payload.decode(ENCODING) or None, r.w or None),
+        WRITE: lambda r: ctl.write_file(r.path, r.payload, append=bool(r.arg)),
+        READ: lambda r: ctl.read_file(r.path),
+        STAT: lambda r: ctl.stat(r.path),
+        DIR: lambda r: ctl.list_dir(r.path),
+        MAKEDIR: lambda r: ctl.makedir(r.path),
+        CHECKSUM: lambda r: ctl.checksum(r.path),
+    }
+    out = []
+    for r in requests:
+        try:
+            out.append(calls[r.cmd](r))
+        except AmigaError as e:
+            if e.code is None:
+                raise
+            out.append(e)
+    return out
 
 
 class AmigaChannel:
@@ -85,40 +197,108 @@ class AmigaChannel:
         assert self._sock
         self._sock.sendall(struct.pack(">BBHHHH", cmd, arg, x, y, w, h))
 
-    def _request(self, cmd: int, path: str = "", arg: int = 0, y: int = 0, w: int = 0, h: int = 0,
-                 payload: bytes = b"", timeout: float | None = None) -> None:
-        """Send a request; raise AmigaError with code for a refusal."""
-        if not self._sock:
-            self.connect()
-        raw = path.encode(ENCODING)
-        self._sock.settimeout(timeout if timeout is not None else self.timeout)
-        self._header(cmd, arg, len(raw), y, w, h)
-        if raw or payload:
-            self._sock.sendall(raw + payload)
+    def _send(self, data: bytes) -> None:
+        """sendall in slices: its timeout covers the whole call, so 5 MB at 15 KB/s
+        would trip any fixed value. Per slice it means 'the wire stalled', which is
+        the only thing worth timing out on."""
+        assert self._sock
+        view = memoryview(data)
+        for at in range(0, len(view), SLICE):
+            self._sock.sendall(view[at:at + SLICE])
+
+    def _put(self, req: Request) -> None:
+        """Fire one request at the Amiga without waiting for its answer."""
+        raw = req.path.encode(ENCODING)
+        head = struct.pack(">BBHHHH", req.cmd, req.arg, len(raw), req.y, req.w, req.h)
+        self._send(head + raw + req.payload)  # one segment, not three: plip pays per packet
+
+    def _status(self) -> None:
+        """First byte of every answer; a refusal carries its text and nothing else."""
         status = self._exact(1)[0]
         if status:
             size = struct.unpack(">H", self._exact(2))[0]
             raise AmigaError(self._exact(size).decode(ENCODING) or f"error {status}", status)
 
+    def _request(self, cmd: int, path: str = "", arg: int = 0, y: int = 0, w: int = 0, h: int = 0,
+                 payload: bytes = b"", timeout: float | None = None) -> None:
+        """Send a request; raise AmigaError with code for a refusal."""
+        if not self._sock:
+            self.connect()
+        self._sock.settimeout(timeout if timeout is not None else self.timeout)
+        self._put(Request(cmd, path, arg, y, w, h, payload))
+        self._status()
+
     def _text(self, cmd: int, path: str = "") -> list[str]:
         self._request(cmd, path)
-        size = struct.unpack(">I", self._exact(4))[0]
-        return self._exact(size).decode(ENCODING).splitlines()
+        return _read_text(self)
+
+    def pipeline(self, requests: list[Request], window: int = WINDOW) -> list:
+        """Many requests, one wire: keep up to window of them in flight.
+
+        The channel works through requests strictly in order and WRITE swallows
+        its data even when it fails, so the stream never loses sync. Each answer
+        lands in the list at its request's place: the reader's result, or the
+        AmigaError the Amiga sent. Only a broken link raises (and closes).
+        Requests are small and answers to WRITE are one byte, so neither side
+        can wedge the other with a full buffer.
+        """
+        if not self._sock:
+            self.connect()
+        results: list = [None] * len(requests)
+        sent = got = 0
+        try:
+            while got < len(requests):
+                while sent < len(requests) and sent - got < window:
+                    self._sock.settimeout(self.timeout)
+                    self._put(requests[sent])
+                    sent += 1
+                self._sock.settimeout(max(requests[got].wait, self.timeout))
+                try:
+                    self._status()
+                    results[got] = requests[got].read(self)
+                except AmigaError as e:
+                    if e.code is None:
+                        raise
+                    results[got] = e
+                got += 1
+        except (OSError, AmigaError):
+            self.close()  # half-read answers: nothing after this point lines up any more
+            raise
+        return results
 
     # files
 
     def list_dir(self, path: str, recursive: bool = False) -> list[dict]:
-        entries = []
-        for line in self._text(DIR, path):
-            kind, name, size, protection, stamp = line.split("\t")
-            entries.append({"type": kind, "name": name, "size": int(size),
-                            "protection": protection, "date": stamp})
-        if recursive:
-            for entry in [e for e in entries if e["type"] == "DIR"]:
-                folder = path + entry["name"] if path.endswith((":", "/")) else f"{path}/{entry['name']}"
-                for sub in self.list_dir(folder, True):
-                    entries.append({**sub, "name": f"{entry['name']}/{sub['name']}"})
-        return entries
+        if not recursive:
+            return [parse_entry(line) for line in self._text(DIR, path)]
+        return [e for e in self.walk(path) if not isinstance(e, AmigaError)]
+
+    def walk(self, path: str) -> list:
+        """Recursive DIR: one pipelined batch per depth level, not one round trip per folder.
+
+        Names come relative to path ('sub/file'), parents before children. A folder
+        that can't be listed shows up as its AmigaError, with .folder set.
+        """
+        out: list = []
+        level = [""]
+        while level:
+            answers = self.pipeline([Request.listing(join_path(path, rel) if rel else path)
+                                     for rel in level])
+            deeper = []
+            for rel, answer in zip(level, answers):
+                if isinstance(answer, AmigaError):
+                    if not rel:
+                        raise answer  # the top itself: that one is the caller's problem
+                    answer.folder = rel
+                    out.append(answer)
+                    continue
+                for entry in answer:
+                    name = f"{rel}/{entry['name']}" if rel else entry["name"]
+                    out.append({**entry, "name": name})
+                    if entry["type"] == "DIR":
+                        deeper.append(name)
+            level = deeper
+        return out
 
     def stat(self, path: str) -> dict:
         kind, name, size, protection, stamp = self._text(STAT, path)[0].split("\t")
@@ -126,16 +306,28 @@ class AmigaChannel:
                 "datestamp": stamp}
 
     def read_file(self, path: str) -> bytes:
-        self._request(READ, path, timeout=max(self.timeout, 300))
-        return self._exact(struct.unpack(">I", self._exact(4))[0])
+        return self._one(Request.read_file(path))
 
     def write_file(self, path: str, data: bytes, append: bool = False) -> None:
-        self._request(WRITE, path, arg=int(append), w=len(data) >> 16, h=len(data) & 0xFFFF,
-                      payload=data, timeout=max(self.timeout, 300))
+        self._one(Request.write(path, data, append))
 
-    def checksum(self, path: str) -> int:
-        self._request(CHECKSUM, path)
-        return struct.unpack(">I", self._exact(4))[0]
+    def checksum(self, path: str, size: int = 0) -> int:
+        """CRC-32 of the file; its size, if known, buys the Amiga time to read it."""
+        return self._one(Request.checksum(path, size))
+
+    def _one(self, req: Request):
+        """A single request with its own patience. No answer means the link is gone."""
+        if not self._sock:
+            self.connect()
+        try:
+            self._sock.settimeout(self.timeout)
+            self._put(req)
+            self._sock.settimeout(max(req.wait, self.timeout))
+            self._status()
+            return req.read(self)
+        except OSError:
+            self.close()  # a late answer must not be taken for the next request's
+            raise
 
     def delete(self, path: str) -> None:
         self._request(DELETE, path)
@@ -151,13 +343,7 @@ class AmigaChannel:
 
     def exec(self, command: str, cd: str | None = None, timeout: float | None = None) -> ExecResult:
         """Run a command line; other channels and the screen stay usable meanwhile."""
-        where = (cd or "").encode(ENCODING)
-        seconds = int(timeout) if timeout else 0
-        self._request(EXEC, command, y=len(where), w=min(seconds, 0xFFFF), payload=where,
-                      timeout=(timeout + 10) if timeout else None)
-        rc = struct.unpack(">i", self._exact(4))[0]
-        output = self._exact(struct.unpack(">I", self._exact(4))[0])
-        return ExecResult(rc, output.decode(ENCODING))
+        return self._one(Request.exec(command, cd, timeout))
 
     def flush(self, volumes) -> None:
         for volume in volumes:
