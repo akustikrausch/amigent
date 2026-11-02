@@ -32,6 +32,15 @@ What makes the difference:
 - **No tiny packets.** The plipbox pays per packet, so frames are sent in large
   pieces.
 
+End to end with the PC client, on the slowest machine we have: an A500+ with a
+7 MHz 68000, Kickstart 2.04 and 1 MB of chip RAM, 640×256 Workbench:
+
+| step | time |
+|---|---|
+| whole screen, the first time | 0.96 s |
+| unchanged screen | 80–94 ms |
+| mouse move and the area around the pointer | 39–56 ms |
+
 Every screen depth was checked pixel for pixel against the full-colour path:
 16 and 256 colours, HAM6, HAM8 and Extra Halfbrite.
 

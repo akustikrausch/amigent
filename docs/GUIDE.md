@@ -5,7 +5,8 @@ Everything the [README](../README.md) leaves out. The measurements behind the sp
 
 ## Requirements in detail
 
-Amiga: AmigaOS 3.0 or newer, a TCP/IP stack with `bsdsocket.library` such as
+Amiga: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL), a TCP/IP
+stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
 plain 68000; `amigent-setup` picks the right one. `amigentd.080` in the archive is

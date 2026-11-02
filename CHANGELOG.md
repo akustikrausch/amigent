@@ -25,6 +25,9 @@ mouse. The numbers and how they were taken are in
 - **Faster for the AI agent.** Whole folders in one stream, unchanged files
   skipped, folders fetched from the Amiga too, screenshots a tenth of the size,
   and `amiga_wait_change` keeps its time limit on a busy link.
+- **From Kickstart 2.04 on:** amigentd runs on OS 2.04, tested on an A500+
+  with a 7 MHz 68000 and 1 MB of chip RAM: commands, files, ARexx, windows,
+  menus and the remote desktop. Encryption still needs OS 3.0 and AmiSSL.
 - **On the Amiga:** the ARexx port `AMIGENT` (STATUS, CLIENTS, VERSION, HELP,
   QUIT), the window `amigent-status` showing who is connected, a build for the
   68080, and the clock taken from the E clock so time limits survive a clock

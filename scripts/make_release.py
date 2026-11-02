@@ -32,7 +32,8 @@ amigentd is the small service that runs on the Amiga. To install everything:
 3. On the PC, run amigent-setup. It finds the Amiga, copies amigentd to C:,
    adds it to S:User-Startup and gives it a key.
 
-Requirements: AmigaOS 3.0 or newer, any CPU from the 68000 on (amigentd.000
+Requirements: AmigaOS 2.04 or newer (TLS needs OS 3 and AmiSSL), any CPU from
+the 68000 on (amigentd.000
 on a plain 68000; amigentd.080 is a build for the Vampire's 68080, which also
 runs the plain amigentd), a TCP/IP stack with bsdsocket.library.
 

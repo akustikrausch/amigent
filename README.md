@@ -22,7 +22,7 @@ Amigent connects your PC or Mac to your real Amiga over the home network. Then y
   keyboard, file transfer and a shared clipboard.
 - **and both of these quickly, even on a slow machine.** Amigent is tuned for
   slow Amigas and slow networks: a 7 MHz 68000 sends its whole screen in
-  0.6 s, and over a plipbox a click shows its result in a fraction of a second.
+  under a second, and over a plipbox a click shows its result in a fraction of a second.
   [How it stays fast](https://github.com/akustikrausch/amigent#made-for-slow-machines-and-slow-wires).
 
 Both at the same time: you see every click the agent makes and can take over at
@@ -68,7 +68,7 @@ Without an AI agent: see the [manual installation](https://github.com/akustikrau
 
 ## What you need
 
-- An Amiga with AmigaOS 3.x, any CPU from the 68000 on, a network connection
+- An Amiga with AmigaOS 2.04 or newer, any CPU from the 68000 on, a network connection
   (a plipbox on the parallel port is enough) and a TCP/IP stack such as Roadshow.
 - A PC or Mac with Windows, macOS or Linux and Python 3.10 or newer.
 
@@ -99,7 +99,7 @@ Measured with a 640×256 Workbench screen:
 
 | Amiga | whole screen | unchanged screen | CPU while watching |
 |---|---|---|---|
-| 68000, 7 MHz | 0.6 s | 80 ms | under 10 % |
+| 68000, 7 MHz | 0.6–1.0 s | 80–95 ms | under 10 % |
 | A1200, 68020 at 14 MHz | 0.1 s | 15 ms | 2–3 % |
 
 On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s):

@@ -26,6 +26,12 @@ Yes, from the icon in the archive. Its tool types work like the Shell options:
 use the Workbench's command path, so `rx` and the like are found as in a
 Shell.
 
+**Does it run on OS 2.04?**
+Yes, from Kickstart 2.04 on: commands, files, the remote desktop and the ARexx
+port. Encryption needs OS 3.0 with AmiSSL. On a 1 MB machine the chipset screen
+goes out as bitplanes, which needs no extra memory; the full-colour region tool
+may refuse there for lack of memory.
+
 **Does it run on a 68000?**
 Use `amigentd.000`; `amigent-setup` picks it by itself. On a 7 MHz 68000 a whole
 640×256 Workbench screen takes about 0.6 s, an unchanged one 80 ms, and
