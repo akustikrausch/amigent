@@ -101,7 +101,7 @@ own window. Or skip Claude and start **Amigent** from the Start menu.
   ![Sending a file: pick the volume, click into the folder, send](docs/screenshots/send.png)
 
   Every volume of the Amiga is a chip, folders open with a click, and you can
-  also type a path such as `Work:Games/New` straight into the field.
+  also type the path of an existing folder, such as `Work:Games`, into the field.
 - **text.** *Type text* sends a whole block, Ctrl+V sends your clipboard.
 - **the rest.** Fit to window or 1:1, full screen (there the Windows keys become
   the Amiga keys), screenshot to PNG, and a restart button that writes the disks
