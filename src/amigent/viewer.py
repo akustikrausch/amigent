@@ -703,7 +703,7 @@ def main() -> None:
     parser.add_argument("--exit-when-closed", action="store_true",
                         help="stop once the window has been closed")
     parser.add_argument("--install", action="store_true",
-                        help="install Amigent as a Windows program (Start menu, desktop, Installed apps)")
+                        help="install Amigent as a program (Windows: Start menu, desktop, Installed apps; macOS: ~/Applications)")
     parser.add_argument("--uninstall", action="store_true", help="remove those shortcuts again")
     parser.add_argument("--version", action="version", version=f"Amigent {__version__}")
     args = parser.parse_args()

@@ -1,7 +1,8 @@
-"""Install the viewer as a Windows program: Start menu, desktop, Installed apps.
+"""Install the viewer as a program: on Windows in the Start menu, on the
+desktop and in Installed apps; on macOS as an app in ~/Applications.
 
-Works from WSL and from a Windows Python. The shortcut starts the viewer
-without a console window; it ends again when its window is closed.
+Works from WSL, from a Windows Python and on macOS. The program starts the
+viewer without a console window; it ends again when its window is closed.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import getpass
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -83,10 +85,48 @@ def _runner() -> str:
     return str(Path(sys.executable).with_name("pythonw.exe"))
 
 
+MAC_APP = Path.home() / "Applications" / f"{NAME}.app"
+
+
+def _install_mac(host: str) -> list[str]:
+    """~/Applications/Amigent.app: a shell script that starts the viewer."""
+    settings = {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
+    package_root = str(Path(__file__).resolve().parents[1])
+    contents = MAC_APP / "Contents"
+    (contents / "MacOS").mkdir(parents=True, exist_ok=True)
+    (contents / "Resources").mkdir(exist_ok=True)
+    shutil.copyfile(ICON.with_suffix(".icns"), contents / "Resources" / "amigent.icns")
+    exports = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in settings.items())
+    launcher = contents / "MacOS" / NAME
+    launcher.write_text(
+        "#!/bin/sh\n"
+        f"export PYTHONPATH={shlex.quote(package_root)}\n{exports}"
+        f"exec {shlex.quote(sys.executable)} -m amigent.viewer {shlex.quote(host)} --exit-when-closed\n")
+    launcher.chmod(0o755)
+    (contents / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>{NAME}</string>
+  <key>CFBundleDisplayName</key><string>{NAME}</string>
+  <key>CFBundleIdentifier</key><string>de.akustikrausch.amigent</string>
+  <key>CFBundleVersion</key><string>{__version__}</string>
+  <key>CFBundleShortVersionString</key><string>{__version__}</string>
+  <key>CFBundleExecutable</key><string>{NAME}</string>
+  <key>CFBundleIconFile</key><string>amigent</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+""")
+    subprocess.run(["touch", str(MAC_APP)], check=False)  # Finder picks up the icon
+    return [str(MAC_APP)]
+
+
 def install(host: str) -> list[str]:
     """Create launcher, shortcuts and the Installed apps entry; returns what was created."""
+    if sys.platform == "darwin":
+        return _install_mac(host)
     if not (_wsl() or sys.platform == "win32"):
-        raise SystemExit("this is for Windows; elsewhere run amigent-viewer directly")
+        raise SystemExit("this is for Windows and macOS; elsewhere run amigent-viewer directly")
     folder = PureWindowsPath(_powershell("[Environment]::GetFolderPath('LocalApplicationData')")) / "amigent"
     local = _local(str(folder))
     local.mkdir(parents=True, exist_ok=True)
@@ -132,6 +172,11 @@ New-ItemProperty -Path $key -Name EstimatedSize -Value {size_kb} -PropertyType D
 
 def uninstall() -> list[str]:
     """Remove shortcuts, launcher folder and the Installed apps entry; returns what was removed."""
+    if sys.platform == "darwin":
+        if MAC_APP.exists():
+            shutil.rmtree(MAC_APP)
+            return [str(MAC_APP)]
+        return []
     names = ", ".join(f"'{n}.lnk'" for n in (NAME, *OLD_NAMES))
     script = f"""
 foreach ($dir in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop'))) {{

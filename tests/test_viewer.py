@@ -153,3 +153,19 @@ def test_describe_system():
     assert facts == {"os": "AmigaOS 3.2", "kickstart": "47.115", "workbench": "47.5",
                      "cpu": "68040", "fpu": "68882"}
     assert describe_system("", "")["os"] == ""
+
+
+def test_mac_app_bundle(monkeypatch, tmp_path):
+    from amigent import desktop
+
+    monkeypatch.setattr(desktop.sys, "platform", "darwin")
+    monkeypatch.setattr(desktop, "MAC_APP", tmp_path / "Amigent.app")
+    monkeypatch.setenv("AMIGENT_FLUSH_VOLUMES", "Work: SYS:")
+    made = desktop.install("192.168.1.50")
+    app = tmp_path / "Amigent.app" / "Contents"
+    assert made == [str(tmp_path / "Amigent.app")]
+    script = (app / "MacOS" / "Amigent").read_text()
+    assert "amigent.viewer 192.168.1.50 --exit-when-closed" in script
+    assert "export AMIGENT_FLUSH_VOLUMES='Work: SYS:'" in script
+    assert (app / "Resources" / "amigent.icns").exists() and "<string>Amigent</string>" in (app / "Info.plist").read_text()
+    assert desktop.uninstall() == [str(tmp_path / "Amigent.app")]
