@@ -7,16 +7,17 @@ keyboard; up to four more run commands and move files, see
 
 ## starting
 
-    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
+    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
 
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
-included. The service runs at priority 2, waits at boot until
+included. `TLSONLY` closes the plain port to other machines while the TLS port is
+open, see [TLS](#tls). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
 Started from Workbench, the same come from the icon's tool types: `PORT=<n>`,
-`SETUP`, `KEY=<file>`, `QUIET`. Tool types in brackets, like `(SETUP)`, are
+`SETUP`, `KEY=<file>`, `QUIET`, `TLSONLY`. Tool types in brackets, like `(SETUP)`, are
 off. When it can't start (no OS 3.0, port taken, out of memory) it says so in a
 requester, unless `QUIET` is set. A port that is taken is tried for a minute
 first, as at boot.
@@ -57,7 +58,9 @@ with it: the hello waits behind the frame data already queued.
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
 the protocol version, currently `3`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
-certificate is there.
+certificate is there, `4` when the plain port is closed to other machines
+(`TLSONLY`): a plain connection from another machine is closed right after the
+hello, use PORT+1. Over TLS the hello shows `4` as well, and the connection stays.
 
 ## key
 
@@ -344,7 +347,15 @@ seconds. It may be written during SETUP: the port opens within about 10 seconds.
 Up to eight TLS connections at once.
 
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
-an ordinary connection there. TLS 1.2 and 1.3, as AmiSSL offers them.
+an ordinary connection there.
+
+With `TLSONLY`, while the TLS port is open and amigentd is not in SETUP mode, a
+new plain connection from any address but 127.0.0.1 gets the hello with flag `4`
+and is closed at once. Connections already open stay. Without a certificate, or
+without AmiSSL, there is no TLS port and the plain port works as usual, so a lost
+certificate never locks you out. In SETUP mode the plain port stays open, so
+`amigent-setup` can deliver the certificate; after SETUP_END new plain connections
+from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
 
 ## setup
 
