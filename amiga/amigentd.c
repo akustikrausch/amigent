@@ -15,15 +15,20 @@
 #include <intuition/screens.h>
 #include <devices/input.h>
 #include <devices/inputevent.h>
+#include <devices/timer.h>
 #include <graphics/gfx.h>
 #include <graphics/view.h>
+#include <graphics/modeid.h>
 #include <proto/exec.h>
+#include <proto/timer.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/keymap.h>
 #include <proto/bsdsocket.h>
 #include <netinet/tcp.h>
+#include <sys/errno.h>
+#include <sys/ioctl.h>
 #include <string.h>
 
 /* The SDK here has the CGX inline stubs but no clib or cybergraphx headers;
@@ -38,6 +43,8 @@ extern struct Library *CyberGfxBase;
 #define DEFAULT_PORT 6801
 #define TILE 64
 #define IDLE_SECONDS 120
+#define MAX_AGE_MS 500
+#define SETTLE_MS 250
 #define IO_SECONDS 30
 #define OUT_SIZE 16384
 #define CHUNK 32768
@@ -49,23 +56,27 @@ enum {
 
 const char version[] = "$VER: amigentd 1.0.1 (02.11.2026)";
 
+struct Device *TimerBase;
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *KeymapBase;
 struct Library *CyberGfxBase;
 struct Library *SocketBase;
 
-static struct MsgPort *input_port;
+static struct MsgPort *input_port, *timer_port;
 static struct IOStdReq *input_io;
+static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
-static BOOL setup_mode;
+static BOOL setup_mode, quit;
 static UWORD buttons;
 static UBYTE prev_code[2], prev_qual[2];
 
 /* The reference: what the clients were last sent, kept across connections.
- * valid[] holds one byte per tile: bit 0 once ref has it, SEND while it is queued. */
+ * valid[] holds one byte per tile: bit 0 once ref has it, SEND while it is queued,
+ * DIFF while cur (the screen as last read) differs from ref. */
 #define SEND 2
+#define DIFF 4
 static UBYTE *ref, *cur, *valid, *rgb;
 static LONG ref_w, ref_h, cols, rows;
 
@@ -75,14 +86,23 @@ static UBYTE tile_buf[12 + TILE * TILE * 2];
 
 /* ---- network ---------------------------------------------------------- */
 
-static BOOL takeover_waiting(void)
+/* Waits until the client can take data or has some. FALSE when a newcomer wants
+ * to take over, on Ctrl-C, or after IO_SECONDS without progress. */
+static BOOL ready(BOOL writing)
 {
-    fd_set r;
-    struct timeval tv = {0, 0};
+    fd_set r, w;
+    struct timeval tv = {IO_SECONDS, 0};
+    ULONG sigs = SIGBREAKF_CTRL_C;
+    LONG n;
 
     FD_ZERO(&r);
+    FD_ZERO(&w);
     FD_SET(listener, &r);
-    return WaitSelect(listener + 1, &r, NULL, NULL, &tv, NULL) > 0;
+    FD_SET(client, writing ? &w : &r);
+    n = WaitSelect((client > listener ? client : listener) + 1, &r, &w, NULL, &tv, &sigs);
+    if (sigs & SIGBREAKF_CTRL_C)
+        quit = TRUE;
+    return n > 0 && !quit && !FD_ISSET(listener, &r);
 }
 
 static BOOL flush(void)
@@ -90,14 +110,17 @@ static BOOL flush(void)
     LONG done = 0, n;
 
     while (done < out_len) {
+        if (!ready(TRUE))
+            return FALSE;
         n = send(client, out + done, out_len - done, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
         if (n <= 0)
             return FALSE;
         done += n;
     }
     out_len = 0;
-    /* A long frame gives way to a client that wants to take over. */
-    return !takeover_waiting();
+    return TRUE;
 }
 
 static BOOL put(const void *data, LONG len)
@@ -130,7 +153,11 @@ static BOOL receive(void *data, LONG len)
     LONG n;
 
     while (len > 0) {
+        if (!ready(FALSE))
+            return FALSE;
         n = recv(client, p, len, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
         if (n <= 0)
             return FALSE;
         p += n;
@@ -168,11 +195,7 @@ static void be32(UBYTE *p, ULONG v)
 
 static void write_event(struct InputEvent *ev)
 {
-    ULONG secs, micros;
-
-    CurrentTime(&secs, &micros);
-    ev->ie_TimeStamp.tv_secs = secs;
-    ev->ie_TimeStamp.tv_micro = micros;
+    GetSysTime(&ev->ie_TimeStamp);
     input_io->io_Command = IND_WRITEEVENT;
     input_io->io_Data = ev;
     input_io->io_Length = sizeof(*ev);
@@ -269,14 +292,41 @@ static BOOL type_char(UWORD ch, UWORD extra)
 
 /* ---- screen ----------------------------------------------------------- */
 
+/* cur is kept fresh between commands: after each frame a reader process reads its tiles
+ * again, so the next look only checks flags. stamp[] says when a tile was last read.
+ * The semaphore guards everything about the picture; both processes hold it only
+ * while at priority 2, so neither waits on the other behind a busy program. */
+static struct SignalSemaphore picture;
+static struct Task *server, *reader;
+static BYTE reader_gone = -1;
+static volatile BOOL reader_quit;
+static ULONG *stamp;
+static UBYTE *want;
+static LONG wanted;
+static struct Screen *seen;
+static ULONG input_ms;
+
+static ULONG now_ms(void)
+{
+    struct timeval tv;
+    ULONG ms;
+
+    GetSysTime(&tv);
+    ms = tv.tv_secs * 1000 + tv.tv_micro / 1000;
+    return ms ? ms : 1;  /* 0 means never read */
+}
+
 static void free_frame(void)
 {
     FreeVec(ref);
     FreeVec(cur);
     FreeVec(valid);
     FreeVec(rgb);
-    ref = cur = valid = rgb = NULL;
-    ref_w = ref_h = 0;
+    FreeVec(stamp);
+    FreeVec(want);
+    ref = cur = valid = rgb = want = NULL;
+    stamp = NULL;
+    ref_w = ref_h = wanted = 0;
 }
 
 /* A new screen size starts a fresh reference: every tile counts as changed. */
@@ -290,8 +340,10 @@ static BOOL fit_frame(LONG w, LONG h)
     ref = AllocVec(w * h, MEMF_ANY);
     cur = AllocVec(w * h, MEMF_ANY);
     valid = AllocVec(cols * rows, MEMF_ANY | MEMF_CLEAR);
+    want = AllocVec(cols * rows, MEMF_ANY | MEMF_CLEAR);
+    stamp = AllocVec(cols * rows * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
     rgb = AllocVec(w * TILE * 3, MEMF_ANY);
-    if (!ref || !cur || !valid || !rgb) {
+    if (!ref || !cur || !valid || !want || !stamp || !rgb) {
         free_frame();
         return FALSE;
     }
@@ -300,17 +352,36 @@ static BOOL fit_frame(LONG w, LONG h)
     return TRUE;
 }
 
+/* Locks Intuition and fits the buffers to the front screen; NULL without memory. */
+static struct Screen *front(ULONG *lock)
+{
+    struct Screen *scr;
+
+    *lock = LockIBase(0);
+    scr = IntuitionBase->FirstScreen;
+    if (!fit_frame(scr->Width, scr->Height)) {
+        UnlockIBase(*lock);
+        return NULL;
+    }
+    if (scr != seen) {  /* same size, other screen: nothing read so far counts */
+        memset(stamp, 0, cols * rows * sizeof(ULONG));
+        seen = scr;
+    }
+    return scr;
+}
+
 #define rgb332(r, g, b) ((UBYTE)(((r) >> 5) | ((g) >> 5 << 3) | ((b) & 0xC0)))
 
-/* Chipset screens: pens through the palette. HAM is not decoded. */
-static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1, LONG w)
+/* Chipset screens: pens through the palette, HAM6 and HAM8 decoded along each row. */
+static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
 {
     struct BitMap *bm = scr->RastPort.BitMap, *line;
     struct RastPort tmp;
     ULONG depth = GetBitMapAttr(bm, BMA_DEPTH), colours, i;
     ULONG *table;
-    UBYTE map[256];
-    LONG y;
+    UBYTE pal[3 * 256];
+    BOOL ham = (GetVPModeID(&scr->ViewPort) & HAM_KEY) && (depth == 6 || depth == 8);
+    LONG y, from = ham ? 0 : x0, width = x0 + cw - from;
 
     if (depth > 8)
         return FALSE;
@@ -318,65 +389,194 @@ static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1, 
     if (colours > (ULONG)scr->ViewPort.ColorMap->Count)
         colours = scr->ViewPort.ColorMap->Count;
     table = AllocVec(colours * 3 * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
-    line = AllocBitMap((cw + 15) & ~15, 1, depth, 0, NULL);
+    line = AllocBitMap((width + 15) & ~15, 1, depth, 0, NULL);
     if (!table || !line) {
         FreeVec(table);
         FreeBitMap(line);
         return FALSE;
     }
     GetRGB32(scr->ViewPort.ColorMap, 0, colours, table);
-    memset(map, 0, sizeof(map));
-    for (i = 0; i < colours; i++)
-        map[i] = rgb332(table[3 * i] >> 24, table[3 * i + 1] >> 24, table[3 * i + 2] >> 24);
+    memset(pal, 0, sizeof(pal));
+    for (i = 0; i < 3 * colours; i++)
+        pal[i] = table[i] >> 24;
     tmp = scr->RastPort;
     tmp.Layer = NULL;
     tmp.BitMap = line;
     for (y = y0; y < y1; y++) {
-        UBYTE *dst = cur + y * w + x0;
-        ReadPixelLine8(&scr->RastPort, x0, y, cw, rgb, &tmp);
-        for (i = 0; i < (ULONG)cw; i++)
-            dst[i] = map[rgb[i]];
+        UBYTE *dst = cur + y * ref_w + x0;
+        ReadPixelLine8(&scr->RastPort, from, y, width, rgb, &tmp);
+        if (!ham) {
+            for (i = 0; i < (ULONG)cw; i++) {
+                const UBYTE *c = pal + 3 * rgb[i];
+                dst[i] = rgb332(c[0], c[1], c[2]);
+            }
+        } else {
+            /* Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits
+             * become the top bits of that component, which is all RGB332 keeps. */
+            UBYTE c[3], shift = depth - 2, mask = (1 << shift) - 1, up = 8 - shift;
+            c[0] = pal[0], c[1] = pal[1], c[2] = pal[2];
+            for (i = 0; i < (ULONG)width; i++) {
+                UBYTE p = rgb[i], data = p & mask;
+                switch (p >> shift) {
+                case 0: c[0] = pal[3 * data]; c[1] = pal[3 * data + 1]; c[2] = pal[3 * data + 2]; break;
+                case 1: c[2] = data << up; break;
+                case 2: c[0] = data << up; break;
+                case 3: c[1] = data << up; break;
+                }
+                if ((LONG)i >= x0 - from)
+                    dst[i - (x0 - from)] = rgb332(c[0], c[1], c[2]);
+            }
+        }
     }
     FreeBitMap(line);
     FreeVec(table);
     return TRUE;
 }
 
-/* Copy the tile-aligned box around a region from the screen into cur, as RGB332. */
-static BOOL grab(LONG x0, LONG y0, LONG x1, LONG y1, LONG *w, LONG *h)
+/* Does the tile at x, y differ between cur and ref? Long words where they line up. */
+static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
 {
-    struct Screen *scr;
-    ULONG lock;
-    LONG y, n, i, cw;
+    LONG at = y * ref_w + x, n, i;
 
-    lock = LockIBase(0);
-    scr = IntuitionBase->FirstScreen;
-    *w = scr->Width;
-    *h = scr->Height;
-    if (!fit_frame(*w, *h)) {
-        UnlockIBase(lock);
-        return FALSE;
+    for (n = 0; n < th; n++, at += ref_w) {
+        if (!(ref_w & 3) && !(tw & 3)) {
+            const ULONG *a = (const ULONG *)(ref + at), *b = (const ULONG *)(cur + at);
+            for (i = 0; i < tw / 4; i++)
+                if (a[i] != b[i])
+                    return TRUE;
+        } else {
+            for (i = 0; i < tw; i++)
+                if (ref[at + i] != cur[at + i])
+                    return TRUE;
+        }
     }
-    if (x1 > *w) x1 = *w;
-    if (y1 > *h) y1 = *h;
-    x0 = x0 / TILE * TILE;
-    y0 = y0 / TILE * TILE;
-    cw = x1 - x0;
-    if (cw > 0 && !GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX) &&
-        grab_planar(scr, x0, y0, cw, y1, *w))
-        cw = 0;
-    for (y = y0; y < y1 && cw > 0; y += TILE) {
-        UBYTE *src = rgb, *dst;
-        LONG rows_here = y1 - y < TILE ? y1 - y : TILE;
-        ReadPixelArray(rgb, 0, 0, cw * 3, &scr->RastPort, x0, y, cw, rows_here, RECTFMT_RGB);
-        for (n = 0; n < rows_here; n++) {
-            dst = cur + (y + n) * *w + x0;
+    return FALSE;
+}
+
+/* Reads tiles tx0..tx1 of tile row ty from the screen into cur, as RGB332. */
+static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
+{
+    LONG x0 = tx0 * TILE, y0 = ty * TILE, x, n, i;
+    LONG cw = ((tx1 + 1) * TILE < ref_w ? (tx1 + 1) * TILE : ref_w) - x0;
+    LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
+    ULONG ms = now_ms();
+
+    if (GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX) ||
+        !grab_planar(scr, x0, y0, cw, y0 + th)) {
+        UBYTE *src = rgb;
+        ReadPixelArray(rgb, 0, 0, cw * 3, &scr->RastPort, x0, y0, cw, th, RECTFMT_RGB);
+        for (n = 0; n < th; n++) {
+            UBYTE *dst = cur + (y0 + n) * ref_w + x0;
             for (i = 0; i < cw; i++, src += 3)
                 dst[i] = rgb332(src[0], src[1], src[2]);
         }
     }
+    for (x = tx0; x <= tx1; x++) {
+        UBYTE *v = valid + ty * cols + x;
+        if (differs(x * TILE, y0, (x + 1) * TILE < ref_w ? TILE : ref_w - x * TILE, th))
+            *v |= DIFF;
+        else
+            *v &= ~DIFF;
+        stamp[ty * cols + x] = ms;
+        if (want[ty * cols + x]) {
+            want[ty * cols + x] = 0;
+            wanted--;
+        }
+    }
+}
+
+/* Too old to answer from: never read, read before the last input had time to
+ * show, or long ago. */
+static BOOL stale(LONG t, ULONG ms)
+{
+    return !stamp[t] || (input_ms && (LONG)(stamp[t] - input_ms) < SETTLE_MS) ||
+           ms - stamp[t] > MAX_AGE_MS;
+}
+
+/* Brings the tiles of a region up to date; FALSE without memory. */
+static BOOL grab(BOOL force, LONG x0, LONG y0, LONG x1, LONG y1, LONG *w, LONG *h)
+{
+    struct Screen *scr;
+    ULONG lock, ms = now_ms();
+    LONG tx, ty, run;
+
+    if (!(scr = front(&lock)))
+        return FALSE;
+    *w = ref_w;
+    *h = ref_h;
+    if (x1 > ref_w) x1 = ref_w;
+    if (y1 > ref_h) y1 = ref_h;
+    for (ty = y0 / TILE; ty * TILE < y1; ty++) {
+        run = -1;
+        for (tx = x0 / TILE; tx * TILE < x1; tx++) {
+            BOOL old = force || stale(ty * cols + tx, ms);
+            if (old && run < 0)
+                run = tx;
+            if (!old && run >= 0) {
+                read_tiles(scr, ty, run, tx - 1);
+                run = -1;
+            }
+        }
+        if (run >= 0)
+            read_tiles(scr, ty, run, tx - 1);
+    }
     UnlockIBase(lock);
     return TRUE;
+}
+
+/* One step of background reading: up to eight wanted tiles of one tile row. */
+static void refresh(void)
+{
+    struct Screen *scr;
+    ULONG lock;
+    LONG t, tx0, tx1;
+
+    if (!wanted || !(scr = front(&lock)))
+        return;
+    for (t = 0; t < cols * rows && !want[t]; t++)
+        ;
+    if (t < cols * rows) {
+        tx0 = t % cols;
+        for (tx1 = cols - 1; !want[t - tx0 + tx1]; tx1--)
+            ;
+        if (tx1 > tx0 + 7)  /* small steps keep everyone else waiting only briefly */
+            tx1 = tx0 + 7;
+        read_tiles(scr, t / cols, tx0, tx1);
+    }
+    UnlockIBase(lock);
+}
+
+/* Reads ahead at priority -1, a few tiles at a time, whenever a frame asks for it. */
+static void __saveds reader_main(void)
+{
+    struct Task *me = FindTask(NULL);
+    BOOL more;
+
+    while (!reader_quit) {
+        Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F);
+        do {
+            SetTaskPri(me, 2);
+            ObtainSemaphore(&picture);
+            refresh();
+            more = wanted > 0;
+            ReleaseSemaphore(&picture);
+            SetTaskPri(me, -1);  /* lets the stack and every program go first */
+        } while (more && !reader_quit);
+    }
+    Forbid();
+    Signal(server, 1UL << reader_gone);
+}
+
+static void want_region(LONG x0, LONG y0, LONG x1, LONG y1)
+{
+    LONG tx, ty;
+
+    for (ty = y0 / TILE; ty * TILE < y1; ty++)
+        for (tx = x0 / TILE; tx * TILE < x1; tx++)
+            if (!want[ty * cols + tx]) {
+                want[ty * cols + tx] = 1;
+                wanted++;
+            }
 }
 
 static void clear_marks(void)
@@ -385,16 +585,6 @@ static void clear_marks(void)
 
     for (i = 0; i < cols * rows; i++)
         valid[i] &= ~SEND;
-}
-
-static BOOL tile_changed(LONG tx, LONG ty, LONG tw, LONG th)
-{
-    LONG y, at = ty * ref_w + tx;
-
-    for (y = 0; y < th; y++, at += ref_w)
-        if (memcmp(ref + at, cur + at, tw))
-            return TRUE;
-    return FALSE;
 }
 
 /* Runs of (length-1, colour) across the whole tile; raw if that is not smaller. */
@@ -426,25 +616,38 @@ static LONG pack(LONG tx, LONG ty, LONG tw, LONG th, UBYTE *dst)
     return size;
 }
 
+static BOOL frame_locked(BOOL force, LONG x, LONG y, LONG w, LONG h);
+
 static BOOL frame(BOOL force, LONG x, LONG y, LONG w, LONG h)
+{
+    BOOL ok;
+
+    ObtainSemaphore(&picture);
+    ok = frame_locked(force, x, y, w, h);
+    ReleaseSemaphore(&picture);
+    if (wanted)
+        Signal(reader, SIGBREAKF_CTRL_F);
+    return ok;
+}
+
+static BOOL frame_locked(BOOL force, LONG x, LONG y, LONG w, LONG h)
 {
     LONG sw, sh, x1, y1, tx, ty, count = 0;
     UBYTE head[4];
 
     x1 = w ? x + w : 0x7FFF;
     y1 = h ? y + h : 0x7FFF;
-    if (!grab(x, y, x1, y1, &sw, &sh)) {
+    if (!grab(force, x, y, x1, y1, &sw, &sh)) {
         be32(head, 0);
         return put(head, 4) && flush();
     }
     if (x1 > sw) x1 = sw;
     if (y1 > sh) y1 = sh;
+    want_region(x, y, x1, y1);  /* read again after the reply, for the next look */
     for (ty = y / TILE; ty * TILE < y1; ty++) {
         for (tx = x / TILE; tx * TILE < x1; tx++) {
-            LONG px = tx * TILE, py = ty * TILE;
             UBYTE *v = valid + ty * cols + tx;
-            if (force || !*v || tile_changed(px, py, sw - px < TILE ? sw - px : TILE,
-                                             sh - py < TILE ? sh - py : TILE)) {
+            if (force || !(*v & 1) || (*v & DIFF)) {
                 *v |= SEND;
                 count++;
             }
@@ -464,7 +667,7 @@ static BOOL frame(BOOL force, LONG x, LONG y, LONG w, LONG h)
             if (!(*v & SEND))
                 continue;
             /* Counted as sent before it is, so an aborted frame leaves no marks. */
-            *v = 1;
+            *v = 1;  /* ref is about to equal cur */
             count--;
             size = pack(px, py, tw, th, tile_buf + 12);
             be16(tile_buf, px);
@@ -576,13 +779,17 @@ static void drop_client(void)
     }
     out_len = 0;
     set_buttons(0);
+    ObtainSemaphore(&picture);
+    if (want)
+        memset(want, 0, cols * rows);
+    wanted = 0;
+    ReleaseSemaphore(&picture);
 }
 
 static void take_client(void)
 {
     struct sockaddr_in addr;
     LONG len = sizeof(addr), fd, one = 1;
-    struct timeval tv = {IO_SECONDS, 0};
     static const UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
 
     fd = accept(listener, (struct sockaddr *)&addr, &len);
@@ -591,8 +798,7 @@ static void take_client(void)
     drop_client();  /* the newcomer wins */
     client = fd;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through ready() */
     if (!put(hello, 8) || !flush())
         drop_client();
 }
@@ -608,17 +814,21 @@ static BOOL command(const UBYTE *c)
     case CMD_FRAME:
         return frame(c[1] & 1, x, y, w, h);
     case CMD_MOVE:
+        input_ms = now_ms();
         move_to(x, y);
         return reply(0);
     case CMD_BUTTON:
+        input_ms = now_ms();
         set_buttons(c[1] & 7);
         return reply(0);
     case CMD_RAWKEY:
+        input_ms = now_ms();
         key(x & 0x7F, c[1] & 1, y);
         return reply(0);
     case CMD_PING:
         return reply(0);
     case CMD_CHAR:
+        input_ms = now_ms();
         return reply(type_char(x, y) ? 0 : 1);
     case CMD_PUT:
         return put_file(x, (ULONG)w << 16 | h);
@@ -635,12 +845,13 @@ static void serve(void)
 {
     UBYTE cmd[10];
     LONG have = 0, n;
+    ULONG heard = 0;
 
-    for (;;) {
+    while (!quit) {
         fd_set r;
-        struct timeval tv = {IDLE_SECONDS, 0};
+        struct timeval tv = {0, 0};
         ULONG sigs = SIGBREAKF_CTRL_C;
-        LONG top = listener;
+        LONG top = listener, left;
 
         FD_ZERO(&r);
         FD_SET(listener, &r);
@@ -648,30 +859,37 @@ static void serve(void)
             FD_SET(client, &r);
             if (client > top)
                 top = client;
+            left = IDLE_SECONDS * 1000 - (LONG)(now_ms() - heard);
+            if (left <= 0) {
+                drop_client();  /* idle */
+                have = 0;
+                continue;
+            }
+            tv.tv_sec = left / 1000;
+            tv.tv_usec = left % 1000 * 1000;
         }
         n = WaitSelect(top + 1, &r, NULL, NULL, client >= 0 ? &tv : NULL, &sigs);
         if (sigs & SIGBREAKF_CTRL_C)
             return;
-        if (n == 0 && client >= 0) {
-            drop_client();  /* idle */
-            have = 0;
-            continue;
-        }
-        if (n < 0)
+        if (n <= 0)
             continue;
         if (FD_ISSET(listener, &r)) {
             take_client();
+            heard = now_ms();
             have = 0;
             continue;
         }
         if (client < 0 || !FD_ISSET(client, &r))
             continue;
         n = recv(client, cmd + have, sizeof(cmd) - have, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
         if (n <= 0) {
             drop_client();
             have = 0;
             continue;
         }
+        heard = now_ms();
         have += n;
         if (have == sizeof(cmd)) {
             have = 0;
@@ -743,7 +961,9 @@ int main(void)
     setup_mode = args[1] != 0;
     FreeArgs(rda);
 
-    SetTaskPri(FindTask(NULL), 2);
+    server = FindTask(NULL);
+    SetTaskPri(server, 2);
+    InitSemaphore(&picture);
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
     KeymapBase = OpenLibrary("keymap.library", 37);
@@ -753,6 +973,15 @@ int main(void)
         goto out;
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;
+    timer_port = CreateMsgPort();
+    timer_io = (struct timerequest *)CreateIORequest(timer_port, sizeof(*timer_io));
+    if (!timer_io || OpenDevice("timer.device", UNIT_MICROHZ, (struct IORequest *)timer_io, 0)) {
+        if (timer_io)
+            DeleteIORequest((struct IORequest *)timer_io);
+        timer_io = NULL;
+        goto out;
+    }
+    TimerBase = timer_io->tr_node.io_Device;
     input_port = CreateMsgPort();
     if (!input_port)
         goto out;
@@ -763,6 +992,13 @@ int main(void)
         input_io = NULL;
         goto out;
     }
+    if ((reader_gone = AllocSignal(-1)) < 0)
+        goto out;
+    reader = (struct Task *)CreateNewProcTags(NP_Entry, (ULONG)reader_main,
+                                              NP_Name, (ULONG)"amigentd reader",
+                                              NP_Priority, -1, NP_StackSize, 16384, TAG_END);
+    if (!reader)
+        goto out;
     if (!listen_on(port)) {
         PutStr("amigentd: cannot listen on that port\n");
         goto out;
@@ -777,6 +1013,13 @@ out:
         drop_client();
     if (listener >= 0)
         CloseSocket(listener);
+    if (reader) {
+        reader_quit = TRUE;
+        Signal(reader, SIGBREAKF_CTRL_C);
+        Wait(1UL << reader_gone);
+    }
+    if (reader_gone >= 0)
+        FreeSignal(reader_gone);
     free_frame();
     if (input_io) {
         CloseDevice((struct IORequest *)input_io);
@@ -784,6 +1027,12 @@ out:
     }
     if (input_port)
         DeleteMsgPort(input_port);
+    if (timer_io) {
+        CloseDevice((struct IORequest *)timer_io);
+        DeleteIORequest((struct IORequest *)timer_io);
+    }
+    if (timer_port)
+        DeleteMsgPort(timer_port);
     if (SocketBase) CloseLibrary(SocketBase);
     if (CyberGfxBase) CloseLibrary(CyberGfxBase);
     if (KeymapBase) CloseLibrary(KeymapBase);
