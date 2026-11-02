@@ -7,12 +7,19 @@ keyboard; up to four more run commands and move files, see
 
 ## starting
 
-    amigentd [PORT <n>] [SETUP] [KEY <file>]
+    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
 
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
-`S:amigent.key`, see [key](#key). The service runs at priority 2, waits at boot
-until `bsdsocket.library` is there, and quits on Ctrl-C.
+`S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
+included. The service runs at priority 2, waits at boot until
+`bsdsocket.library` is there, and quits on Ctrl-C.
+
+Started from Workbench, the same come from the icon's tool types: `PORT=<n>`,
+`SETUP`, `KEY=<file>`, `QUIET`. Tool types in brackets, like `(SETUP)`, are
+off. When it can't start (no OS 3.0, port taken, out of memory) it says so in a
+requester, unless `QUIET` is set. A port that is taken is tried for a minute
+first, as at boot.
 
 What it needs: a 68020 or better (the code also builds for a 68000 with
 `build-amigentd CPU 68000`), OS 3.0 or newer, and a TCP stack with
@@ -153,6 +160,8 @@ long as that screen stays open.
 
 SCREEN_FRONT brings the screen with that handle to the front, after checking that
 it is still open. `1` if it isn't. The next FRAME then reads everything fresh.
+The answer comes at once; while a menu is open, Intuition only switches screens
+once it closes.
 
 ## rgb
 
@@ -277,8 +286,11 @@ separated by tabs.
 
 - EXEC runs the line like a Shell would, through `SystemTags` in a process of
   its own, with input from `NIL:` and output and errors collected in a file in
-  `T:`, which goes away afterwards. The directory is the current directory for
-  the command; without one it is the one amigentd was started in. The output
+  `T:`, which goes away afterwards. The command finds programs along the
+  command path of the Shell that started amigentd (`Path`), so `rx` and the
+  like work; started from Workbench it only has `C:`. The directory is the
+  current directory for the command; without one it is the one amigentd was
+  started in. The output
   comes after the command has finished, all at once. Return code `-1` with a
   failure status: the line could not run at all. When the timeout runs out the
   command gets Ctrl-C and the reply is status `2`, text `timeout`; the command

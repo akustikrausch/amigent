@@ -3,9 +3,10 @@
  * channels for command lines and files, over TCP.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
- *   amigentd [PORT <n>] [SETUP] [KEY <file>]
+ *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
+ * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET.
  */
 
 #include <exec/types.h>
@@ -26,12 +27,15 @@
 #include <graphics/modeid.h>
 #include <graphics/clip.h>
 #include <graphics/layers.h>
+#include <workbench/startup.h>
+#include <workbench/workbench.h>
 #include <proto/exec.h>
 #include <proto/timer.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/keymap.h>
+#include <proto/icon.h>
 #include <proto/bsdsocket.h>
 #include <netinet/tcp.h>
 #include <sys/errno.h>
@@ -88,13 +92,14 @@ struct GfxBase *GfxBase;
 struct Library *KeymapBase;
 struct Library *CyberGfxBase;
 struct Library *SocketBase;
+struct Library *IconBase;
 
 static struct MsgPort *input_port, *timer_port;
 static struct IOStdReq *input_io;
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
-static BOOL setup_mode, quit, authed;
+static BOOL setup_mode, quit, authed, from_wb, quiet;
 static ULONG client_id, owner;  /* CLIENT ids: this connection's, and whose picture ref is */
 
 /* With a key file, every connection has to send the key first. */
@@ -947,8 +952,7 @@ static BOOL screens(void)
     return ok;
 }
 
-/* Only a screen that is still in the list gets brought to the front. */
-static BOOL screen_front(ULONG handle)
+static struct Screen *open_screen(ULONG handle)
 {
     struct Screen *s;
     ULONG lock;
@@ -957,9 +961,43 @@ static BOOL screen_front(ULONG handle)
     for (s = IntuitionBase->FirstScreen; s && (ULONG)s != handle; s = s->NextScreen)
         ;
     UnlockIBase(lock);
-    if (!s)
+    return s;
+}
+
+/* ScreenToFront waits for Intuition, which holds it back while a menu is open,
+ * for as long as that may be. So a helper process waits instead of us. */
+static void __saveds front_main(void)
+{
+    struct Screen *s;
+
+    Wait(SIGBREAKF_CTRL_F);
+    if ((s = open_screen((ULONG)FindTask(NULL)->tc_UserData)))
+        ScreenToFront(s);
+    Forbid();
+    children--;
+    Signal(server, 1UL << chan_gone);
+}
+
+/* Only a screen that is still in the list gets brought to the front. */
+static BOOL screen_front(ULONG handle)
+{
+    struct Process *proc;
+
+    if (!open_screen(handle))
         return reply(1);
-    ScreenToFront(s);
+    Forbid();
+    children++;
+    Permit();
+    proc = CreateNewProcTags(NP_Entry, (ULONG)front_main, NP_Name, (ULONG)"amigentd front",
+                             NP_Priority, 0, NP_StackSize, 4096, TAG_END);
+    if (!proc) {
+        Forbid();
+        children--;
+        Permit();
+        return reply(1);
+    }
+    proc->pr_Task.tc_UserData = (APTR)handle;
+    Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
     input_ms = now_ms();  /* what was read before shows another screen */
     return reply(0);
 }
@@ -2096,6 +2134,26 @@ struct run {
     char name[32], out[48];
 };
 
+/* A copy of the command path of the Shell that started us, for the command's
+ * Shell, which frees it. Without it the command would only find C: programs.
+ * Nodes are a BPTR to the next one and a lock. */
+static BPTR copy_path(void)
+{
+    struct CommandLineInterface *cli = BADDR(((struct Process *)server)->pr_CLI);
+    BPTR first = 0, *link = &first, *from, *node;
+
+    if (!cli)
+        return 0;  /* started from Workbench */
+    for (from = BADDR(cli->cli_CommandDir); from; from = BADDR(from[0])) {
+        if (!(node = AllocVec(2 * sizeof(BPTR), MEMF_PUBLIC | MEMF_CLEAR)))
+            break;
+        node[1] = DupLock(from[1]);
+        *link = MKBADDR(node);
+        link = &node[0];
+    }
+    return first;
+}
+
 static void __saveds runner_main(void)
 {
     struct run *r;
@@ -2112,6 +2170,7 @@ static void __saveds runner_main(void)
     if (in && out) {
         r->rc = SystemTags(r->line, SYS_Input, in, SYS_Output, out,
                            NP_Error, out, NP_CloseError, FALSE, NP_Name, (ULONG)r->name,
+                           NP_Path, copy_path(),
                            NP_StackSize, 65536, NP_Priority, 0, TAG_END);
         if (r->rc == -1)
             r->err = IoErr();
@@ -2561,27 +2620,94 @@ static BOOL listen_on(UWORD port)
     return FALSE;
 }
 
-int main(void)
+/* To the Shell, or in a requester when started from Workbench. fmt takes one
+ * %ld or %s, as RawDoFmt. */
+static void complain(const char *fmt, LONG arg)
 {
-    LONG args[3] = {0, 0, 0};
+    struct EasyStruct es = {sizeof(struct EasyStruct), 0, (UBYTE *)"amigentd", NULL, (UBYTE *)"OK"};
+    struct Library *ib = (struct Library *)IntuitionBase;
+
+    if (quiet)
+        return;
+    if (!from_wb) {
+        PutStr("amigentd: ");
+        VPrintf((STRPTR)fmt, &arg);
+        PutStr("\n");
+        return;
+    }
+    if (!ib && !(IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 36)))
+        return;
+    es.es_TextFormat = (UBYTE *)fmt;
+    EasyRequestArgs(NULL, &es, NULL, &arg);
+    if (!ib) {
+        CloseLibrary((struct Library *)IntuitionBase);
+        IntuitionBase = NULL;
+    }
+}
+
+static void set_key_file(const char *name)
+{
+    strncpy(secret_file, name, sizeof(secret_file) - 1);
+    secret_file[sizeof(secret_file) - 1] = 0;
+}
+
+/* The tool types of our icon, then those of any project icons we were started
+ * with, later ones winning. */
+static void tool_types(struct WBStartup *wb, UWORD *port)
+{
+    struct WBArg *arg = wb->sm_ArgList;
+    struct DiskObject *icon;
+    STRPTR v, *tt;
+    LONG i, n;
+    BPTR old;
+
+    if (!(IconBase = OpenLibrary("icon.library", 36)))
+        return;
+    for (i = 0; i < wb->sm_NumArgs; i++, arg++) {
+        old = CurrentDir(arg->wa_Lock);
+        if ((icon = GetDiskObject(arg->wa_Name))) {
+            tt = (STRPTR *)icon->do_ToolTypes;
+            if ((v = FindToolType(tt, "PORT")) && StrToLong(v, &n) > 0)
+                *port = n;
+            if (FindToolType(tt, "SETUP"))
+                setup_mode = TRUE;
+            if (FindToolType(tt, "QUIET"))
+                quiet = TRUE;
+            if ((v = FindToolType(tt, "KEY")))
+                set_key_file((const char *)v);
+            FreeDiskObject(icon);
+        }
+        CurrentDir(old);
+    }
+    CloseLibrary(IconBase);
+    IconBase = NULL;
+}
+
+int main(int argc, char **argv)
+{
+    LONG args[4] = {0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     int rc = RETURN_FAIL;
     LONG i, n;
 
-    rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K", args, NULL);
-    if (!rda) {
-        PrintFault(IoErr(), "amigentd");
-        return RETURN_FAIL;
+    if (argc == 0) {  /* Workbench: argv is the WBStartup message */
+        from_wb = TRUE;
+        tool_types((struct WBStartup *)argv, &port);
+    } else {
+        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S", args, NULL);
+        if (!rda) {
+            PrintFault(IoErr(), "amigentd");
+            return RETURN_FAIL;
+        }
+        if (args[0])
+            port = *(LONG *)args[0];
+        setup_mode = args[1] != 0;
+        if (args[2])
+            set_key_file((const char *)args[2]);
+        quiet = args[3] != 0;
+        FreeArgs(rda);
     }
-    if (args[0])
-        port = *(LONG *)args[0];
-    setup_mode = args[1] != 0;
-    if (args[2]) {
-        strncpy(secret_file, (const char *)args[2], sizeof(secret_file) - 1);
-        secret_file[sizeof(secret_file) - 1] = 0;
-    }
-    FreeArgs(rda);
 
     server = FindTask(NULL);
     SetTaskPri(server, 2);
@@ -2591,8 +2717,10 @@ int main(void)
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
     KeymapBase = OpenLibrary("keymap.library", 37);
-    if (!IntuitionBase || !GfxBase || !KeymapBase)
+    if (!IntuitionBase || !GfxBase || !KeymapBase) {
+        complain("needs OS 3.0 or newer", 0);
         goto out;
+    }
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;
@@ -2602,31 +2730,39 @@ int main(void)
         if (timer_io)
             DeleteIORequest((struct IORequest *)timer_io);
         timer_io = NULL;
+        complain("cannot open %s", (LONG)"timer.device");
         goto out;
     }
     TimerBase = timer_io->tr_node.io_Device;
     input_port = CreateMsgPort();
-    if (!input_port)
+    if (!input_port) {
+        complain("out of memory", 0);
         goto out;
+    }
     input_io = (struct IOStdReq *)CreateIORequest(input_port, sizeof(*input_io));
     if (!input_io || OpenDevice("input.device", 0, (struct IORequest *)input_io, 0)) {
         if (input_io)
             DeleteIORequest((struct IORequest *)input_io);
         input_io = NULL;
+        complain("cannot open %s", (LONG)"input.device");
         goto out;
     }
-    if ((chan_gone = AllocSignal(-1)) < 0 || (reader_gone = AllocSignal(-1)) < 0)
+    if ((chan_gone = AllocSignal(-1)) < 0 || (reader_gone = AllocSignal(-1)) < 0) {
+        complain("out of signals", 0);
         goto out;
+    }
     reader = (struct Task *)CreateNewProcTags(NP_Entry, (ULONG)reader_main,
                                               NP_Name, (ULONG)"amigentd reader",
                                               NP_Priority, -1, NP_StackSize, 16384, TAG_END);
-    if (!reader)
-        goto out;
-    if (!listen_on(port)) {
-        PutStr("amigentd: cannot listen on that port\n");
+    if (!reader) {
+        complain("out of memory", 0);
         goto out;
     }
-    if (setup_mode)
+    if (!listen_on(port)) {
+        complain("cannot listen on port %ld; is amigentd running already?", port);
+        goto out;
+    }
+    if (setup_mode && !from_wb && !quiet)
         PutStr("amigentd: SETUP mode, waiting for amigent-setup\n");
     serve();
     rc = RETURN_OK;
