@@ -28,58 +28,60 @@ double-click the icon, or `amigentd SETUP` in a Shell (`amigentd.000 SETUP` on a
 
 ### Windows
 
-Python 3.10 or newer from python.org or `winget install Python.Python.3.13`, and
-Git with `winget install Git.Git`. In a terminal (PowerShell):
+Python 3.10 or newer from python.org or `winget install Python.Python.3.13`.
+In a terminal (PowerShell):
 
 ```powershell
-git clone https://github.com/akustikrausch/amigent
+py -m pip install --user pipx; py -m pipx ensurepath
 ```
 
 ```powershell
-cd amigent; py -m venv .venv; .venv\Scripts\pip install -e .
+pipx install amigent
+```
+
+Open a new terminal, then:
+
+```powershell
+amigent-setup
 ```
 
 ```powershell
-.venv\Scripts\amigent-setup
+amigent-viewer --install
 ```
 
-```powershell
-.venv\Scripts\amigent-viewer --install
-```
-
-The MCP server is `.venv\Scripts\amigent-server.exe` with its full path. Inside
-WSL the Linux steps below apply, and `--install` still puts Amigent into the
-Windows Start menu; `--serve` then runs its server in Windows Python, because the
-network does not reach servers inside WSL.
+Inside WSL the Linux steps below apply, and `--install` still puts Amigent into
+the Windows Start menu; `--serve` then runs its server in Windows Python,
+because the network does not reach servers inside WSL.
 
 ### macOS
 
-Python 3.10 or newer with `brew install python` or from python.org; git comes
-with `xcode-select --install`. In Terminal:
-
 ```bash
-git clone https://github.com/akustikrausch/amigent && cd amigent
+brew install pipx && pipx ensurepath
 ```
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e .
+pipx install amigent
 ```
 
 ```bash
-.venv/bin/amigent-setup
+amigent-setup
 ```
 
 ```bash
-.venv/bin/amigent-viewer --install
+amigent-viewer --install
 ```
 
-The MCP server is `.venv/bin/amigent-server` with its full path. Allow Amigent
-access to the local network when macOS asks on its first start.
+Allow Amigent access to the local network when macOS asks on its first start.
 
 ### Linux
 
-As on macOS, with Python and git from the package manager. There is no
-`--install`; start the remote desktop with `.venv/bin/amigent-viewer`.
+Install `pipx` from the package manager, then `pipx install amigent` and
+`amigent-setup`. There is no `--install`; start the remote desktop with
+`amigent-viewer`.
+
+`uv tool install amigent` works instead of pipx everywhere. To work on Amigent
+itself, clone the repository and run `pip install -e .` in a virtual
+environment.
 
 ### What setup does
 
@@ -90,15 +92,18 @@ for example `amigent-setup 192.168.1.50`, it goes straight there. It copies
 the certificate. It remembers the Amiga under a name, "Amiga" unless you give
 `--name A1200`.
 
-Register the MCP server with your agent, with the full path from above:
+Register the MCP server with your agent:
 
 ```bash
-claude mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
+claude mcp add amigent -- amigent-server
 ```
 
 ```bash
-codex mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
+codex mcp add amigent -- amigent-server
 ```
+
+If the agent does not find `amigent-server`, give it the full path that
+`pipx list` shows.
 
 Codex asks before every tool call. To let it work on the Amiga on its own,
 add to its entry in `~/.codex/config.toml`:
@@ -109,7 +114,8 @@ default_tools_approval_mode = "approve"
 ```
 
 Antigravity reads its servers from `~/.gemini/antigravity/mcp_config.json`, in
-the usual `mcpServers` format. Other agents need that command. With several
+the usual `mcpServers` format. Other agents need the command `amigent-server`.
+With several
 Amigas, give each entry `AMIGENT_HOST` with the Amiga's name.
 
 ### When the address changes

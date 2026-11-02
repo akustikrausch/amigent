@@ -39,15 +39,12 @@ any moment.
 
 **3.** Paste this into your AI agent:
 
-    Install Amigent from https://github.com/akustikrausch/amigent for me.
-    If git or Python 3.10 or newer is missing on this computer, install it
-    first (Windows: winget, macOS: Homebrew or python.org, Linux: the package
-    manager). Clone the repository, create a virtual environment .venv in it,
-    run pip install -e . there, then run amigent-setup from it. It finds my
-    Amiga by itself and remembers it. Register the MCP server "amigent" with
-    the full path of amigent-server in .venv. Then run amigent-viewer
-    --install so the remote desktop shows up as a program. Tell me if you
-    need to be restarted.
+    Install Amigent for me: run "pipx install amigent" (if pipx or Python 3.10
+    or newer is missing, install them first: Windows winget, macOS Homebrew,
+    Linux the package manager). Then run amigent-setup; it finds my Amiga on
+    the network by itself. Register the MCP server "amigent" with the command
+    amigent-server, and run amigent-viewer --install so the remote desktop
+    shows up as a program. Tell me if you need to be restarted.
 
 The agent sets up the Amiga over the network; from then on amigentd starts
 with it.
