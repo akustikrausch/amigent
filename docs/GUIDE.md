@@ -21,12 +21,21 @@ Copy [`amiga/bin/amigentd`](../amiga/bin/amigentd) to the Amiga, or unpack
 `amigent-1.0.0.lha` from the releases. If the Amiga has a browser or wget but
 no other way in, `amigent-setup --serve` offers both builds on the network for
 30 minutes and prints the address to open. Under WSL it uses Windows Python
-for this, because the network does not reach servers inside WSL. Then start it: double-click the icon, or
-`amigentd SETUP` in a Shell (`amigentd.000 SETUP` on a 68000). Then on the PC:
+for this, because the network does not reach servers inside WSL. Then start
+it: double-click the icon, or `amigentd SETUP` in a Shell (`amigentd.000 SETUP`
+on a 68000). Then on the PC, in the cloned repository:
 
 ```bash
-pip install -e .
+python3 -m venv .venv
 ```
+
+```bash
+.venv/bin/pip install -e .
+```
+
+On Windows the second command is `.venv\Scripts\pip install -e .`. The commands
+below are in `.venv/bin` (`.venv\Scripts` on Windows); give the agent their full
+path.
 
 ```bash
 amigent-setup 192.168.1.50
