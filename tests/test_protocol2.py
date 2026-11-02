@@ -24,7 +24,13 @@ def fake_amigentd(version, replies, seen):
                     conn.sendall(struct.pack(">HHHH", 640, 256, 64, 0))
                 elif data[0] == 13:
                     w, h = struct.unpack(">HH", data[6:10])
-                    conn.sendall(struct.pack(">HH", w, h) + bytes([data[2] & 255, 7, 9]) * (w * h))
+                    runs = b""
+                    left = w * h
+                    while left:
+                        n = min(left, 256)
+                        runs += bytes([n - 1, data[2] & 255, 7, 9])
+                        left -= n
+                    conn.sendall(struct.pack(">HHI", w, h, len(runs)) + runs)
                 else:
                     conn.sendall(replies.get(data[0], b"\0"))
             conn.close()
@@ -55,11 +61,12 @@ def test_screens_and_front():
 def test_colour_region_comes_in_pieces():
     seen = []
     amiga = fake_amigentd(2, {}, seen)
-    picture = amiga.capture_rgb(0, 0, 600, 10)
-    assert picture.size == (600, 10)
-    assert picture.getpixel((0, 0))[1:] == (7, 9)
+    picture = amiga.capture_rgb(0, 0, 1000, 600)
+    assert picture.size == (1000, 600)
+    assert picture.getpixel((999, 599))[1:] == (7, 9)
     asked = [struct.unpack(">HHHH", c[2:10]) for c in seen if c[0] == 13]
-    assert asked == [(0, 0, 512, 10), (512, 0, 88, 10)]
+    assert asked == [(0, 0, 1000, 262), (0, 262, 1000, 262), (0, 524, 1000, 76)]
+    assert all(c[1] == 1 for c in seen if c[0] == 13)  # packed
 
 
 def test_relative_move_is_signed():
@@ -262,3 +269,11 @@ def test_unlabelled_gadgets_come_with_a_picture(monkeypatch):
     result = server.amiga_ui_tree()
     assert "#4 other ''" in result[0] and len(result) == 2
     assert server.amiga_ui_tree(pictures=False) == [result[0]]
+
+
+def test_raw_colour_when_packing_does_not_help():
+    from amigent.amigentd import unpack_rgb
+
+    raw = bytes(range(12))
+    assert unpack_rgb(raw, 4) == raw
+    assert unpack_rgb(bytes([2, 1, 2, 3]), 3) == bytes([1, 2, 3]) * 3

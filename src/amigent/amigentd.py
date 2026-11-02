@@ -16,7 +16,7 @@ CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = rang
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
 CMD_AUTH, CMD_CLIENT = 17, 18
-RGB_LIMIT = 512  # FRAME_RGB answers regions up to this many pixels on each side
+RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
 
 RAWKEYS = {
     "space": 0x40, "backspace": 0x41, "tab": 0x42, "enter": 0x43, "return": 0x44,
@@ -55,6 +55,18 @@ def decode_tile(data: bytes, w: int, h: int) -> Image.Image:
         raise AmigentdError(f"tile decoded to {len(data)} bytes, expected {size}")
     bands = [Image.frombytes("L", (w, h), data.translate(_LUT[c])) for c in "rgb"]
     return Image.merge("RGB", bands)
+
+
+def unpack_rgb(data: bytes, pixels: int) -> bytes:
+    """FRAME_RGB arg 1: runs of (count-1, r, g, b), or raw RGB when that was shorter."""
+    if len(data) == pixels * 3:
+        return data
+    out = bytearray()
+    for i in range(0, len(data) - 3, 4):
+        out += data[i + 1:i + 4] * (data[i] + 1)
+    if len(out) != pixels * 3:
+        raise AmigentdError(f"colour region decoded to {len(out)} bytes, expected {pixels * 3}")
+    return bytes(out)
 
 
 class Amigentd:
@@ -349,21 +361,24 @@ class Amigentd:
         return self._retry(call)
 
     def capture_rgb(self, x: int, y: int, w: int, h: int) -> Image.Image:
-        """A region in full colour, assembled from pieces the Amiga is willing to send."""
+        """A region in full colour, fetched packed in pieces of at most RGB_AREA pixels."""
         self._need(2)
         picture = Image.new("RGB", (w, h))
-        for top in range(0, h, RGB_LIMIT):
-            for left in range(0, w, RGB_LIMIT):
-                pw, ph = min(RGB_LIMIT, w - left), min(RGB_LIMIT, h - top)
+        piece_w = min(w, RGB_AREA)
+        piece_h = max(1, RGB_AREA // piece_w)
+        for top in range(0, h, piece_h):
+            for left in range(0, w, piece_w):
+                pw, ph = min(piece_w, w - left), min(piece_h, h - top)
 
                 def call():
-                    self._send(CMD_FRAME_RGB, 0, x + left, y + top, pw, ph)
-                    gw, gh = struct.unpack(">HH", self._exact(4))
-                    return gw, gh, self._exact(gw * gh * 3)
+                    self._send(CMD_FRAME_RGB, 1, x + left, y + top, pw, ph)
+                    gw, gh, size = struct.unpack(">HHI", self._exact(8))
+                    return gw, gh, self._exact(size)
 
                 gw, gh, data = self._retry(call)
                 if gw and gh:
-                    picture.paste(Image.frombytes("RGB", (gw, gh), data), (left, top))
+                    picture.paste(Image.frombytes("RGB", (gw, gh), unpack_rgb(data, gw * gh)),
+                                  (left, top))
         return picture
 
     def move_relative(self, dx: int, dy: int) -> None:

@@ -93,5 +93,10 @@
  "rel_mouse": "Mus för spel",
  "rel_mouse_tip": "Fångar musen och skickar dess rörelser, för spel. Esc släpper den.",
  "rel_mouse_on": "Musen fångad. Esc släpper den.",
- "not_supported": "Inte möjligt"
+ "not_supported": "Inte möjligt",
+ "fleet_title": "Dina Amigor",
+ "fleet_hint": "Förhandsvisningarna uppdateras var 20:e sekund. Lägg till Amigor med amigent-fleet --add NAMN ADRESS.",
+ "fleet_offline": "inte nåbar",
+ "fleet_open": "Öppna {name}",
+ "fleet_summary": "{up} av {total} nåbara"
 }

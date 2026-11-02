@@ -405,3 +405,35 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
   .actions span { display: none; }
   #bar { gap: 8px; }
 }
+
+/* fleet overview */
+
+body.fleet { display: grid; grid-template-rows: auto 1fr auto; }
+body.fleet #tiles {
+  overflow: auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
+  align-content: start;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  text-align: left;
+  background: var(--panel-bg);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .25);
+}
+.tile:hover { background: var(--control-hover); }
+.tile .shot { aspect-ratio: 16 / 9; background: var(--stage); display: grid; place-items: center; }
+.tile .shot img { width: 100%; height: 100%; object-fit: contain; }
+.tile .shot img:not([src]) { display: none; }
+.tile .meta { display: grid; gap: 4px; padding: 10px 12px 12px; }
+.tile .meta b { font-size: 14px; }
+.tile .meta small { color: var(--muted); }
+.tile.offline .shot img { filter: grayscale(1) opacity(.5); }

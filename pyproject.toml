@@ -19,6 +19,7 @@ amigent-server = "amigent.server:main"
 amigent-doctor = "amigent.doctor:main"
 amigent-setup = "amigent.setup:main"
 amigent-viewer = "amigent.viewer:main"
+amigent-fleet = "amigent.fleet:main"
 
 [build-system]
 requires = ["setuptools>=68"]

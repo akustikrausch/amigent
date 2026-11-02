@@ -93,5 +93,10 @@
  "rel_mouse": "Maus für Spiele",
  "rel_mouse_tip": "Fängt die Maus ein und sendet ihre Bewegung, für Spiele. Esc gibt sie frei.",
  "rel_mouse_on": "Maus eingefangen. Esc gibt sie frei.",
- "not_supported": "Nicht möglich"
+ "not_supported": "Nicht möglich",
+ "fleet_title": "Deine Amigas",
+ "fleet_hint": "Die Vorschau erneuert sich alle 20 Sekunden. Amigas kommen mit amigent-fleet --add NAME ADRESSE dazu.",
+ "fleet_offline": "nicht erreichbar",
+ "fleet_open": "{name} öffnen",
+ "fleet_summary": "{up} von {total} erreichbar"
 }

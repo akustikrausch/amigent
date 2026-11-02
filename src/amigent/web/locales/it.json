@@ -93,5 +93,10 @@
  "rel_mouse": "Mouse per giochi",
  "rel_mouse_tip": "Cattura il mouse e ne invia il movimento, per i giochi. Esc lo rilascia.",
  "rel_mouse_on": "Mouse catturato. Esc lo rilascia.",
- "not_supported": "Non possibile"
+ "not_supported": "Non possibile",
+ "fleet_title": "I tuoi Amiga",
+ "fleet_hint": "Le anteprime si aggiornano ogni 20 secondi. Aggiungi Amiga con amigent-fleet --add NOME INDIRIZZO.",
+ "fleet_offline": "non raggiungibile",
+ "fleet_open": "Apri {name}",
+ "fleet_summary": "{up} di {total} raggiungibili"
 }

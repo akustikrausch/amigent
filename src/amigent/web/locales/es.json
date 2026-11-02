@@ -93,5 +93,10 @@
  "rel_mouse": "Ratón para juegos",
  "rel_mouse_tip": "Captura el ratón y envía su movimiento, para juegos. Esc lo libera.",
  "rel_mouse_on": "Ratón capturado. Esc lo libera.",
- "not_supported": "No es posible"
+ "not_supported": "No es posible",
+ "fleet_title": "Tus Amigas",
+ "fleet_hint": "Las vistas previas se actualizan cada 20 segundos. Añade Amigas con amigent-fleet --add NOMBRE DIRECCIÓN.",
+ "fleet_offline": "no disponible",
+ "fleet_open": "Abrir {name}",
+ "fleet_summary": "{up} de {total} disponibles"
 }

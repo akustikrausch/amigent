@@ -93,5 +93,10 @@
  "rel_mouse": "Souris pour les jeux",
  "rel_mouse_tip": "Capture la souris et envoie ses mouvements, pour les jeux. Échap la libère.",
  "rel_mouse_on": "Souris capturée. Échap la libère.",
- "not_supported": "Impossible"
+ "not_supported": "Impossible",
+ "fleet_title": "Vos Amiga",
+ "fleet_hint": "Les aperçus se rafraîchissent toutes les 20 secondes. Ajoutez des Amiga avec amigent-fleet --add NOM ADRESSE.",
+ "fleet_offline": "injoignable",
+ "fleet_open": "Ouvrir {name}",
+ "fleet_summary": "{up} sur {total} joignables"
 }

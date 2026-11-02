@@ -93,5 +93,10 @@
  "rel_mouse": "Egér játékokhoz",
  "rel_mouse_tip": "Elkapja az egeret és elküldi a mozgását, játékokhoz. Az Esc elengedi.",
  "rel_mouse_on": "Egér elkapva. Az Esc elengedi.",
- "not_supported": "Nem lehetséges"
+ "not_supported": "Nem lehetséges",
+ "fleet_title": "Az Amigáid",
+ "fleet_hint": "Az előnézetek 20 másodpercenként frissülnek. Amigát az amigent-fleet --add NÉV CÍM paranccsal adhatsz hozzá.",
+ "fleet_offline": "nem elérhető",
+ "fleet_open": "{name} megnyitása",
+ "fleet_summary": "{up} / {total} elérhető"
 }

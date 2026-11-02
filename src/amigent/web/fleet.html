@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Amigent</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body class="fleet">
+<header id="bar">
+  <div class="title">
+    <img src="icon.svg" alt="" width="20" height="20">
+    <b data-i18n="fleet_title">Your Amigas</b>
+  </div>
+  <div class="actions"><span id="summary" class="state"></span></div>
+</header>
+<main id="tiles" aria-live="polite"></main>
+<footer id="status"><span data-i18n="fleet_hint">Previews refresh every 20 seconds. Add Amigas with amigent-fleet --add NAME ADDRESS.</span></footer>
+<script src="fleet.js"></script>
+</body>
+</html>

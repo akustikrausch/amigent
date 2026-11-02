@@ -93,5 +93,10 @@
  "rel_mouse": "Mouse for games",
  "rel_mouse_tip": "Captures the mouse and sends its movement, for games. Esc releases it.",
  "rel_mouse_on": "Mouse captured. Esc releases it.",
- "not_supported": "Not possible"
+ "not_supported": "Not possible",
+ "fleet_title": "Your Amigas",
+ "fleet_hint": "Previews refresh every 20 seconds. Add Amigas with amigent-fleet --add NAME ADDRESS.",
+ "fleet_offline": "not reachable",
+ "fleet_open": "Open {name}",
+ "fleet_summary": "{up} of {total} reachable"
 }

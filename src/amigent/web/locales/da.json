@@ -93,5 +93,10 @@
  "rel_mouse": "Mus til spil",
  "rel_mouse_tip": "Fanger musen og sender dens bevægelser, til spil. Esc slipper den.",
  "rel_mouse_on": "Musen fanget. Esc slipper den.",
- "not_supported": "Ikke muligt"
+ "not_supported": "Ikke muligt",
+ "fleet_title": "Dine Amigaer",
+ "fleet_hint": "Forhåndsvisningerne opdateres hvert 20. sekund. Tilføj Amigaer med amigent-fleet --add NAVN ADRESSE.",
+ "fleet_offline": "ikke tilgængelig",
+ "fleet_open": "Åbn {name}",
+ "fleet_summary": "{up} af {total} tilgængelige"
 }

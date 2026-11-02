@@ -93,5 +93,10 @@
  "rel_mouse": "Myš pro hry",
  "rel_mouse_tip": "Zachytí myš a posílá její pohyb, pro hry. Esc ji uvolní.",
  "rel_mouse_on": "Myš zachycena. Esc ji uvolní.",
- "not_supported": "Není možné"
+ "not_supported": "Není možné",
+ "fleet_title": "Vaše Amigy",
+ "fleet_hint": "Náhledy se obnovují každých 20 sekund. Amigy přidáte příkazem amigent-fleet --add NÁZEV ADRESA.",
+ "fleet_offline": "nedostupná",
+ "fleet_open": "Otevřít {name}",
+ "fleet_summary": "{up} z {total} dostupných"
 }
