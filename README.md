@@ -46,7 +46,7 @@ By Andreas Wendorf (Akustikrausch).
   everything else is copied and set up from the PC.
 
 It is made for accelerated Amigas running AmigaOS 3.x, such as PiStorm systems
-or 68030/040/060 cards. Tested on an A1200 with PiStorm and in WinUAE with AmiKit.
+or 68030/040/060 cards.
 
 ## Requirements
 
