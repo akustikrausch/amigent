@@ -18,17 +18,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .secret import FOLDER, safe
+from . import machines, roster
+from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLDER
 
 
 def pinned(host: str) -> Path:
     """This Amiga's pinned cert: by name, by any address it ever had, or by what DNS says."""
-    from . import machines
-    names = machines.stems(host) or [host]
-    try:
-        names = [*names, socket.gethostbyname(host)]
-    except OSError:
-        pass
+    names = roster.aliases(host)
     for name in names:
         path = FOLDER / f"tls-{safe(name)}.pem"
         if path.exists():
@@ -66,8 +62,7 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     host is a name or an address. No answer there? One sweep of the local
     network, and the Amiga is picked up again at its new address.
     """
-    from . import machines
-    address = machines.address(host)
+    address = roster.address(host)  # machines is only rung when the line stays dead
     try:
         return _dial(address, host, port, timeout)
     except (OSError, ssl.SSLError):

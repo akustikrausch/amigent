@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import socket
 
-from .machines import address
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
+from .roster import address
 
 __all__ = ["AmigaCtl", "AmigaError", "ExecResult", "join_path"]  # the old addresses still deliver
 

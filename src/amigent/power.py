@@ -12,8 +12,8 @@ import subprocess
 import time
 
 from .errors import AmigaError
-from .machines import address
 from .net import greet
+from .roster import address
 
 OFF_SECONDS = 30
 BOOT_WAIT = 300
