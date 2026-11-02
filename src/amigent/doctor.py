@@ -11,7 +11,7 @@ import sys
 import time
 
 from . import machines
-from .amigactl import AmigaError
+from .errors import AmigaError
 from .channel import Commands
 from .amigentd import Amigentd, AmigentdError
 
@@ -29,7 +29,7 @@ def main() -> int:
     ctl = Commands(host)
     try:
         ctl.connect()
-        print(f"commands   OK   {ctl.banner}" + (", TLS" if hasattr(ctl._sock, "version") else ""))
+        print(f"commands   OK   {ctl.banner}" + (", TLS" if ctl.is_tls else ""))
         print(f"           {ctl.sysinfo()}")
         for volume in ctl.volumes():
             print(f"           {volume['name'].rstrip(':')}: {volume['free'] // 2**20} MB free")

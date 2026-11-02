@@ -196,7 +196,7 @@ def test_wrong_or_missing_key_is_explained():
 
 
 def test_setup_keeps_existing_amigactld_settings():
-    from amigent.setup import allow_script
+    from amigent.legacy import allow_script
 
     script = allow_script("192.168.1.10", "SYS:amigent")
     assert 'Echo >>S:amigactld.conf "ALLOW 192.168.1.10"' in script

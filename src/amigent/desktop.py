@@ -18,7 +18,8 @@ import sys
 from pathlib import Path, PureWindowsPath
 
 from . import __version__
-from .viewer import windows_exe
+from .platform_util import in_wsl as _wsl  # tests swap _wsl, so the alias stays
+from .platform_util import windows_exe
 
 NAME = "Amigent"
 OLD_NAMES = ("Amiga Remote",)  # shortcuts from older releases, swept away on install
@@ -27,10 +28,6 @@ HOMEPAGE = "https://github.com/akustikrausch/amigent"
 REGISTRY = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\amigent"
 ICON = Path(__file__).with_name("web") / "amigent.ico"
 SETTINGS = ("AMIGENT_CTL_PORT", "AMIGENT_SCREEN_PORT", "AMIGENT_VIEWER_PORT", "AMIGENT_FLUSH_VOLUMES")
-
-
-def _wsl() -> bool:
-    return "microsoft" in platform.release().lower()
 
 
 def _powershell(script: str) -> str:
@@ -55,7 +52,7 @@ def _quote(arg: str) -> str:
 
 def _script(name: str, args: list[str]) -> tuple[str, str]:
     """File name and body of a script that runs amigent-viewer with args, console-free."""
-    settings = {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
+    settings = _settings()
     package_root = str(Path(__file__).resolve().parents[1])
     if _wsl():
         command = ["wsl.exe", "-d", os.environ.get("WSL_DISTRO_NAME", "Ubuntu"), "-u", getpass.getuser(),

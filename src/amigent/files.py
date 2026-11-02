@@ -11,7 +11,8 @@ from __future__ import annotations
 import zlib
 from pathlib import Path, PurePosixPath
 
-from .amigactl import AmigaError, join_path
+from .client import join_path
+from .errors import AmigaError
 from .channel import AmigaChannel, Request
 
 CHECK_FROM = 16384  # below this a lone file just goes: asking costs about as much as sending

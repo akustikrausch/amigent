@@ -12,22 +12,18 @@ accept only this PC.
 from __future__ import annotations
 
 import argparse
-import json
-import socket
 import sys
-import time
-import urllib.request
-from pathlib import Path
 
-from . import lzh
-from .amigactl import AmigaCtl, AmigaError
+from . import machines, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
-from . import machines, tls
+from .errors import AmigaError
+from .legacy import (UNDO_ALLOW, allow_script, fetch_amigactld,  # noqa: F401 (allow_script: old address)
+                     reach_amigactld, same_network, startup_script)
+from .net import lan_address
+from .paths import AMIGA
 from .secret import new_key, own_key, save_key
 
-AMIGA = Path(__file__).resolve().parent / "amiga"  # the Amiga half rides inside the package
-UPSTREAM = "https://api.github.com/repos/tbdye/amigactl/releases/latest"
 SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 
 
@@ -35,91 +31,6 @@ def find_amiga() -> str | None:
     """Sweep the local /24 for amigentd; first one to say hello wins."""
     hits = machines.scan()
     return hits[0] if hits else None
-
-
-def fetch_amigactld() -> bytes:
-    request = urllib.request.Request(UPSTREAM, headers={"User-Agent": "amigent-setup"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        release = json.load(response)
-    url = next(a["browser_download_url"] for a in release["assets"] if a["name"].endswith(".lha"))
-    print(f"fetching amigactld {release['tag_name']}")
-    with urllib.request.urlopen(url, timeout=120) as response:
-        return lzh.extract(response.read(), "/amigactld")
-
-
-def own_address(host: str) -> str:
-    """The address the Amiga sees this PC under (NAT may disagree with the LAN)."""
-    with socket.create_connection((host, 6801), 5) as s:
-        return s.getsockname()[0]
-
-
-def same_network(a: str, b: str) -> bool:
-    return a.rsplit(".", 1)[0] == b.rsplit(".", 1)[0]
-
-
-def allow_script(address: str, home: str) -> str:
-    """AmigaDOS script: ALLOW address in S:amigactld.conf, old lines untouched, backup first."""
-    return f"""FailAt 21
-If EXISTS S:amigactld.conf
-  Copy S:amigactld.conf S:amigactld.conf.amigent-bak QUIET
-  ; Search can't match whole lines (1.2.3.5 would match 1.2.3.50), and a second
-  ; identical ALLOW line does no harm.
-  Echo >>S:amigactld.conf "ALLOW {address}"
-Else
-  Echo >S:amigactld.conf "ALLOW {address}"
-EndIf
-Copy S:amigactld.conf {home}/amigactld.conf QUIET
-"""
-
-
-UNDO_ALLOW = """FailAt 21
-If EXISTS S:amigactld.conf.amigent-bak
-  Copy S:amigactld.conf.amigent-bak S:amigactld.conf QUIET
-Else
-  Delete >NIL: S:amigactld.conf QUIET
-EndIf
-Status >NIL: COMMAND=C:amigactld
-If NOT WARN
-  Break `Status COMMAND=C:amigactld` C
-  Wait 2
-EndIf
-Run >NIL: C:amigactld
-"""
-
-
-def reach_amigactld(host: str, wait: float = 40) -> AmigaCtl | None:
-    """A live amigactld link, or None if it stays mute or shows us the door."""
-    deadline = time.monotonic() + wait
-    while time.monotonic() < deadline:
-        try:
-            ctl = AmigaCtl(host)
-            ctl.connect()
-            return ctl
-        except AmigaError:
-            time.sleep(3)
-    return None
-
-
-def offer_tls(link: Amigentd, host: str, home: str) -> None:
-    """Hand amigentd a certificate; keep the pin only if its TLS port answers with it in 30 s."""
-    made = tls.make_certificate(host)
-    if not made:
-        print("No openssl on this PC, so the connection stays unencrypted.")
-        return
-    for_amiga, certificate = made
-    link.put("S:amigent-tls.pem", for_amiga)
-    link.put(f"{home}/amigent-tls.pem", for_amiga)
-    pin = tls.remember(host, certificate)
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        try:
-            tls.connect(host, link.port, 10).close()
-            print("Connections to amigentd are encrypted from now on.")
-            return
-        except OSError:
-            time.sleep(3)
-    pin.unlink()
-    print("amigentd did not open its TLS port; the connection stays unencrypted.")
 
 
 def run_script(link: Amigentd, text: str) -> None:
@@ -176,17 +87,7 @@ If WARN
 EndIf
 """
     if with_actld:
-        script += f"""Protect C:amigactld rwed
-Copy C:amigactld {home}/ QUIET
-Search >NIL: S:User-Startup "C:amigactld" QUIET
-If WARN
-  Echo >>S:User-Startup "RUN >NIL: C:amigactld"
-EndIf
-Status >NIL: COMMAND=C:amigactld
-If WARN
-  Run >NIL: C:amigactld
-EndIf
-"""
+        script += startup_script(home)
     link.put("T:amigent-setup", script.encode("iso-8859-1"))
     run(link, "Execute T:amigent-setup")
 
@@ -212,12 +113,12 @@ def main() -> int:
         print("No Amiga in sight. Is `amigentd SETUP` running over there?")
         return 1
     known = machines.find(host)
-    name = args.name or (known["name"] if known else machines._unique("Amiga", machines.load()))
+    name = args.name or (known["name"] if known else machines.unique_name("Amiga", machines.load()))
     host = machines.address(host)
     print(f"Amiga at {host}")
     allow = None if args.no_allow else args.allow
     if not allow and not args.no_allow:
-        mine = own_address(host)
+        mine = lan_address(host)
         if same_network(mine, host):
             allow = mine
         else:
@@ -232,7 +133,7 @@ def main() -> int:
         with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
         install(link, args.home, key, allow, with_actld)
         if link.flags & 2:
-            offer_tls(link, host, args.home)
+            tls.provision(link, host, args.home)
         if not with_actld:
             channel = AmigaChannel(host, key=key)
             channel.connect()

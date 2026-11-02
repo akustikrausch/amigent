@@ -12,8 +12,10 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .amigactl import AmigaCtl, AmigaError, ExecResult, join_path
 from . import tls
+from .amigactl import AmigaCtl
+from .client import ExecResult, VolumeFlush, join_path
+from .errors import AmigaError
 from .secret import load_key
 
 ENCODING = "iso-8859-1"
@@ -132,7 +134,7 @@ def perform(ctl, requests: list[Request]) -> list:
     return out
 
 
-class AmigaChannel:
+class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None):
@@ -345,11 +347,6 @@ class AmigaChannel:
         """Run a command line; other channels and the screen stay usable meanwhile."""
         return self._one(Request.exec(command, cd, timeout))
 
-    def flush(self, volumes) -> None:
-        for volume in volumes:
-            self.exec(f"Lock {volume} ON")
-            self.exec(f"Lock {volume} OFF")
-
     # system state
 
     def sysinfo(self) -> dict:
@@ -387,8 +384,16 @@ class Commands:
             self.backend.close()
 
     @property
-    def _sock(self):
+    def _sock(self):  # viewer.py still peeks here; new code asks connected / is_tls
         return self.backend._sock if self.backend else None
+
+    @property
+    def connected(self) -> bool:
+        return bool(self._sock)
+
+    @property
+    def is_tls(self) -> bool:
+        return hasattr(self._sock, "version")  # only an SSLSocket knows its protocol version
 
     @property
     def banner(self) -> str:

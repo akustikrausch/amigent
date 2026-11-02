@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import struct
 
-WINDOW = 1 << 13  # 8 KB sliding dictionary, -lh5- style
 MAX_MATCH = 256
 THRESHOLD = 3
 NC = 255 + MAX_MATCH + 2 - THRESHOLD

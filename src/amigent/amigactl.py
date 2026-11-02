@@ -7,33 +7,19 @@ docs/protocol-commands.md in the amigactl project), not a rip of its client code
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass
+
+from .client import ExecResult, VolumeFlush, join_path
+from .errors import AmigaError
+from .roster import address
+
+__all__ = ["AmigaCtl", "AmigaError", "ExecResult", "join_path"]  # the old addresses still deliver
 
 ENCODING = "iso-8859-1"
 CHUNK_SIZE = 4096
 MAX_LINE = 4096
 
 
-def join_path(folder: str, name: str) -> str:
-    """Amiga path of name inside folder ('RAM:' + 'x' or 'Work:Games' + 'x')."""
-    return folder + name if folder.endswith((":", "/")) else f"{folder}/{name}"
-
-
-class AmigaError(Exception):
-    """The daemon said ERR, or the wire went dead."""
-
-    def __init__(self, message: str, code: int | None = None):
-        super().__init__(message)
-        self.code = code
-
-
-@dataclass
-class ExecResult:
-    rc: int
-    output: str
-
-
-class AmigaCtl:
+class AmigaCtl(VolumeFlush):
     def __init__(self, host: str, port: int = 6800, timeout: float = 30.0):
         self.host = host
         self.port = port
@@ -45,7 +31,6 @@ class AmigaCtl:
     def connect(self) -> None:
         self.close()
         try:
-            from .machines import address
             self._sock = socket.create_connection((address(self.host), self.port), self.timeout)
             self.banner = self._line()
         except OSError as e:
@@ -194,12 +179,6 @@ class AmigaCtl:
         prefix = f"CD={cd} " if cd else ""
         info, data = self._binary(f"EXEC {prefix}{command}", timeout)
         return ExecResult(int(info.split("=", 1)[1]), data.decode(ENCODING))
-
-    def flush(self, volumes) -> None:
-        """Lock ON/OFF per volume: write-protecting forces the file system to commit what it holds."""
-        for volume in volumes:
-            self.exec(f"Lock {volume} ON")
-            self.exec(f"Lock {volume} OFF")
 
     def exec_async(self, command: str) -> int:
         """Fire and forget, no output captured; returns the daemon's process id."""

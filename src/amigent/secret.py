@@ -2,35 +2,23 @@
 
 amigent-setup rolls one per Amiga, drops it there as S:amigent.key and keeps a
 copy in ~/.config/amigent/key-<address> (also found under the Amiga's name,
-see machines.py). The first one doubles as ~/.config/amigent/key, the
+see roster.py). The first one doubles as ~/.config/amigent/key, the
 fallback for any address without a key of its own. AMIGENT_KEY trumps the files.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import secrets
-import socket
 from pathlib import Path
 
-FOLDER = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "amigent"
-
-
-def safe(host: str) -> str:
-    """host squeezed into a file name: IPv6 colons and path characters become _."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", host).strip(".") or "_"
+from . import roster
+from .paths import FOLDER, safe  # FOLDER stays patchable here: tests point it at a sandbox
 
 
 def _own(host: str) -> Path | None:
     """This Amiga's own key file: by name, by any address it ever had, or by what DNS says."""
-    from . import machines
-    names = machines.stems(host)
-    try:
-        names.append(socket.gethostbyname(host))
-    except OSError:
-        pass
-    for name in names:
+    for name in roster.aliases(host):
         path = FOLDER / f"key-{safe(name)}"
         if path.exists():
             return path
