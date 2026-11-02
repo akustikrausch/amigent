@@ -98,14 +98,15 @@ def test_recursive_listing_is_one_batch_per_level(amiga):
 
 
 def test_pipelining_beats_the_round_trips(amiga, tmp_path):
-    link = SlowLink(amiga.port, rate=2_000_000, latency=0.03)
+    # long latency on purpose: the round trips must dominate, not the CI box's CPU
+    link = SlowLink(amiga.port, rate=2_000_000, latency=0.2)
     src = tree(tmp_path / "src", 30)
     start = time.monotonic()
     files.put(channel(link.port), src, "RAM:p")
     took = time.monotonic() - start
     link.close()
     assert len([f for f in amiga.files if f.startswith("RAM:p/")]) == 30
-    assert took < 30 * 0.06 / 2  # one by one would be 30 round trips of 60 ms
+    assert took < 30 * 0.4 / 3  # one by one: 30 round trips of 400 ms, 12 s
 
 
 def test_amigactld_walks_through_requests_one_by_one():
