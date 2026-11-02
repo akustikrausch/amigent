@@ -2,7 +2,7 @@
  * amigentd: the front screen as 64x64 tiles, plus mouse and keyboard, over TCP.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
- *   amigentd [PORT <n>] [SETUP]
+ *   amigentd [PORT <n>] [SETUP] [KEY <file>]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
  */
@@ -13,12 +13,16 @@
 #include <dos/dostags.h>
 #include <intuition/intuitionbase.h>
 #include <intuition/screens.h>
+#include <intuition/classes.h>
+#include <intuition/imageclass.h>
 #include <devices/input.h>
 #include <devices/inputevent.h>
 #include <devices/timer.h>
 #include <graphics/gfx.h>
 #include <graphics/view.h>
 #include <graphics/modeid.h>
+#include <graphics/clip.h>
+#include <graphics/layers.h>
 #include <proto/exec.h>
 #include <proto/timer.h>
 #include <proto/dos.h>
@@ -39,9 +43,15 @@ extern struct Library *CyberGfxBase;
 #define RECTFMT_RGB 0
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2
 #define DEFAULT_PORT 6801
 #define TILE 64
+#define RGB_MAX 512  /* FRAME_RGB: largest side in pixels */
+/* Menu boxes relative to Intuition's layout numbers, found on OS 3.2. */
+#define MENU_X 0
+#define MENU_Y 0
+#define SUB_X 0
+#define SUB_Y 0
 #define IDLE_SECONDS 120
 #define MAX_AGE_MS 500
 #define SETTLE_MS 250
@@ -53,7 +63,8 @@ extern struct Library *CyberGfxBase;
 
 enum {
     CMD_INFO = 1, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING,
-    CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END
+    CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END, CMD_SCREENS, CMD_SCREEN_FRONT,
+    CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT
 };
 
 const char version[] = "$VER: amigentd 1.0.0 (02.11.2026)";
@@ -70,7 +81,14 @@ static struct IOStdReq *input_io;
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
-static BOOL setup_mode, quit;
+static BOOL setup_mode, quit, authed;
+static ULONG client_id, owner;  /* CLIENT ids: this connection's, and whose picture ref is */
+
+/* With a key file, every connection has to send the key first. */
+#define KEY_MAX 64
+static char secret_file[256] = "S:amigent.key";
+static UBYTE secret[KEY_MAX];
+static LONG secret_len;
 static UWORD buttons;
 static UBYTE prev_code[2], prev_qual[2];
 
@@ -215,6 +233,20 @@ static UWORD button_qualifiers(void)
     if (buttons & 2) q |= IEQUALIFIER_RBUTTON;
     if (buttons & 4) q |= IEQUALIFIER_MIDBUTTON;
     return q;
+}
+
+/* For programs that read mouse deltas and ignore absolute positions. */
+static void move_by(WORD dx, WORD dy)
+{
+    struct InputEvent ev;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.ie_Class = IECLASS_RAWMOUSE;
+    ev.ie_Code = IECODE_NOBUTTON;
+    ev.ie_Qualifier = button_qualifiers();
+    ev.ie_X = dx;
+    ev.ie_Y = dy;
+    write_event(&ev);
 }
 
 static void move_to(WORD x, WORD y)
@@ -376,13 +408,14 @@ static struct Screen *front(ULONG *lock)
 
 #define rgb332(r, g, b) ((UBYTE)(((r) >> 5) | ((g) >> 5 << 3) | ((b) & 0xC0)))
 
-/* One row of HAM6 or HAM8 pens from the left edge; RGB332 out from pixel skip on.
- * Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits become the
- * top bits of that component, which is all RGB332 keeps. */
+/* One row of HAM6 or HAM8 pens from the left edge; RGB888 out from pixel skip on.
+ * Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits replace the
+ * top bits of that component, the low bits stay from the pixel before. */
 static void ham_row(const UBYTE *pens, LONG width, ULONG depth, const UBYTE *pal,
                     UBYTE *dst, LONG skip)
 {
     UBYTE c[3], shift = depth - 2, mask = (1 << shift) - 1, up = 8 - shift;
+    UBYTE low = (1 << up) - 1;
     LONG i;
 
     c[0] = pal[0], c[1] = pal[1], c[2] = pal[2];  /* each row starts from colour 0 */
@@ -390,25 +423,27 @@ static void ham_row(const UBYTE *pens, LONG width, ULONG depth, const UBYTE *pal
         UBYTE p = pens[i], data = p & mask;
         switch (p >> shift) {
         case 0: c[0] = pal[3 * data]; c[1] = pal[3 * data + 1]; c[2] = pal[3 * data + 2]; break;
-        case 1: c[2] = data << up; break;
-        case 2: c[0] = data << up; break;
-        case 3: c[1] = data << up; break;
+        case 1: c[2] = (c[2] & low) | data << up; break;
+        case 2: c[0] = (c[0] & low) | data << up; break;
+        case 3: c[1] = (c[1] & low) | data << up; break;
         }
-        if (i >= skip)
-            dst[i - skip] = rgb332(c[0], c[1], c[2]);
+        if (i >= skip) {
+            UBYTE *d = dst + 3 * (i - skip);
+            d[0] = c[0], d[1] = c[1], d[2] = c[2];
+        }
     }
 }
 
 /* Chipset screens: pens through the palette, HAM6 and HAM8 decoded along each row. */
-static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
+static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
 {
     struct BitMap *bm = scr->RastPort.BitMap, *line;
     struct RastPort tmp;
     ULONG depth = GetBitMapAttr(bm, BMA_DEPTH), colours, i;
     ULONG *table;
-    UBYTE pal[3 * 256];
+    UBYTE pal[3 * 256], *pens;
     BOOL ham = (GetVPModeID(&scr->ViewPort) & HAM_KEY) && (depth == 6 || depth == 8);
-    LONG y, from = ham ? 0 : x0, width = x0 + cw - from;
+    LONG y, from = ham ? 0 : x0, width = x0 + w - from;
 
     if (depth > 8)
         return FALSE;
@@ -416,9 +451,11 @@ static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
     if (colours > (ULONG)scr->ViewPort.ColorMap->Count)
         colours = scr->ViewPort.ColorMap->Count;
     table = AllocVec(colours * 3 * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
+    pens = AllocVec((width + 15) & ~15, MEMF_ANY);
     line = AllocBitMap((width + 15) & ~15, 1, depth, 0, NULL);
-    if (!table || !line) {
+    if (!table || !pens || !line) {
         FreeVec(table);
+        FreeVec(pens);
         FreeBitMap(line);
         return FALSE;
     }
@@ -429,21 +466,39 @@ static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
     tmp = scr->RastPort;
     tmp.Layer = NULL;
     tmp.BitMap = line;
-    for (y = y0; y < y1; y++) {
-        UBYTE *dst = cur + y * ref_w + x0;
-        ReadPixelLine8(&scr->RastPort, from, y, width, rgb, &tmp);
+    for (y = 0; y < h; y++) {
+        UBYTE *dst = out + y * w * 3;
+        ReadPixelLine8(&scr->RastPort, from, y0 + y, width, pens, &tmp);
         if (!ham) {
-            for (i = 0; i < (ULONG)cw; i++) {
-                const UBYTE *c = pal + 3 * rgb[i];
-                dst[i] = rgb332(c[0], c[1], c[2]);
+            for (i = 0; i < (ULONG)w; i++, dst += 3) {
+                const UBYTE *c = pal + 3 * pens[i];
+                dst[0] = c[0], dst[1] = c[1], dst[2] = c[2];
             }
         } else {
-            ham_row(rgb, width, depth, pal, dst, x0 - from);
+            ham_row(pens, width, depth, pal, dst, x0 - from);
         }
     }
     FreeBitMap(line);
+    FreeVec(pens);
     FreeVec(table);
     return TRUE;
+}
+
+/* Without cybergraphics.library there are only chipset screens. */
+static BOOL is_rtg(struct Screen *scr)
+{
+    return CyberGfxBase && GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX);
+}
+
+/* Any screen, as RGB888 rows of w pixels. Callers hold LockIBase. */
+static void read_rgb(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
+{
+    if (is_rtg(scr) || !read_planar(scr, x0, y0, w, h, out)) {
+        if (CyberGfxBase)
+            ReadPixelArray(out, 0, 0, w * 3, &scr->RastPort, x0, y0, w, h, RECTFMT_RGB);
+        else
+            memset(out, 0, w * h * 3);  /* deeper than 8 planes, nothing to read it with */
+    }
 }
 
 /* Does the tile at x, y differ between cur and ref? Long words where they line up. */
@@ -473,16 +528,13 @@ static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
     LONG cw = ((tx1 + 1) * TILE < ref_w ? (tx1 + 1) * TILE : ref_w) - x0;
     LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
     ULONG ms = now_ms();
+    UBYTE *src = rgb;
 
-    if (GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX) ||
-        !grab_planar(scr, x0, y0, cw, y0 + th)) {
-        UBYTE *src = rgb;
-        ReadPixelArray(rgb, 0, 0, cw * 3, &scr->RastPort, x0, y0, cw, th, RECTFMT_RGB);
-        for (n = 0; n < th; n++) {
-            UBYTE *dst = cur + (y0 + n) * ref_w + x0;
-            for (i = 0; i < cw; i++, src += 3)
-                dst[i] = rgb332(src[0], src[1], src[2]);
-        }
+    read_rgb(scr, x0, y0, cw, th, rgb);
+    for (n = 0; n < th; n++) {
+        UBYTE *dst = cur + (y0 + n) * ref_w + x0;
+        for (i = 0; i < cw; i++, src += 3)
+            dst[i] = rgb332(src[0], src[1], src[2]);
     }
     for (x = tx0; x <= tx1; x++) {
         UBYTE *v = valid + ty * cols + x;
@@ -666,6 +718,10 @@ static BOOL frame_locked(BOOL force, LONG x, LONG y, LONG w, LONG h)
             }
         }
     }
+    /* The reference stays some client's exact picture only if that client keeps
+     * getting the changes, or starts over with everything. */
+    if (count)
+        owner = force || (client_id && owner == client_id) ? client_id : 0;
     be32(head, count);
     if (!put(head, 4))
         return FALSE;
@@ -711,6 +767,405 @@ static BOOL info(void)
     be16(msg + 4, TILE);
     be16(msg + 6, 0);
     return put(msg, 8) && flush();
+}
+
+/* ---- protocol 2: screens, true colour, user interface ------------------ */
+
+/* A growing reply buffer for the variable length answers. */
+struct text {
+    UBYTE *buf;
+    ULONG len, size;
+    BOOL broke;
+};
+
+static void t_add(struct text *t, const void *data, ULONG n)
+{
+    if (t->broke)
+        return;
+    if (t->len + n > t->size) {
+        ULONG size = t->size ? t->size : 4096;
+        UBYTE *bigger;
+        while (size < t->len + n)
+            size *= 2;
+        if (!(bigger = AllocVec(size, MEMF_ANY))) {
+            t->broke = TRUE;
+            return;
+        }
+        if (t->buf) {
+            CopyMem(t->buf, bigger, t->len);
+            FreeVec(t->buf);
+        }
+        t->buf = bigger;
+        t->size = size;
+    }
+    CopyMem((APTR)data, t->buf + t->len, n);
+    t->len += n;
+}
+
+static void t_chr(struct text *t, char c)
+{
+    t_add(t, &c, 1);
+}
+
+/* A name or label: tabs and line ends become spaces; underscores go if marks is set. */
+static void t_str(struct text *t, const UBYTE *s, BOOL marks)
+{
+    LONG n;
+
+    for (n = 0; s && *s && n < 256; s++, n++) {
+        if (marks && *s == '_' && s[1] && s[1] != '_')
+            continue;
+        t_chr(t, *s == '\t' || *s == '\n' || *s == '\r' ? ' ' : *s);
+    }
+}
+
+static void t_num(struct text *t, LONG v)
+{
+    char d[12];
+    LONG n = 0;
+    ULONG u = v < 0 ? -v : v;
+
+    if (v < 0)
+        t_chr(t, '-');
+    do
+        d[n++] = '0' + u % 10;
+    while (u /= 10);
+    while (n)
+        t_chr(t, d[--n]);
+}
+
+static void t_hex(struct text *t, ULONG v)
+{
+    LONG i;
+
+    for (i = 28; i >= 0; i -= 4)
+        t_chr(t, "0123456789abcdef"[v >> i & 15]);
+}
+
+static void t_tab(struct text *t)
+{
+    t_chr(t, '\t');
+}
+
+/* u32 length, then the text. */
+static BOOL send_text(struct text *t)
+{
+    UBYTE head[4];
+    BOOL ok;
+
+    if (t->broke)
+        t->len = 0;
+    be32(head, t->len);
+    ok = put(head, 4) && put(t->buf, t->len) && flush();
+    FreeVec(t->buf);
+    return ok;
+}
+
+static const UBYTE *screen_title(struct Screen *s)
+{
+    return s->DefaultTitle ? s->DefaultTitle : s->Title;
+}
+
+static BOOL screens(void)
+{
+    struct text t = {0};
+    struct Screen *s;
+    ULONG lock;
+    UBYTE b[16] = {0};
+    UWORD count = 0;
+    BOOL ok;
+
+    t_add(&t, b, 2);  /* count, filled in below */
+    lock = LockIBase(0);
+    for (s = IntuitionBase->FirstScreen; s; s = s->NextScreen) {
+        const UBYTE *title = screen_title(s);
+        UWORD flags = 0, n = title ? strlen((const char *)title) : 0;
+        if (s == IntuitionBase->FirstScreen) flags |= 1;
+        if ((s->Flags & SCREENTYPE) == WBENCHSCREEN) flags |= 2;
+        if (is_rtg(s)) flags |= 4;
+        if (GetVPModeID(&s->ViewPort) & HAM_KEY) flags |= 8;
+        be32(b, (ULONG)s);
+        be16(b + 4, s->Width);
+        be16(b + 6, s->Height);
+        be16(b + 8, GetBitMapAttr(s->RastPort.BitMap, BMA_DEPTH));
+        be16(b + 10, flags);
+        be16(b + 12, n);
+        t_add(&t, b, 14);
+        t_add(&t, title, n);
+        count++;
+    }
+    UnlockIBase(lock);
+    if (t.broke) {
+        FreeVec(t.buf);
+        be16(b, 0);
+        return put(b, 2) && flush();
+    }
+    be16(t.buf, count);
+    ok = put(t.buf, t.len) && flush();
+    FreeVec(t.buf);
+    return ok;
+}
+
+/* Only a screen that is still in the list gets brought to the front. */
+static BOOL screen_front(ULONG handle)
+{
+    struct Screen *s;
+    ULONG lock;
+
+    lock = LockIBase(0);
+    for (s = IntuitionBase->FirstScreen; s && (ULONG)s != handle; s = s->NextScreen)
+        ;
+    UnlockIBase(lock);
+    if (!s)
+        return reply(1);
+    ScreenToFront(s);
+    input_ms = now_ms();  /* what was read before shows another screen */
+    return reply(0);
+}
+
+static BOOL frame_rgb(LONG x, LONG y, LONG w, LONG h)
+{
+    struct Screen *scr;
+    ULONG lock;
+    UBYTE head[4], *buf = NULL;
+    BOOL ok;
+
+    lock = LockIBase(0);
+    scr = IntuitionBase->FirstScreen;
+    if (!w || x + w > scr->Width) w = scr->Width - x;
+    if (!h || y + h > scr->Height) h = scr->Height - y;
+    if (w <= 0 || h <= 0 || w > RGB_MAX || h > RGB_MAX || !(buf = AllocVec(w * h * 3, MEMF_ANY)))
+        w = h = 0;
+    else
+        read_rgb(scr, x, y, w, h, buf);
+    UnlockIBase(lock);
+    be16(head, w);
+    be16(head + 2, h);
+    ok = put(head, 4) && put(buf, w * h * 3) && flush();
+    FreeVec(buf);
+    return ok;
+}
+
+/* Gadget box on the screen, from the window's place and the relative flags. */
+static void gadget_box(struct Window *w, struct Gadget *g, LONG *box)
+{
+    LONG x = g->LeftEdge, y = g->TopEdge, gw = g->Width, gh = g->Height;
+
+    if (g->Flags & GFLG_RELRIGHT) x += w->Width - 1;
+    if (g->Flags & GFLG_RELBOTTOM) y += w->Height - 1;
+    if (g->Flags & GFLG_RELWIDTH) gw += w->Width;
+    if (g->Flags & GFLG_RELHEIGHT) gh += w->Height;
+    if ((w->Flags & WFLG_GIMMEZEROZERO) && !(g->GadgetType & GTYP_GZZGADGET)) {
+        x += w->BorderLeft;
+        y += w->BorderTop;
+    }
+    box[0] = w->LeftEdge + x;
+    box[1] = w->TopEdge + y;
+    box[2] = gw;
+    box[3] = gh;
+}
+
+static void t_box(struct text *t, LONG *box)
+{
+    LONG i;
+
+    for (i = 0; i < 4; i++) {
+        t_tab(t);
+        t_num(t, box[i]);
+    }
+}
+
+static void t_itext(struct text *t, struct IntuiText *it)
+{
+    BOOL first = TRUE;
+
+    for (; it; it = it->NextText) {
+        if (!it->IText)
+            continue;
+        if (!first)
+            t_chr(t, ' ');
+        t_str(t, it->IText, TRUE);
+        first = FALSE;
+    }
+}
+
+/* GadTools buttons carry their label as an itexticlass image; its data is the text. */
+static struct IntuiText *image_text(struct Image *im)
+{
+    struct IClass *cl;
+
+    if (!im || im->Depth != CUSTOMIMAGEDEPTH)
+        return NULL;
+    cl = OCLASS(im);
+    if (!cl || !cl->cl_ID || strcmp((const char *)cl->cl_ID, "itexticlass"))
+        return NULL;
+    return (struct IntuiText *)im->ImageData;
+}
+
+static BOOL ui_tree(void)
+{
+    static const char *const sys[] = {"", "size", "drag", "sdrag", "depth", "sdepth",
+                                      "zoom", "", "close"};
+    struct text t = {0};
+    struct Screen *s;
+    struct Layer *l;
+    ULONG lock;
+
+    lock = LockIBase(0);
+    s = IntuitionBase->FirstScreen;
+    t_chr(&t, 'S');
+    t_tab(&t);
+    t_hex(&t, (ULONG)s);
+    t_tab(&t);
+    t_num(&t, s->Width);
+    t_tab(&t);
+    t_num(&t, s->Height);
+    t_tab(&t);
+    t_str(&t, screen_title(s), FALSE);
+    t_chr(&t, '\n');
+    /* Layers run front to back; the window list does not. */
+    for (l = s->LayerInfo.top_layer; l; l = l->back) {
+        struct Window *w;
+        struct Gadget *g;
+        LONG box[4], n = 0;
+
+        for (w = s->FirstWindow; w && w != (struct Window *)l->Window; w = w->NextWindow)
+            ;
+        if (!w)
+            continue;
+        box[0] = w->LeftEdge, box[1] = w->TopEdge, box[2] = w->Width, box[3] = w->Height;
+        t_chr(&t, 'W');
+        t_tab(&t);
+        t_hex(&t, (ULONG)w);
+        t_box(&t, box);
+        t_tab(&t);
+        if (w == IntuitionBase->ActiveWindow) t_chr(&t, 'a');
+        if (w->Flags & WFLG_BACKDROP) t_chr(&t, 'b');
+        t_tab(&t);
+        t_str(&t, w->Title, FALSE);
+        t_chr(&t, '\n');
+        for (g = w->FirstGadget; g; g = g->NextGadget, n++) {
+            UWORD type = g->GadgetType;
+            gadget_box(w, g, box);
+            t_chr(&t, 'G');
+            t_tab(&t);
+            t_hex(&t, (ULONG)w);
+            t_tab(&t);
+            t_num(&t, n);
+            t_box(&t, box);
+            t_tab(&t);
+            if (type & GTYP_SYSGADGET)
+                t_str(&t, (const UBYTE *)"sys", FALSE);
+            else switch (type & GTYP_GTYPEMASK) {
+            case GTYP_BOOLGADGET:
+                t_str(&t, (const UBYTE *)(g->Activation & GACT_TOGGLESELECT ? "check" : "button"), FALSE);
+                break;
+            case GTYP_PROPGADGET: t_str(&t, (const UBYTE *)"prop", FALSE); break;
+            case GTYP_STRGADGET: t_str(&t, (const UBYTE *)"string", FALSE); break;
+            default: t_str(&t, (const UBYTE *)"other", FALSE); break;
+            }
+            t_tab(&t);
+            if (g->Flags & GFLG_DISABLED) t_chr(&t, 'd');
+            if (g->Flags & GFLG_SELECTED) t_chr(&t, 's');
+            t_tab(&t);
+            if (type & GTYP_SYSGADGET)
+                t_str(&t, (const UBYTE *)sys[(type & GTYP_SYSTYPEMASK) >> 4 <= 8 ?
+                                             (type & GTYP_SYSTYPEMASK) >> 4 : 0], FALSE);
+            else if ((g->Flags & GFLG_LABELMASK) == GFLG_LABELSTRING)
+                t_str(&t, (const UBYTE *)g->GadgetText, TRUE);
+            else if ((g->Flags & GFLG_LABELMASK) == GFLG_LABELITEXT)
+                t_itext(&t, g->GadgetText);
+            else
+                t_itext(&t, image_text((struct Image *)g->GadgetText));
+            t_chr(&t, '\n');
+        }
+    }
+    UnlockIBase(lock);
+    return send_text(&t);
+}
+
+static void t_item(struct text *t, struct MenuItem *it, LONG *box)
+{
+    t_box(t, box);
+    t_tab(t);
+    if (it->Flags & ITEMENABLED) t_chr(t, 'e');
+    if ((it->Flags & CHECKIT) && (it->Flags & CHECKED)) t_chr(t, 'c');
+    t_tab(t);
+    if ((it->Flags & COMMSEQ) && it->Command)
+        t_chr(t, it->Command);
+    t_tab(t);
+    if ((it->Flags & ITEMTEXT) && it->ItemFill)
+        t_itext(t, (struct IntuiText *)it->ItemFill);
+    else
+        t_str(t, (const UBYTE *)"(image)", FALSE);
+    t_chr(t, '\n');
+}
+
+/* Boxes as Intuition places them: titles in the screen bar, items below their title,
+ * sub items next to their item. Menu patches that draw elsewhere are not seen. */
+static BOOL menus(void)
+{
+    struct text t = {0};
+    struct Window *w;
+    struct Menu *m;
+    ULONG lock;
+    LONG mi = 0;
+
+    lock = LockIBase(0);
+    w = IntuitionBase->ActiveWindow;
+    if (w) {
+        /* RMBTRAP: the right button goes to the program, the strip never shows. */
+        t_chr(&t, 'A');
+        t_tab(&t);
+        t_hex(&t, (ULONG)w);
+        t_tab(&t);
+        if (w->Flags & WFLG_RMBTRAP) t_chr(&t, 'r');
+        t_tab(&t);
+        t_str(&t, w->Title, FALSE);
+        t_chr(&t, '\n');
+    }
+    for (m = w ? w->MenuStrip : NULL; m; m = m->NextMenu, mi++) {
+        struct Screen *s = w->WScreen;
+        struct MenuItem *it;
+        LONG box[4], ii = 0, bar = s->BarHeight + 1;
+
+        box[0] = m->LeftEdge, box[1] = 0, box[2] = m->Width, box[3] = bar;
+        t_chr(&t, 'M');
+        t_tab(&t);
+        t_num(&t, mi);
+        t_box(&t, box);
+        t_tab(&t);
+        if (m->Flags & MENUENABLED) t_chr(&t, 'e');
+        t_tab(&t);
+        t_str(&t, (const UBYTE *)m->MenuName, FALSE);
+        t_chr(&t, '\n');
+        for (it = m->FirstItem; it; it = it->NextItem, ii++) {
+            struct MenuItem *sub;
+            LONG ix = m->LeftEdge + it->LeftEdge + MENU_X, iy = bar + it->TopEdge + MENU_Y, si = 0;
+
+            box[0] = ix, box[1] = iy, box[2] = it->Width, box[3] = it->Height;
+            t_chr(&t, 'I');
+            t_tab(&t);
+            t_num(&t, mi);
+            t_tab(&t);
+            t_num(&t, ii);
+            t_item(&t, it, box);
+            for (sub = it->SubItem; sub; sub = sub->NextItem, si++) {
+                box[0] = ix + sub->LeftEdge + SUB_X, box[1] = iy + sub->TopEdge + SUB_Y;
+                box[2] = sub->Width, box[3] = sub->Height;
+                t_chr(&t, 'U');
+                t_tab(&t);
+                t_num(&t, mi);
+                t_tab(&t);
+                t_num(&t, ii);
+                t_tab(&t);
+                t_num(&t, si);
+                t_item(&t, sub, box);
+            }
+        }
+    }
+    UnlockIBase(lock);
+    return send_text(&t);
 }
 
 /* ---- setup ------------------------------------------------------------ */
@@ -803,11 +1258,60 @@ static void drop_client(void)
     ReleaseSemaphore(&picture);
 }
 
+/* First line of the key file, at most KEY_MAX bytes, trailing blanks cut. Read for
+ * every connection, so a key put there during SETUP counts from the next one on. */
+static void load_key(void)
+{
+    UBYTE buf[KEY_MAX];
+    BPTR fh = Open(secret_file, MODE_OLDFILE);
+    LONG n = 0, i;
+
+    secret_len = 0;
+    if (!fh)
+        return;
+    n = Read(fh, buf, sizeof(buf));
+    Close(fh);
+    if (n <= 0)
+        return;
+    for (i = 0; i < n && buf[i] != '\n' && buf[i] != '\r'; i++)
+        ;
+    while (i > 0 && (buf[i - 1] == ' ' || buf[i - 1] == '\t'))
+        i--;
+    memset(secret, 0, sizeof(secret));
+    memcpy(secret, buf, i);
+    secret_len = i;
+}
+
+/* A failed attempt costs a second for everyone: one guess per second at most. */
+static BOOL refuse(void)
+{
+    reply(1);
+    Delay(50);
+    return FALSE;
+}
+
+static BOOL auth(UWORD len)
+{
+    UBYTE got[KEY_MAX], diff;
+    LONG i;
+
+    memset(got, 0, sizeof(got));
+    if (!receive(got, len < KEY_MAX ? len : KEY_MAX) || (len > KEY_MAX && !skip(len - KEY_MAX)))
+        return FALSE;
+    diff = len != secret_len;
+    for (i = 0; i < KEY_MAX; i++)  /* the same work whatever matches */
+        diff |= got[i] ^ secret[i];
+    if (secret_len && diff)
+        return refuse();
+    authed = TRUE;
+    return reply(0);
+}
+
 static void take_client(void)
 {
     struct sockaddr_in addr;
     LONG len = sizeof(addr), fd, one = 1, low = SEND_STEP, buffer = SEND_BUFFER;
-    static const UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
+    UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
 
     fd = accept(listener, (struct sockaddr *)&addr, &len);
     if (fd < 0)
@@ -818,6 +1322,10 @@ static void take_client(void)
     IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through ready() */
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
+    load_key();
+    authed = secret_len == 0;
+    client_id = 0;
+    hello[7] = secret_len ? 1 : 0;
     if (!put(hello, 8) || !flush())
         drop_client();
 }
@@ -827,6 +1335,10 @@ static BOOL command(const UBYTE *c)
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
     UWORD w = c[6] << 8 | c[7], h = c[8] << 8 | c[9];
 
+    if (c[0] == CMD_AUTH)
+        return auth(x);
+    if (!authed)
+        return refuse();
     switch (c[0]) {
     case CMD_INFO:
         return info();
@@ -856,6 +1368,23 @@ static BOOL command(const UBYTE *c)
     case CMD_SETUP_END:
         setup_mode = FALSE;
         return reply(0);
+    case CMD_SCREENS:
+        return screens();
+    case CMD_SCREEN_FRONT:
+        return screen_front((ULONG)x << 16 | y);
+    case CMD_FRAME_RGB:
+        return frame_rgb(x, y, w, h);
+    case CMD_MOVE_REL:
+        input_ms = now_ms();
+        move_by((WORD)x, (WORD)y);
+        return reply(0);
+    case CMD_UITREE:
+        return ui_tree();
+    case CMD_MENUS:
+        return menus();
+    case CMD_CLIENT:
+        client_id = (ULONG)x << 16 | y;
+        return reply(client_id && owner == client_id ? 0 : 1);
     }
     return reply(1);
 }
@@ -965,12 +1494,12 @@ static BOOL listen_on(UWORD port)
 
 int main(void)
 {
-    LONG args[2] = {0, 0};
+    LONG args[3] = {0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     int rc = RETURN_FAIL;
 
-    rda = ReadArgs("PORT/K/N,SETUP/S", args, NULL);
+    rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K", args, NULL);
     if (!rda) {
         PrintFault(IoErr(), "amigentd");
         return RETURN_FAIL;
@@ -978,6 +1507,10 @@ int main(void)
     if (args[0])
         port = *(LONG *)args[0];
     setup_mode = args[1] != 0;
+    if (args[2]) {
+        strncpy(secret_file, (const char *)args[2], sizeof(secret_file) - 1);
+        secret_file[sizeof(secret_file) - 1] = 0;
+    }
     FreeArgs(rda);
 
     server = FindTask(NULL);
@@ -988,8 +1521,7 @@ int main(void)
     KeymapBase = OpenLibrary("keymap.library", 37);
     if (!IntuitionBase || !GfxBase || !KeymapBase)
         goto out;
-    if (!(CyberGfxBase = wait_for("cybergraphics.library", 40)))
-        goto out;
+    CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;
     timer_port = CreateMsgPort();
