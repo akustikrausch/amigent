@@ -11,6 +11,7 @@ import socket
 import struct
 
 from .amigactl import AmigaCtl, AmigaError, ExecResult
+from . import tls
 from .secret import load_key
 
 ENCODING = "iso-8859-1"
@@ -36,7 +37,7 @@ class AmigaChannel:
     def connect(self) -> None:
         self.close()
         try:
-            self._sock = socket.create_connection((self.host, self.port), self.timeout)
+            self._sock = tls.connect(self.host, self.port, self.timeout)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             hello = self._exact(8)
             if hello[:4] != b"AMGT":

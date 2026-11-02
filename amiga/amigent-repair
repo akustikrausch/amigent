@@ -20,6 +20,11 @@ If NOT EXISTS S:amigent.key
     Copy $SRC/amigent.key S: CLONE
   EndIf
 EndIf
+If NOT EXISTS S:amigent-tls.pem
+  If EXISTS $SRC/amigent-tls.pem
+    Copy $SRC/amigent-tls.pem S: CLONE
+  EndIf
+EndIf
 If NOT EXISTS S:amigactld.conf
   If EXISTS $SRC/amigactld.conf
     Copy $SRC/amigactld.conf S: CLONE

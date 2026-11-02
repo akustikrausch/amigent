@@ -10,6 +10,7 @@ from collections import deque
 
 from PIL import Image
 
+from . import tls
 from .secret import load_key
 
 CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = range(1, 8)
@@ -85,19 +86,20 @@ class Amigentd:
         self._buttons = 0
         self._last_used = 0.0
         self.protocol = 0
+        self.flags = 0
         self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
 
     def connect(self) -> None:
         self.close()
         try:
-            self._sock = socket.create_connection((self.host, self.port), 5)
+            self._sock = tls.connect(self.host, self.port, 5)  # TLS when a certificate is pinned
             self._sock.settimeout(self.timeout)
             self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
-            self.protocol, locked = struct.unpack(">HH", hello[4:8])
-            if locked & 1:
+            self.protocol, self.flags = struct.unpack(">HH", hello[4:8])
+            if self.flags & 1:  # bit 0: a key is required, bit 1: TLS on the next port
                 self._authenticate()
             if self.protocol >= 2:
                 self._send(CMD_CLIENT, 0, self.client_id >> 16, self.client_id & 0xFFFF)

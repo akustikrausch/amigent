@@ -137,3 +137,45 @@ def test_old_amigentd_falls_back_to_amigactld():
     commands = Commands("127.0.0.1", banner.getsockname()[1], port, timeout=5)
     commands.connect()
     assert commands.banner.startswith("AMIGACTL")
+
+
+def test_tls_is_pinned(tmp_path, monkeypatch):
+    import ssl
+    import subprocess
+
+    from amigent import tls
+
+    monkeypatch.setattr(tls, "FOLDER", tmp_path)
+    made = tls.make_certificate("127.0.0.1")
+    if made is None:
+        pytest.skip("no openssl")
+    for_amiga, certificate = made
+    (tmp_path / "server.pem").write_bytes(for_amiga)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(tmp_path / "server.pem")
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(2)
+    port = listener.getsockname()[1]
+
+    def run():
+        while True:
+            conn, _ = listener.accept()
+            try:
+                with context.wrap_socket(conn, server_side=True) as secure:
+                    secure.sendall(b"AMGT")
+            except (OSError, ssl.SSLError):
+                pass
+
+    threading.Thread(target=run, daemon=True).start()
+    assert not tls.wanted("127.0.0.1")
+    tls.remember("127.0.0.1", certificate)
+    with tls.connect("127.0.0.1", port - 1, 5) as sock:
+        assert sock.recv(4) == b"AMGT"
+    other = subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
+                            "ec_paramgen_curve:prime256v1", "-nodes", "-subj", "/CN=x", "-keyout",
+                            str(tmp_path / "k"), "-out", str(tmp_path / "c")], capture_output=True)
+    assert other.returncode == 0
+    tls.remember("127.0.0.1", (tmp_path / "c").read_bytes())
+    with pytest.raises(ssl.SSLError):
+        tls.connect("127.0.0.1", port - 1, 5)

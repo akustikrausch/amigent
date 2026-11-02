@@ -24,6 +24,7 @@ from . import lzh
 from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
+from . import tls
 from .secret import load_key, new_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
@@ -116,6 +117,28 @@ def reach_amigactld(host: str, wait: float = 40) -> AmigaCtl | None:
     return None
 
 
+def offer_tls(link: Amigentd, host: str, home: str) -> None:
+    """Give amigentd a certificate and pin it here once its TLS port answers with it."""
+    made = tls.make_certificate(host)
+    if not made:
+        print("No openssl on this PC, so the connection stays unencrypted.")
+        return
+    for_amiga, certificate = made
+    link.put("S:amigent-tls.pem", for_amiga)
+    link.put(f"{home}/amigent-tls.pem", for_amiga)
+    pin = tls.remember(host, certificate)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            tls.connect(host, link.port, 10).close()
+            print("Connections to amigentd are encrypted from now on.")
+            return
+        except OSError:
+            time.sleep(3)
+    pin.unlink()
+    print("amigentd did not open its TLS port; the connection stays unencrypted.")
+
+
 def run_script(link: Amigentd, text: str) -> None:
     link.put("T:amigent-step", text.encode("iso-8859-1"))
     run(link, "Execute T:amigent-step")
@@ -204,6 +227,8 @@ def main() -> int:
         link.connect()
         with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
         install(link, args.home, key, allow, with_actld)
+        if link.flags & 2:
+            offer_tls(link, host, args.home)
         if not with_actld:
             channel = AmigaChannel(host, key=key)
             channel.connect()
