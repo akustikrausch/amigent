@@ -122,17 +122,6 @@ All numbers, how they were taken and how to repeat them are in
 
 More in the [guide](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md) and the [FAQ](https://github.com/akustikrausch/amigent/blob/main/docs/FAQ.md).
 
-## Related projects
-
-[amimcp](https://github.com/thomas-luebker/amimcp) also connects AI agents to
-real Amigas, [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4) does it
-for AmigaOS 4.1, and WinUAE and Amiberry have MCP servers of their own.
-
-## Thanks
-
-tbdye for amigactld, Volker Barthelmann for vbcc, and the PiStorm, Emu68, AmiKit
-and Aminet people.
-
 ## License
 
 MIT, see [LICENSE](https://github.com/akustikrausch/amigent/blob/main/LICENSE). By Andreas Wendorf (Akustikrausch).
