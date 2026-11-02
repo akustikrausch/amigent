@@ -119,5 +119,11 @@
  "clip_empty": "The clipboard is empty.",
  "clip_got": "Copied the Amiga's clipboard to this PC.",
  "clip_put_done": "On the Amiga's clipboard. Paste with Right Amiga+V.",
- "clip_failed": "Clipboard: {error}"
+ "clip_failed": "Clipboard: {error}",
+ "fleet_run": "Run on all",
+ "fleet_run_placeholder": "An AmigaDOS command for every Amiga, e.g. Version",
+ "fleet_running": "Running {command} …",
+ "fleet_details": "Details",
+ "fleet_restart": "Restart",
+ "fleet_restart_confirm": "Write the disks and restart {name}?"
 }

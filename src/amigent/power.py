@@ -12,6 +12,8 @@ import socket
 import subprocess
 import time
 
+from .amigactl import AmigaError
+
 OFF_SECONDS = 30
 BOOT_WAIT = 300
 RESTART_WAIT = 120  # after a restart: how long to wait before cutting the power, if we can
@@ -57,3 +59,13 @@ def power_cycle(host: str, port: int, attempts: int = 3) -> int:
         if wait_for_port(host, port, BOOT_WAIT):
             return attempt
     raise PowerError(f"no answer from {host}:{port} after {attempts} power cycles")
+
+
+def reboot(commands, volumes) -> None:
+    """Flush the disks, then pull the reset: the clean way down, not the plug."""
+    commands.flush(volumes)
+    try:
+        commands.exec("Run >NIL: C:Reboot", timeout=5)
+    except (OSError, AmigaError):
+        pass  # it dies mid-sentence, that's the whole point
+    commands.close()

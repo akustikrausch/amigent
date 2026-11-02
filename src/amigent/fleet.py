@@ -6,12 +6,15 @@ Usage: amigent-fleet                       open the overview
        amigent-fleet --list
 
 Every Amiga gets a Viewer in this one process, so the overview's previews and
-the remote desktop windows share one connection per Amiga.
+the remote desktop windows share one screen connection per Amiga. Commands for
+the whole fleet ride on a command channel of their own, so a long one never
+freezes a preview.
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import io
 import json
 import os
@@ -25,11 +28,17 @@ from urllib.parse import parse_qs, urlparse
 from . import machines
 from .amigactl import AmigaError
 from .amigentd import AmigentdError
+from .channel import Commands
+from .power import reboot
 from .secret import FOLDER
 from .viewer import STATIC, WEB, Viewer, _Server, open_window
 
 PREVIEW_EVERY = 20  # seconds between previews of one Amiga
 PREVIEW_WIDTH = 480
+RUN_TIMEOUT = 120  # one command for the whole fleet: generous, plipboxes are no T1 lines
+OUTPUT_LIMIT = 8000  # per Amiga, the page is no log viewer
+FLEET_STATIC = {"fleet.js": "text/javascript", "fleet.css": "text/css"}
+FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 
 
 def load_amigas() -> list[dict]:
@@ -47,6 +56,7 @@ class Fleet:
         for amiga in amigas:
             viewer = Viewer(amiga["name"])  # by name, so a new address is found again
             self.entries.append({"name": amiga["name"], "host": amiga["host"], "viewer": viewer,
+                                 "commands": Commands(amiga["name"]), "busy": threading.Lock(),
                                  "online": None, "info": {}, "preview": None, "seen": 0.0})
         self.httpd = None
         self.url = ""
@@ -94,8 +104,37 @@ class Fleet:
                          "online": e["online"],
                          "os": info.get("os", ""), "cpu": info.get("cpu", ""),
                          "free": info.get("chip_free", 0) + info.get("fast_free", 0),
-                         "seen": e["seen"], "watching": bool(e["viewer"].clients)})
+                         "info": info, "seen": e["seen"], "watching": bool(e["viewer"].clients)})
         return rows
+
+    def _command(self, entry: dict, job) -> dict:
+        """One Amiga, one job, its own channel: errors come back as text, never as a crash."""
+        commands = entry["commands"]
+        with entry["busy"]:
+            try:
+                return {"ok": True, **(job(commands) or {})}
+            except (OSError, AmigaError, AmigentdError, EOFError) as e:
+                commands.close()
+                return {"ok": False, "error": str(e) or type(e).__name__}
+
+    def run(self, command: str, ids: list[int] | None = None) -> list[dict]:
+        """The same AmigaDOS line on every chosen Amiga at once; slow ones don't hold up fast ones."""
+        chosen = [i for i in range(len(self.entries)) if ids is None or i in ids]
+
+        def one(i: int) -> dict:
+            def job(commands):
+                result = commands.exec(command, timeout=RUN_TIMEOUT)
+                return {"rc": result.rc, "output": result.output[-OUTPUT_LIMIT:]}
+            return {"id": i, "name": self.entries[i]["name"], **self._command(self.entries[i], job)}
+
+        if not chosen:
+            return []
+        with concurrent.futures.ThreadPoolExecutor(len(chosen)) as pool:
+            return list(pool.map(one, chosen))
+
+    def restart(self, index: int) -> dict:
+        """Disks flushed, then a warm restart; the preview finds it again once it is back."""
+        return self._command(self.entries[index], lambda commands: reboot(commands, FLUSH_VOLUMES))
 
     def open_viewer(self, index: int) -> str:
         viewer = self.entries[index]["viewer"]
@@ -126,8 +165,8 @@ class _FleetHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         name = url.path.lstrip("/")
-        if name in STATIC or name == "fleet.js":
-            kind = STATIC.get(name, "text/javascript")
+        if name in STATIC or name in FLEET_STATIC:
+            kind = STATIC.get(name) or FLEET_STATIC[name]
             return self._reply(200, (WEB / name).read_bytes(), kind)
         if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
             return self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
@@ -151,6 +190,32 @@ class _FleetHandler(BaseHTTPRequestHandler):
             except (ValueError, IndexError):
                 return self._reply(404, b"no such Amiga", "text/plain")
             return self._reply(200, json.dumps({"url": address}).encode(), "application/json")
+        self._reply(404, b"not found", "text/plain")
+
+    def do_POST(self) -> None:
+        url = urlparse(self.path)
+        if not self._allowed(parse_qs(url.query)):
+            return self._reply(403, b"forbidden", "text/plain")
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(size) or b"{}") if 0 <= size <= 65536 else None
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return self._reply(400, b"bad request", "text/plain")
+        if url.path == "/api/run":
+            command = str(body.get("command", "")).strip()
+            ids = body.get("ids")
+            if not command or "\n" in command or (ids is not None and not isinstance(ids, list)):
+                return self._reply(400, b"one command line, please", "text/plain")
+            result = self.fleet.run(command, [int(i) for i in ids] if ids is not None else None)
+            return self._reply(200, json.dumps(result).encode(), "application/json")
+        if url.path.startswith("/api/restart/"):
+            try:
+                result = self.fleet.restart(int(url.path.rsplit("/", 1)[1]))
+            except (ValueError, IndexError):
+                return self._reply(404, b"no such Amiga", "text/plain")
+            return self._reply(200, json.dumps(result).encode(), "application/json")
         self._reply(404, b"not found", "text/plain")
 
 

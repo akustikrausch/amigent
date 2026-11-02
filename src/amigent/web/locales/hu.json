@@ -119,5 +119,11 @@
  "clip_empty": "A vágólap üres.",
  "clip_got": "Az Amiga vágólapja átmásolva erre a gépre.",
  "clip_put_done": "Az Amiga vágólapján van. Beillesztés: jobb Amiga+V.",
- "clip_failed": "Vágólap: {error}"
+ "clip_failed": "Vágólap: {error}",
+ "fleet_run": "Futtatás mindegyiken",
+ "fleet_run_placeholder": "AmigaDOS parancs minden Amigának, pl. Version",
+ "fleet_running": "{command} fut …",
+ "fleet_details": "Részletek",
+ "fleet_restart": "Újraindítás",
+ "fleet_restart_confirm": "Lemezek kiírása és {name} újraindítása?"
 }

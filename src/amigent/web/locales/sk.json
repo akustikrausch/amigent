@@ -119,5 +119,11 @@
  "clip_empty": "Schránka je prázdna.",
  "clip_got": "Schránka Amigy skopírovaná do tohto PC.",
  "clip_put_done": "Je v schránke Amigy. Vložte pravou Amiga+V.",
- "clip_failed": "Schránka: {error}"
+ "clip_failed": "Schránka: {error}",
+ "fleet_run": "Spustiť na všetkých",
+ "fleet_run_placeholder": "Príkaz AmigaDOS pre každú Amigu, napr. Version",
+ "fleet_running": "Prebieha {command} …",
+ "fleet_details": "Podrobnosti",
+ "fleet_restart": "Reštartovať",
+ "fleet_restart_confirm": "Zapísať disky a reštartovať {name}?"
 }

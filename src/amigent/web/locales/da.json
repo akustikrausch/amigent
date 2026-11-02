@@ -119,5 +119,11 @@
  "clip_empty": "Udklipsholderen er tom.",
  "clip_got": "Amigaens udklipsholder kopieret til denne pc.",
  "clip_put_done": "Ligger i Amigaens udklipsholder. Indsæt med højre Amiga+V.",
- "clip_failed": "Udklipsholder: {error}"
+ "clip_failed": "Udklipsholder: {error}",
+ "fleet_run": "Kør på alle",
+ "fleet_run_placeholder": "En AmigaDOS-kommando til hver Amiga, f.eks. Version",
+ "fleet_running": "Kører {command} …",
+ "fleet_details": "Detaljer",
+ "fleet_restart": "Genstart",
+ "fleet_restart_confirm": "Skriv diskene og genstart {name}?"
 }
