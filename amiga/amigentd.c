@@ -2170,20 +2170,45 @@ struct run {
     char name[32], out[48];
 };
 
-/* A copy of the command path of the Shell that started us, for the command's
- * Shell, which frees it. Without it the command would only find C: programs.
+/* Where commands are looked for when no Shell gave us a path, as the
+ * Startup-Sequence sets it; C: comes last anyway. */
+static const char *const std_path[] = {
+    "SYS:Utilities", "SYS:Rexxc", "SYS:System", "S:", "SYS:Prefs", "SYS:WBStartup",
+    "SYS:Tools", "SYS:Tools/Commodities", NULL
+};
+
+/* A copy of a command path for the command's Shell, which frees it. Without it
+ * the command would only find C: programs. It is the path of the Shell that
+ * started us; from Workbench, that of the Workbench process, or else std_path.
  * Nodes are a BPTR to the next one and a lock. */
 static BPTR copy_path(void)
 {
     struct CommandLineInterface *cli = BADDR(((struct Process *)server)->pr_CLI);
-    BPTR first = 0, *link = &first, *from, *node;
+    struct Task *wb;
+    BPTR first = 0, *link = &first, *from, *node, lock;
+    BOOL copied;
+    LONG i;
 
-    if (!cli)
-        return 0;  /* started from Workbench */
-    for (from = BADDR(cli->cli_CommandDir); from; from = BADDR(from[0])) {
+    Forbid();  /* the Workbench process could end meanwhile */
+    if (!cli && (wb = FindTask("Workbench")) && wb->tc_Node.ln_Type == NT_PROCESS)
+        cli = BADDR(((struct Process *)wb)->pr_CLI);
+    for (from = cli ? BADDR(cli->cli_CommandDir) : NULL; from; from = BADDR(from[0])) {
         if (!(node = AllocVec(2 * sizeof(BPTR), MEMF_PUBLIC | MEMF_CLEAR)))
             break;
         node[1] = DupLock(from[1]);
+        *link = MKBADDR(node);
+        link = &node[0];
+    }
+    copied = first != 0;
+    Permit();
+    for (i = 0; !copied && std_path[i]; i++) {  /* also when that path was empty */
+        if (!(lock = Lock(std_path[i], SHARED_LOCK)))
+            continue;
+        if (!(node = AllocVec(2 * sizeof(BPTR), MEMF_PUBLIC | MEMF_CLEAR))) {
+            UnLock(lock);
+            break;
+        }
+        node[1] = lock;
         *link = MKBADDR(node);
         link = &node[0];
     }

@@ -291,7 +291,10 @@ separated by tabs.
   its own, with input from `NIL:` and output and errors collected in a file in
   `T:`, which goes away afterwards. The command finds programs along the
   command path of the Shell that started amigentd (`Path`), so `rx` and the
-  like work; started from Workbench it only has `C:`. The directory is the
+  like work. Started from Workbench it takes the path of the Workbench process
+  (the Shell that ran `LoadWB`); if that has none, `SYS:Utilities`, `SYS:Rexxc`,
+  `SYS:System`, `S:`, `SYS:Prefs`, `SYS:WBStartup`, `SYS:Tools` and
+  `SYS:Tools/Commodities`, those that exist. `C:` is always searched last. The directory is the
   current directory for the command; without one it is the one amigentd was
   started in. The output
   comes after the command has finished, all at once. Return code `-1` with a
