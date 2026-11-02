@@ -152,7 +152,11 @@ def run(link: Amigentd, command: str) -> None:
 
 def amigentd_build(link: Amigentd) -> str:
     """amigentd.000 for a plain 68000 or 68010, amigentd for everything from the 68020 on."""
-    return "amigentd.000" if link.run("CPU CHECK 68020") == 5 else "amigentd"
+    code = link.run("CPU CHECK 68020")
+    if code not in (0, 5):
+        raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
+                         "Workbench disk and try again.")
+    return "amigentd.000" if code == 5 else "amigentd"
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
@@ -212,7 +216,12 @@ def main() -> int:
                         help="also install amigactld (automatic for amigentd before protocol 3)")
     parser.add_argument("--allow", help="the PC address amigactld should accept (default: this PC)")
     parser.add_argument("--no-allow", action="store_true", help="let amigactld accept any address")
+    parser.add_argument("--serve", nargs="?", const=8001, type=int, metavar="PORT",
+                        help="first step: offer amigentd to the Amiga over the network (port 8001)")
     args = parser.parse_args()
+    if args.serve:
+        from .serve import serve
+        return serve(args.serve)
 
     host = args.host or find_amiga()
     if not host:
