@@ -410,8 +410,11 @@ def amiga_mouse_relative(dx: int, dy: int) -> str:
 def amiga_ui_tree() -> str:
     """The front screen's windows and gadgets as text, with labels and boxes.
 
-    Works for standard Intuition and GadTools windows; MUI interiors and games
-    still need screenshots. Click entries with amiga_ui_click.
+    Labels come from classic Intuition gadgets and GadTools checkboxes, strings
+    and sliders. GadTools buttons, BOOPSI, ReAction and MUI gadgets (and
+    requesters patched by tools like ReqAttack) show an empty label but still
+    their box and number: look at that area with amiga_screenshot_color and
+    click with amiga_ui_click(number=..., window=...).
     """
     lines = []
     for item in _with_screen(screen.ui_tree):
@@ -424,7 +427,7 @@ def amiga_ui_tree() -> str:
         else:
             state = " disabled" if item["disabled"] else ""
             state += " selected" if item["selected"] else ""
-            lines.append(f"    {item['type']} {item['label']!r} {box}{state}")
+            lines.append(f"    #{item['id']} {item['type']} {item['label']!r} {box}{state}")
     return "\n".join(lines) or "no windows"
 
 
@@ -433,14 +436,24 @@ def _centre(item: dict) -> tuple[int, int]:
 
 
 @mcp.tool()
-def amiga_ui_click(label: str, window: str = "", button: str = "left", double: bool = False) -> str:
-    """Click a gadget by its label (from amiga_ui_tree), optionally in a window by title."""
+def amiga_ui_click(label: str = "", window: str = "", number: int = -1, button: str = "left",
+                   double: bool = False) -> str:
+    """Click a gadget from amiga_ui_tree by its label, or by its #number within a window.
+
+    window is part of the window's title, or its id from amiga_ui_tree.
+    """
     tree = _with_screen(screen.ui_tree)
     windows = {w["id"]: w["title"] for w in tree if w["kind"] == "window"}
     gadgets = [g for g in tree if g["kind"] == "gadget"
-               and (not window or window.lower() in windows.get(g["window"], "").lower())]
-    exact = [g for g in gadgets if g["label"].lower() == label.lower()]
-    matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
+               and (not window or window == g["window"]
+                    or window.lower() in windows.get(g["window"], "").lower())]
+    if number >= 0:
+        matches = [g for g in gadgets if g["id"] == str(number)]
+    else:
+        if not label:
+            raise AmigaError("give a label or a number")
+        exact = [g for g in gadgets if g["label"].lower() == label.lower()]
+        matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
     if len(matches) != 1:
         names = ", ".join(repr(g["label"]) for g in matches[:8])
         raise AmigaError(f"{len(matches)} gadgets match {label!r}{': ' + names if names else ''}")
@@ -449,7 +462,7 @@ def amiga_ui_click(label: str, window: str = "", button: str = "left", double: b
         raise AmigaError(f"{gadget['label']!r} is disabled")
     x, y = _centre(gadget)
     _with_screen(lambda: screen.click(x, y, button, double))
-    return f"clicked {gadget['label']!r} at ({x},{y})"
+    return f"clicked #{gadget['id']} {gadget['label']!r} at ({x},{y})"
 
 
 @mcp.tool()
@@ -512,7 +525,10 @@ def amiga_menu_select(path: str) -> str:
 def amiga_click(x: int, y: int, button: str = "left", double: bool = False) -> str:
     """Click at screen pixels. button is left, right or middle.
 
-    The right button opens menus only while held; use amiga_drag for menus.
+    The right button opens menus only while held; use amiga_menu_select or
+    amiga_drag for menus. Avoid short right clicks: on a Directory Opus desktop
+    they leave a popup open that holds back every new window and screen until
+    Esc is pressed (amiga_key('esc')).
     """
     _with_screen(lambda: screen.click(x, y, button, double))
     return f"clicked {button} at ({x},{y})"

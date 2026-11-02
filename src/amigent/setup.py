@@ -205,7 +205,7 @@ def main() -> int:
         return 1
     path = save_key(key)
     print(f"Done. {ctl.banner} and amigentd are up, and both start with the machine.")
-    print(f"The key is in {path} and in S:amigent.key; amigentd asks for it after the next restart.")
+    print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
     print(f"AMIGENT_HOST={host}")
     return 0
 

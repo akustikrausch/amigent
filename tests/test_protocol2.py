@@ -115,9 +115,9 @@ class FakeScreen:
 def test_ui_click_by_label(monkeypatch):
     fake = FakeScreen(tree=[
         {"kind": "window", "id": "w1", "title": "Save file"},
-        {"kind": "gadget", "window": "w1", "label": "Save", "x": 20, "y": 80, "w": 60, "h": 14,
+        {"kind": "gadget", "window": "w1", "id": "4", "label": "Save", "x": 20, "y": 80, "w": 60, "h": 14,
          "disabled": False, "selected": False, "type": "button"},
-        {"kind": "gadget", "window": "w1", "label": "Cancel", "x": 200, "y": 80, "w": 60, "h": 14,
+        {"kind": "gadget", "window": "w1", "id": "5", "label": "Cancel", "x": 200, "y": 80, "w": 60, "h": 14,
          "disabled": True, "selected": False, "type": "button"},
     ])
     monkeypatch.setattr(server, "screen", fake)
@@ -177,7 +177,7 @@ def test_key_is_sent_first():
     port = locked_amigentd(b"sesam", seen)
     amiga = Amigentd("127.0.0.1", port, timeout=5, key="sesam")
     amiga.ping()
-    assert seen[:2] == [17, 1]
+    assert seen[:3] == [17, 18, 1]  # key, then who we are, then INFO
 
 
 def test_wrong_or_missing_key_is_explained():
@@ -194,3 +194,23 @@ def test_setup_keeps_existing_amigactld_settings():
     script = allow_script("192.168.1.10", "SYS:amigent")
     assert 'Search >NIL: S:amigactld.conf "ALLOW 192.168.1.10"' in script
     assert 'Echo >>S:amigactld.conf "ALLOW 192.168.1.10"' in script
+
+
+def test_picture_is_dropped_when_others_took_frames():
+    seen = []
+    amiga = fake_amigentd(2, {18: b"\1"}, seen)
+    amiga.connect()
+    amiga._frame = object()  # pretend we had a picture
+    amiga.connect()
+    assert amiga._frame is None
+
+
+def test_ui_click_by_number(monkeypatch):
+    fake = FakeScreen(tree=[
+        {"kind": "window", "id": "08e7b714", "title": "Amigent"},
+        {"kind": "gadget", "window": "08e7b714", "id": "6", "label": "", "x": 992, "y": 574,
+         "w": 103, "h": 29, "disabled": False, "selected": False, "type": "other"},
+    ])
+    monkeypatch.setattr(server, "screen", fake)
+    server.amiga_ui_click(number=6, window="Amigent")
+    assert fake.calls == [("click", 1043, 588)]

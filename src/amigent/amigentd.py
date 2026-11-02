@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import socket
 import struct
 import time
@@ -13,7 +14,7 @@ from .secret import load_key
 CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = range(1, 8)
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
-CMD_AUTH = 17
+CMD_AUTH, CMD_CLIENT = 17, 18
 RGB_LIMIT = 512  # FRAME_RGB answers regions up to this many pixels on each side
 
 RAWKEYS = {
@@ -55,7 +56,8 @@ class Amigentd:
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0,
                  key: str | None = None):
         self.host = host
-        self.key = key if key is not None else load_key(host)
+        self.key = key
+        self.client_id = random.getrandbits(32)  # lets amigentd tell us if others took frames
         self.port = port
         self.timeout = timeout
         self._sock: socket.socket | None = None
@@ -79,6 +81,10 @@ class Amigentd:
             self.protocol, locked = struct.unpack(">HH", hello[4:8])
             if locked & 1:
                 self._authenticate()
+            if self.protocol >= 2:
+                self._send(CMD_CLIENT, 0, self.client_id >> 16, self.client_id & 0xFFFF)
+                if self._exact(1) != b"\0":
+                    self._frame = None  # frames went to someone else meanwhile
             size = self._info()
         except OSError as e:
             self.close()
@@ -89,6 +95,8 @@ class Amigentd:
         self._apply_size(*size)
 
     def _authenticate(self) -> None:
+        if self.key is None:
+            self.key = load_key(self.host)  # read late: setup may have created it meanwhile
         if not self.key:
             raise AmigentdError("amigentd wants a key: run amigent-setup, or set AMIGENT_KEY")
         raw = self.key.encode()
@@ -146,9 +154,9 @@ class Amigentd:
         try:
             result = fn()
         except (OSError, AmigentdError):
-            if time.monotonic() - self._last_used < 100:
-                # Not the idle timeout, so another client took over and may have
-                # received tiles our picture is missing.
+            if self.protocol < 2 and time.monotonic() - self._last_used < 100:
+                # Old amigentd: not the idle timeout, so another client took over
+                # and may have received tiles our picture is missing.
                 self._frame = None
             self.connect()
             result = fn()
@@ -333,7 +341,7 @@ class Amigentd:
         items = []
         for f in self._text(CMD_UITREE):
             if f[0] == "S" and len(f) >= 5:
-                items.append({"kind": "screen", "handle": int(f[1], 0), "width": int(f[2]),
+                items.append({"kind": "screen", "handle": int(f[1], 16), "width": int(f[2]),
                               "height": int(f[3]), "title": f[4]})
             elif f[0] == "W" and len(f) >= 8:
                 items.append({"kind": "window", "id": f[1], "x": int(f[2]), "y": int(f[3]),
