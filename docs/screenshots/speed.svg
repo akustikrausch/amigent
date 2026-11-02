@@ -13,27 +13,27 @@
 </style>
 <rect class="bg" width="760" height="324" rx="10"/>
 <text class="title" x="20" y="32">Seconds per screen update over a plipbox (50 KB/s)</text>
-<text class="sub" x="20" y="52">Lower is better. 1920×1080 Workbench on a real A1200, logarithmic scale.</text>
+<text class="sub" x="20" y="52">Shorter is better. 1920×1080 Workbench on a real A1200; bar lengths to scale.</text>
 <rect class="raw" x="210" y="64" width="12" height="12" rx="3"/><text class="sub" x="228" y="75">Whole screen as raw pixels</text>
 <rect class="ours" x="420" y="64" width="12" height="12" rx="3"/><text class="sub" x="438" y="75">Amigent</text>
-<line class="grid" x1="240.2" y1="88" x2="240.2" y2="276"/>
-<text class="tick" x="240.2" y="292" text-anchor="middle">10 ms</text>
-<line class="grid" x1="340.7" y1="88" x2="340.7" y2="276"/>
-<text class="tick" x="340.7" y="292" text-anchor="middle">100 ms</text>
-<line class="grid" x1="441.2" y1="88" x2="441.2" y2="276"/>
-<text class="tick" x="441.2" y="292" text-anchor="middle">1 s</text>
-<line class="grid" x1="541.6" y1="88" x2="541.6" y2="276"/>
-<text class="tick" x="541.6" y="292" text-anchor="middle">10 s</text>
-<line class="grid" x1="642.1" y1="88" x2="642.1" y2="276"/>
-<text class="tick" x="642.1" y="292" text-anchor="middle">100 s</text>
+<line class="grid" x1="210.0" y1="88" x2="210.0" y2="276"/>
+<text class="tick" x="210.0" y="292" text-anchor="middle">0 s</text>
+<line class="grid" x1="320.8" y1="88" x2="320.8" y2="276"/>
+<text class="tick" x="320.8" y="292" text-anchor="middle">30 s</text>
+<line class="grid" x1="431.5" y1="88" x2="431.5" y2="276"/>
+<text class="tick" x="431.5" y="292" text-anchor="middle">60 s</text>
+<line class="grid" x1="542.3" y1="88" x2="542.3" y2="276"/>
+<text class="tick" x="542.3" y="292" text-anchor="middle">90 s</text>
+<line class="grid" x1="653.1" y1="88" x2="653.1" y2="276"/>
+<text class="tick" x="653.1" y="292" text-anchor="middle">120 s</text>
 <line class="axis" x1="210" y1="88" x2="210" y2="276"/>
 <text class="case" x="198" y="114" text-anchor="end">First picture</text>
-<path class="raw" d="M210 92h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="105">124 s</text>
-<path class="ours" d="M210 114h256.1a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-256.1z"><title>Amigent: 1.9 s</title></path><text class="value" x="476.1" y="127">1.9 s</text>
+<path class="raw" d="M210 92h455.4a4.0 4.0 0 0 1 4.0 4.0v10.0a4.0 4.0 0 0 1 -4.0 4.0h-455.4z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="675.4" y="105">124 s</text>
+<path class="ours" d="M210 114h3.6a3.6 3.6 0 0 1 3.6 3.6v10.8a3.6 3.6 0 0 1 -3.6 3.6h-3.6z"><title>Amigent: 1.9 s</title></path><text class="value" x="223.2" y="127">1.9 s · 64× faster</text>
 <text class="case" x="198" y="178" text-anchor="end">One line typed in a Shell</text>
-<path class="raw" d="M210 156h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="169">124 s</text>
-<path class="ours" d="M210 178h149.8a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-149.8z"><title>Amigent: 170 ms</title></path><text class="value" x="369.8" y="191">170 ms</text>
+<path class="raw" d="M210 156h455.4a4.0 4.0 0 0 1 4.0 4.0v10.0a4.0 4.0 0 0 1 -4.0 4.0h-455.4z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="675.4" y="169">124 s</text>
+<path class="ours" d="M210 178h1.5a1.5 1.5 0 0 1 1.5 1.5v15.0a1.5 1.5 0 0 1 -1.5 1.5h-1.5z"><title>Amigent: 170 ms</title></path><text class="value" x="219.0" y="191">170 ms · 730× faster</text>
 <text class="case" x="198" y="242" text-anchor="end">Nothing changed</text>
-<path class="raw" d="M210 220h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="233">124 s</text>
-<path class="ours" d="M210 242h10.7a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-10.7z"><title>Amigent: 7 ms</title></path><text class="value" x="230.7" y="255">7 ms</text>
+<path class="raw" d="M210 220h455.4a4.0 4.0 0 0 1 4.0 4.0v10.0a4.0 4.0 0 0 1 -4.0 4.0h-455.4z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="675.4" y="233">124 s</text>
+<path class="ours" d="M210 242h1.5a1.5 1.5 0 0 1 1.5 1.5v15.0a1.5 1.5 0 0 1 -1.5 1.5h-1.5z"><title>Amigent: 7 ms</title></path><text class="value" x="219.0" y="255">7 ms · 18,000× faster</text>
 </svg>

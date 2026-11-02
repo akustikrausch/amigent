@@ -102,7 +102,7 @@ Measured with a 640×256 Workbench screen:
 
 On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s):
 
-![Seconds per screen update over a plipbox: whole screen as raw pixels 124 s each time; Amigent 1.9 s for the first picture, 170 ms for a typed line, 7 ms when nothing changed](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/speed.svg)
+![Seconds per screen update over a plipbox, bar lengths to scale: whole screen as raw pixels 124 s each time; Amigent 1.9 s for the first picture (64 times faster), 170 ms for a typed line (730 times), 7 ms when nothing changed (18,000 times)](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/speed.svg)
 
 The orange bars are what moving the whole screen as raw 24-bit pixels costs on
 that wire, every time; the blue ones are Amigent, measured on a real A1200.
