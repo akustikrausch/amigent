@@ -12,6 +12,16 @@ If NOT EXISTS C:amigentd
   Copy $SRC/amigentd C: CLONE
   Protect C:amigentd rwed
 EndIf
+If NOT EXISTS S:amigent.key
+  If EXISTS $SRC/amigent.key
+    Copy $SRC/amigent.key S: CLONE
+  EndIf
+EndIf
+If NOT EXISTS S:amigactld.conf
+  If EXISTS $SRC/amigactld.conf
+    Copy $SRC/amigactld.conf S: CLONE
+  EndIf
+EndIf
 Delete >NIL: S:amigent-start QUIET
 Search >NIL: S:User-Startup "C:amigactld" QUIET
 If WARN

@@ -1,10 +1,11 @@
 """One-shot installer, run from the PC once amigentd is up on the Amiga.
 
-Usage: amigent-setup [HOST] [--home DIR]
+Usage: amigent-setup [HOST] [--home DIR] [--allow IP | --no-allow]
 
 Start `amigentd SETUP` on the Amiga first. This finds the machine, fetches
-amigactld from its project page, puts everything in place and adds the two
-services to S:User-Startup.
+amigactld from its project page, puts everything in place, adds the two
+services to S:User-Startup, gives amigentd a key and lets amigactld accept
+only this PC.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from . import lzh
 from .amigactl import AmigaCtl
 from .amigentd import Amigentd, AmigentdError
 from .power import wait_for_port
+from .secret import load_key, new_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
 AMIGA = REPO / "amiga"
@@ -59,13 +61,59 @@ def fetch_amigactld() -> bytes:
         return lzh.extract(response.read(), "/amigactld")
 
 
+def own_address(host: str) -> str:
+    """The address this PC uses towards the Amiga."""
+    with socket.create_connection((host, 6801), 5) as s:
+        return s.getsockname()[0]
+
+
+def same_network(a: str, b: str) -> bool:
+    return a.rsplit(".", 1)[0] == b.rsplit(".", 1)[0]
+
+
+def allow_script(address: str, home: str) -> str:
+    """Add ALLOW for address to S:amigactld.conf, keeping whatever is in there."""
+    return f"""FailAt 21
+If EXISTS S:amigactld.conf
+  Copy S:amigactld.conf S:amigactld.conf.amigent-bak QUIET
+  Search >NIL: S:amigactld.conf "ALLOW {address}" QUIET
+  If WARN
+    Echo >>S:amigactld.conf "ALLOW {address}"
+  EndIf
+Else
+  Echo >S:amigactld.conf "ALLOW {address}"
+EndIf
+Copy S:amigactld.conf {home}/amigactld.conf QUIET
+"""
+
+
+UNDO_ALLOW = """FailAt 21
+If EXISTS S:amigactld.conf.amigent-bak
+  Copy S:amigactld.conf.amigent-bak S:amigactld.conf QUIET
+Else
+  Delete >NIL: S:amigactld.conf QUIET
+EndIf
+Status >NIL: COMMAND=C:amigactld
+If NOT WARN
+  Break `Status COMMAND=C:amigactld` C
+  Wait 2
+EndIf
+Run >NIL: C:amigactld
+"""
+
+
+def run_script(link: Amigentd, text: str) -> None:
+    link.put("T:amigent-step", text.encode("iso-8859-1"))
+    run(link, "Execute T:amigent-step")
+
+
 def run(link: Amigentd, command: str) -> None:
     code = link.run(command)
     if code > 5:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
-def install(link: Amigentd, home: str) -> None:
+def install(link: Amigentd, home: str, key: str, allow: str | None) -> None:
     binary = fetch_amigactld()
     print("uploading amigactld")
     link.put("C:amigactld", binary)
@@ -77,6 +125,12 @@ def install(link: Amigentd, home: str) -> None:
         text = (AMIGA / name).read_text().replace("Stuff:amigent", home)
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
+    print("setting the key")
+    link.put("S:amigent.key", (key + "\n").encode())
+    link.put(f"{home}/amigent.key", (key + "\n").encode())
+    if allow:
+        print(f"amigactld will accept only {allow}")
+        run_script(link, allow_script(allow, home))
     script = f"""FailAt 21
 Protect C:amigactld rwed
 Protect {home}/amigent-repair +s
@@ -108,6 +162,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("host", nargs="?")
     parser.add_argument("--home", default="SYS:amigent", help="folder for the Amigent scripts")
+    parser.add_argument("--allow", help="the PC address amigactld should accept (default: this PC)")
+    parser.add_argument("--no-allow", action="store_true", help="let amigactld accept any address")
     args = parser.parse_args()
 
     host = args.host or find_amiga()
@@ -115,20 +171,41 @@ def main() -> int:
         print("No Amiga in sight. Is `amigentd SETUP` running over there?")
         return 1
     print(f"Amiga at {host}")
-    link = Amigentd(host, timeout=60)
+    key = load_key(host) or new_key()
+    allow = None if args.no_allow else args.allow
+    if not allow and not args.no_allow:
+        mine = own_address(host)
+        if same_network(mine, host):
+            allow = mine
+        else:
+            print(f"This PC talks to the Amiga as {mine}, which looks translated (NAT); amigactld "
+                  "stays open to the whole network. Use --allow with the PC's LAN address to change that.")
+    link = Amigentd(host, timeout=60, key=key)
     try:
         link.connect()
-        install(link, args.home)
+        install(link, args.home, key, allow)
+        if not wait_for_port(host, 6800, 30):
+            print("amigactld does not answer yet. A reboot of the Amiga should sort that out.")
+            return 1
+        try:
+            ctl = AmigaCtl(host)
+            ctl.connect()
+        except OSError as e:
+            if not allow:
+                raise
+            # The Amiga sees us under another address: undo the restriction while we still can.
+            print(f"amigactld turned this PC away ({e}); removing the ALLOW line again")
+            run_script(link, UNDO_ALLOW)
+            wait_for_port(host, 6800, 20)
+            ctl = AmigaCtl(host)
+            ctl.connect()
         link.end_setup()
     except AmigentdError as e:
         print(f"{e}\nStart `amigentd SETUP` on the Amiga and try again.")
         return 1
-    if not wait_for_port(host, 6800, 30):
-        print("amigactld does not answer yet. A reboot of the Amiga should sort that out.")
-        return 1
-    ctl = AmigaCtl(host)
-    ctl.connect()
+    path = save_key(key)
     print(f"Done. {ctl.banner} and amigentd are up, and both start with the machine.")
+    print(f"The key is in {path} and in S:amigent.key; amigentd asks for it after the next restart.")
     print(f"AMIGENT_HOST={host}")
     return 0
 

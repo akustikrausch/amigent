@@ -139,3 +139,58 @@ def test_menu_select_drags_with_the_right_button(monkeypatch):
     server.amiga_menu_select("Project/Save as/IFF")
     assert fake.calls == [("move", 10, 5), ("button", "right", True), ("move", 10, 25),
                           ("move", 50, 25), ("button", "right", False)]
+
+
+def locked_amigentd(key, seen):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(2)
+
+    def run():
+        while True:
+            conn, _ = listener.accept()
+            conn.sendall(b"AMGT" + struct.pack(">HH", 2, 1))
+            authed = False
+            while len(data := conn.recv(10)) == 10:
+                seen.append(data[0])
+                if data[0] == 17:
+                    given = conn.recv(struct.unpack(">H", data[2:4])[0])
+                    authed = given == key
+                    conn.sendall(b"\0" if authed else b"\1")
+                    if not authed:
+                        break
+                elif not authed:
+                    conn.sendall(b"\1")
+                    break
+                elif data[0] == 1:
+                    conn.sendall(struct.pack(">HHHH", 640, 256, 64, 0))
+                else:
+                    conn.sendall(b"\0")
+            conn.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return listener.getsockname()[1]
+
+
+def test_key_is_sent_first():
+    seen = []
+    port = locked_amigentd(b"sesam", seen)
+    amiga = Amigentd("127.0.0.1", port, timeout=5, key="sesam")
+    amiga.ping()
+    assert seen[:2] == [17, 1]
+
+
+def test_wrong_or_missing_key_is_explained():
+    port = locked_amigentd(b"sesam", [])
+    with pytest.raises(AmigentdError, match="refused the key"):
+        Amigentd("127.0.0.1", port, timeout=5, key="nope").connect()
+    with pytest.raises(AmigentdError, match="wants a key"):
+        Amigentd("127.0.0.1", port, timeout=5, key="").connect()
+
+
+def test_setup_keeps_existing_amigactld_settings():
+    from amigent.setup import allow_script
+
+    script = allow_script("192.168.1.10", "SYS:amigent")
+    assert 'Search >NIL: S:amigactld.conf "ALLOW 192.168.1.10"' in script
+    assert 'Echo >>S:amigactld.conf "ALLOW 192.168.1.10"' in script

@@ -8,9 +8,12 @@ import time
 
 from PIL import Image
 
+from .secret import load_key
+
 CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = range(1, 8)
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
+CMD_AUTH = 17
 RGB_LIMIT = 512  # FRAME_RGB answers regions up to this many pixels on each side
 
 RAWKEYS = {
@@ -49,8 +52,10 @@ def decode_tile(data: bytes, w: int, h: int) -> Image.Image:
 
 
 class Amigentd:
-    def __init__(self, host: str, port: int = 6801, timeout: float = 30.0):
+    def __init__(self, host: str, port: int = 6801, timeout: float = 30.0,
+                 key: str | None = None):
         self.host = host
+        self.key = key if key is not None else load_key(host)
         self.port = port
         self.timeout = timeout
         self._sock: socket.socket | None = None
@@ -71,12 +76,28 @@ class Amigentd:
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
-            self.protocol = struct.unpack(">H", hello[4:6])[0]
+            self.protocol, locked = struct.unpack(">HH", hello[4:8])
+            if locked & 1:
+                self._authenticate()
             size = self._info()
         except OSError as e:
             self.close()
             raise AmigentdError(f"amigentd at {self.host}:{self.port} not answering: {e}") from e
+        except AmigentdError:
+            self.close()
+            raise
         self._apply_size(*size)
+
+    def _authenticate(self) -> None:
+        if not self.key:
+            raise AmigentdError("amigentd wants a key: run amigent-setup, or set AMIGENT_KEY")
+        raw = self.key.encode()
+        self._send(CMD_AUTH, 0, len(raw))
+        assert self._sock
+        self._sock.sendall(raw)
+        if self._exact(1) != b"\0":
+            raise AmigentdError("amigentd refused the key; AMIGENT_KEY or ~/.config/amigent/key "
+                                "must match S:amigent.key on the Amiga")
 
     def _info(self) -> tuple[int, int]:
         self._send(CMD_INFO)
