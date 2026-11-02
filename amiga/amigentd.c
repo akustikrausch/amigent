@@ -1401,7 +1401,9 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
         best = packbits(ptile, raw, penc(0));
         method = 1;
-        if (ext) {  /* rows against rows: text, borders, patterns */
+        if (ext && best > raw / 4) {  /* rows against rows: text, borders, patterns.
+             * Not for tiles PackBits already squeezed: a 68000 pays a second
+             * pass for a percent or two. */
             row_xor(ptile, pwork, bw, th);
             if ((size = packbits(pwork, raw, penc(1 - b))) < best)
                 best = size, method = 1 | 4, b = 1 - b;
@@ -1627,9 +1629,11 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
         } else {
             best = packbits(ptile, raw, penc(0));
             method = 1;
-            xor_rows(ptile, pwork, tw, th);
-            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
-                best = size, method = 1 | 4, b = 1 - b;
+            if (best > raw / 4) {  /* as for planar: only where there is room to win */
+                xor_rows(ptile, pwork, tw, th);
+                if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                    best = size, method = 1 | 4, b = 1 - b;
+            }
         }
         if (had) {  /* the client has the old tile */
             ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
