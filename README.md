@@ -106,8 +106,8 @@ On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s):
 
 The orange bars are what moving the whole screen as raw 24-bit pixels costs on
 that wire, every time; the blue ones are Amigent, measured on a real A1200.
-`scripts/bench_viewer.py` and `scripts/bench_mcp.py` repeat the measurements
-on a simulated slow link.
+All numbers, how they were taken and how to repeat them are in
+[docs/PERFORMANCE.md](https://github.com/akustikrausch/amigent/blob/main/docs/PERFORMANCE.md).
 
 ## Good to know
 

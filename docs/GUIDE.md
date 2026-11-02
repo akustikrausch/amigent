@@ -1,6 +1,7 @@
 # guide
 
-Everything the [README](../README.md) leaves out.
+Everything the [README](../README.md) leaves out. The measurements behind the speed are in
+[PERFORMANCE.md](PERFORMANCE.md).
 
 ## Requirements in detail
 
