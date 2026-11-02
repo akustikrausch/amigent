@@ -69,6 +69,8 @@
  "about_tips": "Gut zu wissen",
  "tip_paste": "Ctrl+V tippt die Zwischenablage des PCs auf dem Amiga.",
  "tip_keys": "Im Vollbild sind die Windows-Tasten die Amiga-Tasten.",
+ "tip_paste_mac": "Cmd+V tippt die Zwischenablage des Macs auf dem Amiga.",
+ "tip_keys_mac": "Die Cmd-Tasten sind die rechte Amiga-Taste, für Kürzel wie Cmd+O.",
  "tip_lock": "Doppelklick auf eine Umschalttaste rastet sie ein, ihre LED wird lang.",
  "tip_drop": "Dateien auf den Bildschirm ziehen, um sie zu senden.",
  "about_project": "Projektseite",

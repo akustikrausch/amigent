@@ -69,6 +69,8 @@
  "about_tips": "Bon à savoir",
  "tip_paste": "Ctrl+V tape le presse-papiers du PC sur l'Amiga.",
  "tip_keys": "En plein écran, les touches Windows sont les touches Amiga.",
+ "tip_paste_mac": "Cmd+V tape le presse-papiers du Mac sur l'Amiga.",
+ "tip_keys_mac": "Les touches Cmd sont la touche Amiga droite, pour les raccourcis comme Cmd+O.",
  "tip_lock": "Double-cliquez sur un modificateur pour le verrouiller, son voyant s'allonge.",
  "tip_drop": "Déposez des fichiers sur l'écran pour les envoyer.",
  "about_project": "Page du projet",

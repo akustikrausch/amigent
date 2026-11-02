@@ -69,6 +69,8 @@
  "about_tips": "Jó tudni",
  "tip_paste": "A Ctrl+V a PC vágólapját gépeli be az Amigán.",
  "tip_keys": "Teljes képernyőn a Windows-billentyűk az Amiga-billentyűk.",
+ "tip_paste_mac": "A Cmd+V a Mac vágólapját gépeli be az Amigán.",
+ "tip_keys_mac": "A Cmd billentyűk a jobb Amiga-billentyű, például a Cmd+O gyorsbillentyűhöz.",
  "tip_lock": "Dupla kattintással rögzítheted a módosítót, a LED-je meghosszabbodik.",
  "tip_drop": "Húzz fájlokat a képernyőre a küldéshez.",
  "about_project": "Projektoldal",

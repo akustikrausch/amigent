@@ -69,6 +69,8 @@
  "about_tips": "Good to know",
  "tip_paste": "Ctrl+V types your PC's clipboard on the Amiga.",
  "tip_keys": "In full screen the Windows keys are the Amiga keys.",
+ "tip_paste_mac": "Cmd+V types your Mac's clipboard on the Amiga.",
+ "tip_keys_mac": "The Cmd keys are the Right Amiga key, for shortcuts such as Cmd+O.",
  "tip_lock": "Double-click a modifier to lock it, its LED gets long.",
  "tip_drop": "Drop files on the screen to send them.",
  "about_project": "Project page",

@@ -7,6 +7,8 @@
   const canvas = $("screen");
   const ctx = canvas.getContext("2d", { alpha: false });
   const stage = $("stage");
+  // On a Mac, Cmd pastes and Option types characters such as @ and € on its own.
+  const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
 
   // ---------------------------------------------------------------- text
 
@@ -49,6 +51,7 @@
 
   function applyLanguage() {
     document.documentElement.lang = language;
+    if (MAC) for (const el of document.querySelectorAll('[data-i18n="tip_paste"], [data-i18n="tip_keys"]')) el.dataset.i18n += "_mac";
     for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
     for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
     for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
@@ -395,8 +398,6 @@
   // ---------------------------------------------------------------- keys
 
   const Q = { lshift: 1, rshift: 2, caps: 4, ctrl: 8, lalt: 16, ralt: 32, lamiga: 64, ramiga: 128 };
-  // On a Mac, Cmd pastes and Option types characters such as @ and € on its own.
-  const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
 
   const SPECIAL = {
     Enter: 0x44, NumpadEnter: 0x43, Backspace: 0x41, Tab: 0x42, Escape: 0x45, Delete: 0x46,
@@ -412,6 +413,9 @@
     AltRight: [0x65, Q.ralt], MetaLeft: [0x66, Q.lamiga], MetaRight: [0x67, Q.ramiga],
     ContextMenu: [0x67, Q.ramiga],
   };
+  // Cmd is the shortcut key on a Mac, as Right Amiga is on the Amiga.
+  if (MAC) MODIFIERS.MetaLeft = MODIFIERS.MetaRight;
+  const CMD = MAC ? Q.ramiga : Q.lamiga;
 
   // Key positions for direct mode. The key left of Return is the ISO one (# on German keyboards).
   const POSITIONS = {
@@ -468,8 +472,14 @@
     return event.getModifierState && event.getModifierState("AltGraph");
   }
 
+  // The Amiga keys held down; also when the browser saw no keydown for them.
+  function amigaKeys(event) {
+    const q = held & (Q.lamiga | Q.ramiga);
+    return q || (event.metaKey ? CMD : 0);
+  }
+
   function qualifiers(event) {
-    let q = held & (Q.lamiga | Q.ramiga | Q.caps);
+    let q = amigaKeys(event) | (held & Q.caps);
     if (event.shiftKey) q |= held & Q.rshift ? Q.rshift : Q.lshift;
     if (!altGraph(event)) {
       if (event.ctrlKey) q |= Q.ctrl;
@@ -522,7 +532,7 @@
       if (event.ctrlKey) q |= Q.ctrl;
       if (event.altKey) q |= Q.lalt;
     }
-    q |= held & (Q.lamiga | Q.ramiga);
+    q |= amigaKeys(event);
     send({ t: "char", c: event.key, q });
   }
 

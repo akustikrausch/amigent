@@ -69,6 +69,8 @@
  "about_tips": "Warto wiedzieć",
  "tip_paste": "Ctrl+V wpisuje schowek PC na Amidze.",
  "tip_keys": "W trybie pełnoekranowym klawisze Windows działają jak klawisze Amiga.",
+ "tip_paste_mac": "Cmd+V wpisuje schowek Maca na Amidze.",
+ "tip_keys_mac": "Klawisze Cmd działają jak prawy klawisz Amiga, do skrótów takich jak Cmd+O.",
  "tip_lock": "Dwuklik na modyfikatorze blokuje go, jego dioda się wydłuża.",
  "tip_drop": "Upuść pliki na ekran, aby je wysłać.",
  "about_project": "Strona projektu",

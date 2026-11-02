@@ -69,6 +69,8 @@
  "about_tips": "Buono a sapersi",
  "tip_paste": "Ctrl+V digita gli appunti del PC sull'Amiga.",
  "tip_keys": "A schermo intero i tasti Windows sono i tasti Amiga.",
+ "tip_paste_mac": "Cmd+V digita gli appunti del Mac sull'Amiga.",
+ "tip_keys_mac": "I tasti Cmd sono il tasto Amiga destro, per scorciatoie come Cmd+O.",
  "tip_lock": "Doppio clic su un modificatore per bloccarlo, il suo LED si allunga.",
  "tip_drop": "Rilascia i file sullo schermo per inviarli.",
  "about_project": "Pagina del progetto",

@@ -69,6 +69,8 @@
  "about_tips": "Bra att veta",
  "tip_paste": "Ctrl+V skriver datorns urklipp på Amigan.",
  "tip_keys": "I helskärm är Windows-tangenterna Amiga-tangenterna.",
+ "tip_paste_mac": "Cmd+V skriver Macens urklipp på Amigan.",
+ "tip_keys_mac": "Cmd-tangenterna är höger Amiga-tangent, för kortkommandon som Cmd+O.",
  "tip_lock": "Dubbelklicka på en modifierare för att låsa den, dess lampa blir lång.",
  "tip_drop": "Släpp filer på skärmen för att skicka dem.",
  "about_project": "Projektsida",

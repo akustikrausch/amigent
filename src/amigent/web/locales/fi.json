@@ -69,6 +69,8 @@
  "about_tips": "Hyvä tietää",
  "tip_paste": "Ctrl+V kirjoittaa PC:n leikepöydän Amigaan.",
  "tip_keys": "Koko näytössä Windows-näppäimet ovat Amiga-näppäimet.",
+ "tip_paste_mac": "Cmd+V kirjoittaa Macin leikepöydän Amigaan.",
+ "tip_keys_mac": "Cmd-näppäimet ovat oikea Amiga-näppäin, pikanäppäimiin kuten Cmd+O.",
  "tip_lock": "Tuplaklikkaa muokkausnäppäintä lukitaksesi sen, sen LED pitenee.",
  "tip_drop": "Pudota tiedostoja näytölle lähettääksesi ne.",
  "about_project": "Projektin sivu",

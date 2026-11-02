@@ -69,6 +69,8 @@
  "about_tips": "Conviene saber",
  "tip_paste": "Ctrl+V escribe el portapapeles del PC en el Amiga.",
  "tip_keys": "En pantalla completa las teclas Windows son las teclas Amiga.",
+ "tip_paste_mac": "Cmd+V escribe el portapapeles del Mac en el Amiga.",
+ "tip_keys_mac": "Las teclas Cmd son la tecla Amiga derecha, para atajos como Cmd+O.",
  "tip_lock": "Doble clic en un modificador lo fija, su LED se alarga.",
  "tip_drop": "Suelta archivos sobre la pantalla para enviarlos.",
  "about_project": "Página del proyecto",

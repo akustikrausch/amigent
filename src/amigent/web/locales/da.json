@@ -69,6 +69,8 @@
  "about_tips": "Godt at vide",
  "tip_paste": "Ctrl+V skriver pc'ens udklipsholder på Amigaen.",
  "tip_keys": "I fuld skærm er Windows-tasterne Amiga-tasterne.",
+ "tip_paste_mac": "Cmd+V skriver Mac'ens udklipsholder på Amigaen.",
+ "tip_keys_mac": "Cmd-tasterne er højre Amiga-tast, til genveje som Cmd+O.",
  "tip_lock": "Dobbeltklik på en ændringstast for at låse den, dens lampe bliver lang.",
  "tip_drop": "Slip filer på skærmen for at sende dem.",
  "about_project": "Projektside",

@@ -69,6 +69,8 @@
  "about_tips": "Dobré vedieť",
  "tip_paste": "Ctrl+V napíše schránku PC na Amige.",
  "tip_keys": "Na celej obrazovke sú klávesy Windows klávesmi Amiga.",
+ "tip_paste_mac": "Cmd+V napíše schránku Macu na Amige.",
+ "tip_keys_mac": "Klávesy Cmd sú pravý kláves Amiga, pre skratky ako Cmd+O.",
  "tip_lock": "Dvojklikom na modifikátor ho zamknete, jeho LED sa predĺži.",
  "tip_drop": "Pustite súbory na obrazovku pre ich odoslanie.",
  "about_project": "Stránka projektu",
