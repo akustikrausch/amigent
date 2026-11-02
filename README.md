@@ -275,6 +275,23 @@ translate the values, keep the `{placeholders}` and add the language code to
 Changes are listed in the [changelog](CHANGELOG.md). Releases are tagged
 `v1.0.0` and so on; `amigent-viewer --version` shows the installed version.
 
+## Related projects
+
+Others work on the same idea, and depending on your machine their projects may
+suit you better:
+
+- [amimcp](https://github.com/thomas-luebker/amimcp) by Thomas Luebker: an MCP
+  server with one small daemon for every Amiga from a 68000 with OS 2.04 on,
+  with token and optional TLS, GUI access by object and ARexx. Its companion
+  amifleet is a macOS app for watching and controlling several Amigas.
+- [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4): an MCP server for
+  AmigaOS 4.1, on real hardware and in QEMU.
+- Several MCP servers for emulators such as WinUAE and Amiberry.
+
+Amigent overlaps with these. It concentrates on accelerated Amigas, slow
+networks, a remote desktop for Windows and browsers, and keeping the machine in
+shape. Ideas are welcome to travel in both directions.
+
 ## Thanks
 
 tbdye for amigactld, Volker Barthelmann for vbcc, and the PiStorm, Emu68, AmiKit
