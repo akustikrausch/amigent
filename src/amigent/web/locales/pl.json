@@ -119,5 +119,11 @@
  "clip_empty": "Schowek jest pusty.",
  "clip_got": "Skopiowano schowek Amigi na ten komputer.",
  "clip_put_done": "Jest w schowku Amigi. Wklej przez prawy Amiga+V.",
- "clip_failed": "Schowek: {error}"
+ "clip_failed": "Schowek: {error}",
+ "fleet_run": "Uruchom na wszystkich",
+ "fleet_run_placeholder": "Polecenie AmigaDOS dla każdej Amigi, np. Version",
+ "fleet_running": "Uruchamianie {command} …",
+ "fleet_details": "Szczegóły",
+ "fleet_restart": "Uruchom ponownie",
+ "fleet_restart_confirm": "Zapisać dyski i uruchomić ponownie {name}?"
 }

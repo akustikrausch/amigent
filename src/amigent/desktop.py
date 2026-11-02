@@ -1,8 +1,8 @@
-"""Install the viewer as a program: on Windows in the Start menu, on the
-desktop and in Installed apps; on macOS as an app in ~/Applications.
+"""Install the viewer as a real program: Start menu, desktop and Installed apps
+on Windows; an app in ~/Applications on macOS.
 
-Works from WSL, from a Windows Python and on macOS. The program starts the
-viewer without a console window; it ends again when its window is closed.
+Runs from WSL, from a Windows Python and on macOS. The program boots the viewer
+without a console window and quits when its window closes. No DOS box in sight.
 """
 
 from __future__ import annotations
@@ -18,10 +18,11 @@ import sys
 from pathlib import Path, PureWindowsPath
 
 from . import __version__
-from .viewer import windows_exe
+from .platform_util import in_wsl as _wsl  # tests swap _wsl, so the alias stays
+from .platform_util import windows_exe
 
 NAME = "Amigent"
-OLD_NAMES = ("Amiga Remote",)  # shortcuts of earlier versions, removed on install
+OLD_NAMES = ("Amiga Remote",)  # shortcuts from older releases, swept away on install
 PUBLISHER = "Akustikrausch"
 HOMEPAGE = "https://github.com/akustikrausch/amigent"
 REGISTRY = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\amigent"
@@ -29,20 +30,16 @@ ICON = Path(__file__).with_name("web") / "amigent.ico"
 SETTINGS = ("AMIGENT_CTL_PORT", "AMIGENT_SCREEN_PORT", "AMIGENT_VIEWER_PORT", "AMIGENT_FLUSH_VOLUMES")
 
 
-def _wsl() -> bool:
-    return "microsoft" in platform.release().lower()
-
-
 def _powershell(script: str) -> str:
     exe = windows_exe("powershell.exe") if _wsl() else "powershell"
-    cwd = "/mnt/c" if _wsl() and os.path.isdir("/mnt/c") else None  # no UNC working directory
+    cwd = "/mnt/c" if _wsl() and os.path.isdir("/mnt/c") else None  # spare Windows a UNC working directory
     result = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
                             capture_output=True, text=True, cwd=cwd, check=True)
     return result.stdout.strip()
 
 
 def _local(windows_path: str) -> Path:
-    """Where a Windows path can be written from here."""
+    """A Windows path as this side can write it (wslpath under WSL)."""
     if not _wsl():
         return Path(windows_path)
     return Path(subprocess.run(["wslpath", "-u", windows_path], capture_output=True, text=True,
@@ -54,8 +51,8 @@ def _quote(arg: str) -> str:
 
 
 def _script(name: str, args: list[str]) -> tuple[str, str]:
-    """File name and text of a script that runs amigent-viewer with args, without a console."""
-    settings = {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
+    """File name and body of a script that runs amigent-viewer with args, console-free."""
+    settings = _settings()
     package_root = str(Path(__file__).resolve().parents[1])
     if _wsl():
         command = ["wsl.exe", "-d", os.environ.get("WSL_DISTRO_NAME", "Ubuntu"), "-u", getpass.getuser(),
@@ -75,12 +72,12 @@ def _launcher(host: str) -> tuple[str, str]:
 
 
 def _ps(text) -> str:
-    """Text for inside single quotes in PowerShell."""
+    """Escape text for PowerShell single quotes: ' becomes ''."""
     return str(text).replace("'", "''")
 
 
 def _runner() -> str:
-    """The program that runs our scripts without a console window."""
+    """The host that runs our scripts with no console window: wscript or pythonw."""
     if _wsl():
         return r"$env:WINDIR\System32\wscript.exe"
     return str(Path(sys.executable).with_name("pythonw.exe"))
@@ -88,7 +85,7 @@ def _runner() -> str:
 
 MAC_APP = Path.home() / "Applications" / f"{NAME}.app"
 MAC_SOURCE = Path(__file__).with_name("macos")
-MAC_RELEASE = MAC_SOURCE / "Amigent.zip"  # signed and notarized, made by scripts/build-mac-app.sh
+MAC_RELEASE = MAC_SOURCE / "Amigent.zip"  # signed and notarized, out of scripts/build-mac-app.sh
 MAC_CONFIG = Path.home() / ".config" / "amigent" / "app.json"
 BUNDLE_ID = "de.akustikrausch.amigent"
 
@@ -128,7 +125,7 @@ def _settings() -> dict:
 
 
 def _compile_launcher(out: Path, universal: bool) -> bool:
-    """Build the native launcher with swiftc; False when the Xcode tools are missing."""
+    """Build the native launcher with swiftc (lipo'd fat when universal); False without Xcode tools."""
     swiftc = shutil.which("swiftc")
     if not swiftc and shutil.which("xcrun"):
         found = subprocess.run(["xcrun", "--find", "swiftc"], capture_output=True, text=True)
@@ -156,7 +153,7 @@ def _compile_launcher(out: Path, universal: bool) -> bool:
 
 
 def _script_launcher(out: Path, host: str) -> None:
-    """Without Xcode tools: a shell script that starts the viewer the same way."""
+    """No Xcode tools, no problem: a shell script boots the viewer the same way."""
     exports = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in _settings().items())
     package_root = str(Path(__file__).resolve().parents[1])
     out.write_text(
@@ -167,7 +164,7 @@ def _script_launcher(out: Path, host: str) -> None:
 
 
 def build_mac_app(folder: Path, sign: str = "-", universal: bool = False, host: str = "") -> Path:
-    """Assemble Amigent.app in folder and sign it (sign "-" is an ad-hoc signature)."""
+    """Link Amigent.app together in folder and sign it (sign "-" means ad-hoc)."""
     app = folder / f"{NAME}.app"
     if app.exists():
         shutil.rmtree(app)
@@ -198,7 +195,7 @@ def _write_mac_config(host: str) -> None:
 
 
 def _install_mac(host: str) -> list[str]:
-    """~/Applications/Amigent.app: the signed release app if there is one, else built here."""
+    """~/Applications/Amigent.app: the signed release if it shipped, else a fresh local build."""
     _write_mac_config(host)
     MAC_APP.parent.mkdir(parents=True, exist_ok=True)
     if MAC_RELEASE.exists() and shutil.which("ditto"):
@@ -207,7 +204,7 @@ def _install_mac(host: str) -> list[str]:
         subprocess.run(["ditto", "-x", "-k", str(MAC_RELEASE), str(MAC_APP.parent)], check=True)
     else:
         build_mac_app(MAC_APP.parent, host=host)
-    subprocess.run(["touch", str(MAC_APP)], check=False)  # Finder picks up the icon
+    subprocess.run(["touch", str(MAC_APP)], check=False)  # poke Finder into showing the icon
     if shutil.which("mdimport"):
         subprocess.run(["mdimport", str(MAC_APP)], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # for Spotlight
@@ -215,7 +212,7 @@ def _install_mac(host: str) -> list[str]:
 
 
 def install(host: str) -> list[str]:
-    """Create launcher, shortcuts and the Installed apps entry; returns what was created."""
+    """Lay down launcher, shortcuts and the Installed apps entry; returns what landed."""
     if sys.platform == "darwin":
         return _install_mac(host)
     if not (_wsl() or sys.platform == "win32"):
@@ -264,7 +261,7 @@ New-ItemProperty -Path $key -Name EstimatedSize -Value {size_kb} -PropertyType D
 
 
 def uninstall() -> list[str]:
-    """Remove shortcuts, launcher folder and the Installed apps entry; returns what was removed."""
+    """Wipe shortcuts, launcher folder and the Installed apps entry; returns what went."""
     if sys.platform == "darwin":
         removed = []
         for path in (MAC_APP, MAC_CONFIG):

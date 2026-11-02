@@ -132,8 +132,8 @@ def test_every_language_has_every_text():
 
     web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
     english = json.loads((web / "locales" / "en.json").read_text(encoding="utf-8"))
-    used = set(re.findall(r'data-i18n(?:-title|-label|-aria)?="([a-z_]+)"', (web / "index.html").read_text()))
-    script = (web / "viewer.js").read_text()
+    used = set(re.findall(r'data-i18n(?:-title|-label|-aria)?="([a-z_]+)"', (web / "index.html").read_text(encoding="utf-8")))
+    script = (web / "viewer.js").read_text(encoding="utf-8")
     used |= set(re.findall(r'\bt\("([a-z_]+)"', script))
     used |= {"restarting", "restart_failed", "not_supported"}  # sent by the server
     assert used <= english.keys(), used - english.keys()

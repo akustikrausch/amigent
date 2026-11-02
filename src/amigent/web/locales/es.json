@@ -119,5 +119,11 @@
  "clip_empty": "El portapapeles está vacío.",
  "clip_got": "Portapapeles del Amiga copiado a este PC.",
  "clip_put_done": "En el portapapeles del Amiga. Pegar con Amiga derecha+V.",
- "clip_failed": "Portapapeles: {error}"
+ "clip_failed": "Portapapeles: {error}",
+ "fleet_run": "Ejecutar en todos",
+ "fleet_run_placeholder": "Un comando AmigaDOS para cada Amiga, p. ej. Version",
+ "fleet_running": "Ejecutando {command} …",
+ "fleet_details": "Detalles",
+ "fleet_restart": "Reiniciar",
+ "fleet_restart_confirm": "¿Escribir los discos y reiniciar {name}?"
 }

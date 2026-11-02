@@ -263,8 +263,10 @@ icon.
   on the PC. A wrong key costs a one-second pause and closes the connection.
 - With `openssl` on the PC and AmiSSL on the Amiga, `amigentd` also accepts TLS
   on port 6802, and the PC accepts only the certificate `amigent-setup` made for
-  that Amiga. Without it the connection is unencrypted, and someone who can read
-  your network traffic could read the key too.
+  that Amiga. Once that works, `amigent-setup` starts `amigentd` with `TLSONLY`:
+  other computers then get in only encrypted (`--allow-plain` keeps the plain
+  port open). Without TLS the connection is unencrypted, and someone who can
+  read your network traffic could read the key too.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.

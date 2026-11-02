@@ -1,42 +1,30 @@
-"""Hand amigentd to the Amiga over the network, for the very first step.
+"""Bootstrap: beam amigentd to the Amiga over the wire, no floppy swapping.
 
-`amigent-setup --serve` starts a small web server on this PC with amigentd and
-amigentd.000. On the Amiga, open the address it prints in a browser, or fetch
-the file in a Shell. Under WSL the server runs in Windows Python, because the
-local network does not reach servers inside WSL.
+`amigent-setup --serve` spins up a tiny web server on this PC with amigentd and
+amigentd.000. On the Amiga, open the printed address in a browser, or fetch
+the file from a Shell. Under WSL the server runs in Windows Python, because the
+LAN can't reach servers inside WSL.
 """
 
 from __future__ import annotations
 
-import platform
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from .setup import AMIGA
-from .viewer import windows_exe
+from .net import lan_address
+from .paths import AMIGA
+from .platform_util import in_wsl, windows_exe
 
 AMIGA_BIN = AMIGA / "bin"
 
 FILES = ("amigentd", "amigentd.000")
 
 
-def lan_address() -> str:
-    """The address other machines on the network reach this PC at."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("192.0.2.1", 9))  # nothing is sent; this only picks the outgoing interface
-        return s.getsockname()[0]
-
-
-def in_wsl() -> bool:
-    return "microsoft" in platform.release().lower()
-
-
 def _windows_folder() -> tuple[Path, str]:
-    """A fresh folder in Windows' temp directory, as a WSL path and as a Windows path."""
+    """A folder in Windows' %TEMP%, as a WSL path and as a Windows path."""
     cmd = windows_exe("cmd.exe")
     temp = subprocess.run([cmd, "/c", "echo %TEMP%"], capture_output=True, text=True,
                           cwd="/mnt/c").stdout.strip()
@@ -48,7 +36,7 @@ def _windows_folder() -> tuple[Path, str]:
 
 
 def server_command(port: int) -> tuple[list[str], Path]:
-    """The http.server command line and the folder it serves, filled with the files."""
+    """The http.server command line and its folder, already stocked with the binaries."""
     if in_wsl():
         python = next((p for p in (windows_exe("py.exe"), windows_exe("python.exe"))
                        if shutil.which(p) or Path(p).exists()), "")

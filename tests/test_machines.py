@@ -83,3 +83,11 @@ def test_connect_finds_the_new_address(private_config, monkeypatch):
     with tls.connect("A1200", port, 2) as sock:
         assert sock.recv(4) == b"AMGT"
     assert machines.address("A1200") == "127.0.0.1"
+
+
+def test_one_lookup_for_keys_and_certificates(private_config):
+    from amigent import roster
+    machines.remember("A1200", "localhost")
+    assert machines.find is roster.find
+    assert roster.aliases("localhost") == ["A1200", "localhost", "127.0.0.1"]  # DNS joins in last
+    assert roster.aliases("nowhere.invalid") == ["nowhere.invalid"]

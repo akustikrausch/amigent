@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import io
-import fcntl
 import json
 import os
 import re
 import time
-from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import inventory, machines, secret
-from .amigactl import AmigaError, join_path
+from . import files, inventory, locks, machines, pictures, secret, watch
+from .client import join_path
+from .errors import AmigaError
 from .amigentd import Amigentd
-from .channel import Commands
+from .channel import Commands, Request, perform
 from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port
 from .power import available as power_available
 from .viewer import Viewer, open_window
@@ -25,8 +23,9 @@ HOST = machines.pick()  # AMIGENT_HOST (a name or an address), else the known Am
 CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
 SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
-MAX_EDGE = 1568  # larger images get downscaled by the model API anyway
-LOCK_FILE = "/tmp/amigent.lock"
+MAX_EDGE = pictures.MAX_EDGE  # larger images get downscaled by the model API anyway
+SAME_SHOT = 120.0  # seconds an unchanged region counts as already seen
+LOCK_FILE = "amigent.lock"  # lives in the temp folder, see locks.py
 VIEWER_PORT = int(os.environ.get("AMIGENT_VIEWER_PORT", "6810"))
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
@@ -41,12 +40,9 @@ ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld 
 screen = Amigentd(HOST, SCREEN_PORT)
 
 
-@contextmanager
 def _exclusive(name: str = LOCK_FILE):
     """Serialise access across all amigent processes and threads on this PC."""
-    with open(name, "a") as lock:  # "a": never truncates whatever the path points to
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    return locks.exclusive(name)
 
 
 def _screen_lock():
@@ -57,7 +53,7 @@ def _screen_lock():
 def _with_ctl(fn):
     """Run fn against amigactld, reconnecting once after a dropped link."""
     with _exclusive():
-        if not ctl._sock:
+        if not ctl.connected:
             ctl.connect()
         try:
             return fn()
@@ -112,7 +108,7 @@ def amiga_find(address: str = "") -> str:
         machines.move(HOST, address.strip())
         found = address.strip()
     else:
-        machines._searched.pop(HOST, None)
+        machines.forget_search(HOST)
         found = machines.relocate(HOST)
     ctl.close()
     screen.close()
@@ -192,8 +188,13 @@ def amiga_arexx(program: str, port: str = "") -> str:
                   "if symbol('RESULT') = 'VAR' then say result\nexit rc\n")
     else:
         script = program if program.lstrip().startswith("/*") else f"/* amigent */\n{program}\n"
-    _with_ctl(lambda: ctl.write_file("RAM:amigent.rexx", script.encode("iso-8859-1")))
-    result = _with_ctl(lambda: ctl.exec("rx RAM:amigent.rexx", timeout=60))
+    # script and rx in one batch: one round trip instead of two
+    wrote, result = _with_ctl(lambda: perform(ctl, [
+        Request.write("RAM:amigent.rexx", script.encode("iso-8859-1")),
+        Request.exec("rx RAM:amigent.rexx", timeout=60)]))
+    for answer in (wrote, result):
+        if isinstance(answer, AmigaError):
+            raise answer
     return f"rc={result.rc}\n{result.output}"
 
 
@@ -216,20 +217,27 @@ def amiga_job(command: str, wait: float = 600) -> str:
         f"{command} >RAM:amigent-job.out\n"
         'Echo >RAM:amigent-job.done "done"\n'
     )
-    _with_ctl(lambda: ctl.exec("Delete >NIL: RAM:amigent-job.done RAM:amigent-job.out QUIET"))
-    _with_ctl(lambda: ctl.write_file("RAM:amigent-job.script", script.encode("iso-8859-1")))
-    _with_ctl(lambda: ctl.exec("Run >NIL: Execute RAM:amigent-job.script"))
+    answers = _with_ctl(lambda: perform(ctl, [
+        Request.exec("Delete >NIL: RAM:amigent-job.done RAM:amigent-job.out QUIET"),
+        Request.write("RAM:amigent-job.script", script.encode("iso-8859-1")),
+        Request.exec("Run >NIL: Execute RAM:amigent-job.script")]))
+    for answer in answers[1:]:
+        if isinstance(answer, AmigaError):
+            raise answer
     global last_started
     last_started = command
     deadline = time.monotonic() + wait
+    pause = 0.5  # short jobs are common: look soon, then back off to 5 s
     while time.monotonic() < deadline:
-        try:
-            _with_ctl(lambda: ctl.stat("RAM:amigent-job.done"))
-            return _with_ctl(lambda: ctl.read_file("RAM:amigent-job.out")).decode("iso-8859-1")
-        except AmigaError as e:
-            if e.code is None:
-                raise
-        time.sleep(5)
+        # marker and output in one go: a finished job costs one round trip, not two
+        done, output = _with_ctl(lambda: perform(ctl, [Request.stat("RAM:amigent-job.done"),
+                                                       Request.read_file("RAM:amigent-job.out")]))
+        if not isinstance(done, AmigaError):
+            if isinstance(output, AmigaError):
+                raise output
+            return output.decode("iso-8859-1")
+        time.sleep(min(pause, max(deadline - time.monotonic(), 0)))
+        pause = min(pause * 2, 5)
     return "still running; output will be in RAM:amigent-job.out"
 
 
@@ -259,61 +267,27 @@ def amiga_write_text(path: str, text: str) -> str:
 def amiga_put(local_path: str, amiga_path: str) -> str:
     """Copy a local file or directory tree to the Amiga.
 
-    amiga_path is the full target name, e.g. 'Work:Games/Foo'.
+    amiga_path is the full target name, e.g. 'Work:Games/Foo'. Files the Amiga
+    already has with the same size and CRC are left alone, so putting a tree
+    again only sends what changed.
     """
     src = Path(local_path).expanduser()
-    files = [src] if src.is_file() else sorted(p for p in src.rglob("*") if p.is_file())
-    if not src.exists():
-        raise AmigaError(f"{src} does not exist")
-    made: set = set()
-    if src.is_dir():
-        _makedirs(amiga_path, made)
-    for f in files:
-        rel = f.relative_to(src) if src.is_dir() else None
-        target = amiga_path
-        if rel:
-            if len(rel.parts) > 1:
-                _makedirs(_join(amiga_path, rel.parent.as_posix()), made)
-            target = _join(amiga_path, rel.as_posix())
-        _with_ctl(lambda: ctl.write_file(target, f.read_bytes()))
-    return f"copied {len(files)} file(s) to {amiga_path}"
-
-
-def _makedirs(path: str, made: set | None = None) -> None:
-    volume, _, rest = path.rpartition(":")
-    current = f"{volume}:"
-    for part in PurePosixPath(rest).parts:
-        current = _join(current, part)
-        if made is not None:
-            if current.lower() in made:
-                continue
-            made.add(current.lower())
-        try:
-            _with_ctl(lambda: ctl.makedir(current))
-        except AmigaError as e:
-            if e.code is None:
-                raise
-            try:  # already there is fine; anything else is a real error
-                if _with_ctl(lambda: ctl.stat(current))["type"].lower() != "dir":
-                    raise e
-            except AmigaError:
-                raise e from None
+    return _with_ctl(lambda: files.put(ctl, src, amiga_path))
 
 
 @mcp.tool()
 def amiga_get(amiga_path: str, local_path: str) -> str:
-    """Copy a single file from the Amiga to the local machine."""
-    data = _with_ctl(lambda: ctl.read_file(amiga_path))
-    target = Path(local_path).expanduser()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
-    return f"saved {len(data)} bytes to {target}"
+    """Copy a file or a whole directory tree from the Amiga to the local machine.
+
+    Local files with the same size and CRC are not fetched again.
+    """
+    return _with_ctl(lambda: files.get(ctl, amiga_path, Path(local_path).expanduser()))
 
 
 @mcp.tool()
 def amiga_mkdir(path: str) -> str:
     """Create a directory, including missing parents."""
-    _makedirs(path)
+    _with_ctl(lambda: files.makedirs(ctl, path))
     return f"created {path}"
 
 
@@ -353,9 +327,9 @@ def amiga_inventory(max_wait: float = 1800) -> str:
     folder = inventory_folder()
     folder.mkdir(parents=True, exist_ok=True)
     scans = sorted(folder.glob("*.json"))
-    previous = json.loads(scans[-1].read_text()) if scans else None
+    previous = json.loads(scans[-1].read_text(encoding="utf-8")) if scans else None
     target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
-    target.write_text(json.dumps(items, indent=1, ensure_ascii=False))
+    target.write_text(json.dumps(items, indent=1, ensure_ascii=False), encoding="utf-8")
     summary = {"file": str(target), "files": len(items),
                "with_version": sum(1 for i in items.values() if i["version"])}
     if previous is not None:
@@ -369,23 +343,46 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) ->
 
     Transfers only what changed since the last call, so repeated shots are
     quick. Colours are reduced to 256. All coordinates for the pointer tools
-    are screen pixels; use the scale in the reply for reduced images.
+    are screen pixels; use the scale in the reply for reduced images. If the
+    same region has not changed since your last shot of it, only a note comes
+    back; ask again right away to get the picture anyway.
     """
-    global last_look
+    global last_look, _last_shot
+    region = (x, y, width, height)
     image = _with_screen(lambda: screen.capture(x, y, width or None, height or None))
-    last_look = time.monotonic()  # after the fetch: what it brought is what was seen
-    scale = max(image.size) / MAX_EDGE
+    seen, last_look = last_look, time.monotonic()  # after the fetch: what it brought is what was seen
+    note = _same_shot(region, seen)
+    _last_shot = (region, last_look, bool(note))
+    if note:
+        return [note]
     size = image.size
-    if scale > 1:
-        image = image.resize((round(size[0] / scale), round(size[1] / scale)))
-    out = io.BytesIO()
-    image.save(out, "PNG", optimize=True)
+    image, scale = pictures.fit(image)
     note = (
         f"screen {screen.width}x{screen.height}; region {size[0]}x{size[1]} at ({x},{y}); "
-        f"screen_x = {x} + image_x * {max(scale, 1):.3f}, "
-        f"screen_y = {y} + image_y * {max(scale, 1):.3f}"
+        f"screen_x = {x} + image_x * {scale:.3f}, "
+        f"screen_y = {y} + image_y * {scale:.3f}"
     )
-    return [note, McpImage(data=out.getvalue(), format="png")]
+    return [note, McpImage(data=pictures.png(image), format="png")]
+
+
+_last_shot: tuple | None = None  # (region, when, answered without a picture)
+
+
+def _same_shot(region: tuple, seen: float) -> str:
+    """A note instead of a picture when the model already holds this very picture.
+
+    Same region, recent, no tile in it since, and the last answer was a real
+    picture: a second ask in a row always gets one."""
+    if not _last_shot or _last_shot[0] != region or _last_shot[2]:
+        return ""
+    when = _last_shot[1]
+    if seen != when or time.monotonic() - when > SAME_SHOT:
+        return ""  # someone looked elsewhere meanwhile, or it's been a while
+    x, y, w, h = region
+    if screen.changed_since(when, x, y, w or None, h or None):
+        return ""
+    return (f"no change in this region since your screenshot {time.monotonic() - when:.0f} s "
+            "ago, so no new picture; call again to get it anyway")
 
 
 @mcp.tool()
@@ -398,9 +395,8 @@ def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
     global last_look
     image = _with_screen(lambda: screen.capture_rgb(x, y, width, height))
     last_look = time.monotonic()  # after the fetch: what it brought is what was seen
-    out = io.BytesIO()
-    image.save(out, "PNG", optimize=True)
-    return [f"region {width}x{height} at ({x},{y}), full colour", McpImage(data=out.getvalue(), format="png")]
+    return [f"region {width}x{height} at ({x},{y}), full colour",
+            McpImage(data=pictures.png(image, exact=True), format="png")]
 
 
 @mcp.tool()
@@ -410,22 +406,20 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
 
     Counts from your last screenshot, so a change your click already caused is
     reported at once. Use it after a click or command instead of taking
-    screenshots in a loop; no pictures are sent.
+    screenshots in a loop; no pictures are sent. Returns within timeout even
+    on a slow link.
     """
     global last_look
-    region = (x, y, width or None, height or None)
-    since = last_look or time.monotonic()
-    start = time.monotonic()
-    while True:
-        _with_screen(lambda: screen.poll(*region))
-        # Count tiles whoever fetched them: an open viewer may have taken them first.
-        changed = screen.changed_since(since, *region)
-        if changed:
-            last_look = time.monotonic()
-            return f"changed ({changed} tiles) after {time.monotonic() - start:.1f} s of waiting"
-        if time.monotonic() - start >= timeout:
-            return f"no change within {timeout:.0f} s"
-        time.sleep(0.25)
+    # Tiles count whoever fetched them: an open viewer may have taken them first.
+    report, changed = watch.wait_change(screen, _with_screen, lookout,
+                                        (x, y, width or None, height or None),
+                                        last_look or time.monotonic(), timeout)
+    if changed:
+        last_look = time.monotonic()
+    return report
+
+
+lookout = watch.Lookout()  # screen polls that a deadline can walk away from
 
 
 @mcp.tool()
@@ -498,33 +492,13 @@ def amiga_ui_tree(pictures: bool = True) -> list:
 
 def _gadget_sheet(tree: list):
     """One picture of the active window's unlabelled gadgets, each beside its number."""
-    from PIL import Image, ImageDraw
-
-    active = next((w["id"] for w in tree if w["kind"] == "window" and w["active"]), None)
-    gadgets = [g for g in tree if g["kind"] == "gadget" and g["window"] == active
-               and not g["label"] and g["type"] != "sys" and 4 <= g["w"] <= 600 and 4 <= g["h"] <= 120]
+    gadgets = pictures.unlabelled(tree)
     if not gadgets:
         return None
-    picture = _with_screen(lambda: screen.capture())
-    rows, width = [], 0
-    for g in gadgets[:40]:
-        crop = picture.crop((g["x"], g["y"], g["x"] + g["w"], g["y"] + g["h"]))
-        scale = min(2.0, 48 / max(g["h"], 1))
-        if scale > 1:
-            crop = crop.resize((round(g["w"] * scale), round(g["h"] * scale)), Image.NEAREST)
-        rows.append((g["id"], crop))
-        width = max(width, crop.width)
-    height = sum(c.height + 8 for _, c in rows) + 8
-    sheet = Image.new("RGB", (width + 70, height), (255, 255, 255))
-    draw = ImageDraw.Draw(sheet)
-    y = 8
-    for number, crop in rows:
-        draw.text((8, y + crop.height // 2 - 6), f"#{number}", fill=(0, 0, 0))
-        sheet.paste(crop, (62, y))
-        y += crop.height + 8
-    out = io.BytesIO()
-    sheet.save(out, "PNG", optimize=True)
-    return McpImage(data=out.getvalue(), format="png")
+    box = pictures.bounds(gadgets)  # fetch the gadgets' corner of the screen, not all of it
+    picture = _with_screen(lambda: screen.capture(*box))
+    sheet = pictures.gadget_sheet(gadgets, picture, box[:2])
+    return McpImage(data=pictures.png(sheet), format="png")
 
 
 def _centre(item: dict) -> tuple[int, int]:

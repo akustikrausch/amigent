@@ -34,6 +34,12 @@ Amiga, yes: it then says so at the end. Run it again after installing either one
 On Windows, Amigent finds the `openssl` that comes with Git for Windows. `AMIGENT_TLS=off`
 switches encryption off for a test.
 
+**A second computer says amigentd takes only encrypted connections.**
+That Amiga was set up for TLS only. Copy the files for it from
+`~/.config/amigent/` on the computer that set it up (the key and
+`tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
+there again with `amigentd SETUP` running.
+
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
 shows up in `amigent-fleet`. The AI agent works with one Amiga per MCP server

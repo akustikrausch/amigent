@@ -179,3 +179,39 @@ def test_tls_is_pinned(tmp_path, monkeypatch):
     tls.remember("127.0.0.1", (tmp_path / "c").read_bytes())
     with pytest.raises(ssl.SSLError):
         tls.connect("127.0.0.1", port - 1, 5)
+
+
+def test_a_closed_plain_port_says_what_to_do():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def run():
+        conn, _ = listener.accept()
+        conn.sendall(b"AMGT" + struct.pack(">HH", 3, 1 | 2 | 4))
+        conn.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    with pytest.raises(AmigaError, match="only encrypted"):
+        AmigaChannel("127.0.0.1", listener.getsockname()[1], timeout=5, key="k").connect()
+
+
+def test_lock_plain_touches_only_the_startup_line():
+    from amigent import tls
+
+    class Files:
+        def __init__(self, startup):
+            self.files = {"S:User-Startup": startup.encode()}
+
+        def read_file(self, path):
+            return self.files[path]
+
+        def write_file(self, path, data):
+            self.files[path] = data
+
+    disk = Files("; mine\nRUN >NIL: C:amigentd\nAssign Foo: SYS:Foo\n")
+    assert tls.lock_plain(disk, "SYS:amigent")
+    assert disk.files["S:User-Startup"] == b"; mine\nRUN >NIL: C:amigentd TLSONLY\nAssign Foo: SYS:Foo\n"
+    assert "SYS:amigent/amigent.tlsonly" in disk.files
+    again = Files("RUN >NIL: C:amigentd TLSONLY\n")
+    assert tls.lock_plain(again, "SYS:amigent") and list(again.files) == ["S:User-Startup"]

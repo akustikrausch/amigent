@@ -196,7 +196,7 @@ def test_wrong_or_missing_key_is_explained():
 
 
 def test_setup_keeps_existing_amigactld_settings():
-    from amigent.setup import allow_script
+    from amigent.legacy import allow_script
 
     script = allow_script("192.168.1.10", "SYS:amigent")
     assert 'Echo >>S:amigactld.conf "ALLOW 192.168.1.10"' in script
@@ -254,8 +254,8 @@ def test_unlabelled_gadgets_come_with_a_picture(monkeypatch):
     from PIL import Image
 
     class Screen(FakeScreen):
-        def capture(self):
-            return Image.new("RGB", (640, 256), (200, 200, 200))
+        def capture(self, x=0, y=0, w=None, h=None):
+            return Image.new("RGB", (w or 640 - x, h or 256 - y), (200, 200, 200))
 
     fake = Screen(tree=[
         {"kind": "screen", "title": "Workbench", "width": 640, "height": 256},

@@ -149,6 +149,13 @@ static BOOL newcomers(fd_set *r);
 
 static UBYTE out[OUT_SIZE];
 static LONG out_len;
+/* The screen client's next command, as far as it came in. Input that turns up
+ * while a reply is still going out is done at once; its answer waits in acks
+ * and follows the reply, so the order on the wire stays the order asked. */
+static UBYTE in_cmd[10];
+static LONG in_have, nacks;
+static UBYTE acks[64];
+static BOOL sneak_input(void);
 static UBYTE tile_buf[12 + TILE * TILE * 2];
 
 /* ---- network ---------------------------------------------------------- */
@@ -164,14 +171,20 @@ static BOOL ready(BOOL writing)
         ULONG sigs = SIGBREAKF_CTRL_C;
         LONG n, top;
 
+        BOOL sneak = writing && in_have < (LONG)sizeof(in_cmd) && nacks < (LONG)sizeof(acks);
+
         FD_ZERO(&r);
         FD_ZERO(&w);
         FD_SET(client, writing ? &w : &r);
+        if (sneak)  /* the mouse doesn't queue behind a frame */
+            FD_SET(client, &r);
         top = watch(&r, client);
         n = WaitSelect(top + 1, &r, &w, NULL, &tv, &sigs);
         if (sigs & SIGBREAKF_CTRL_C)
             quit = TRUE;
         if (n <= 0 || quit || newcomers(&r))
+            return FALSE;
+        if (sneak && FD_ISSET(client, &r) && !sneak_input())
             return FALSE;
         if (FD_ISSET(client, writing ? &w : &r))
             return TRUE;
@@ -841,6 +854,365 @@ static BOOL frame_locked(BOOL force, LONG x, LONG y, LONG w, LONG h)
     return flush();
 }
 
+/* ---- planar frames ---------------------------------------------------- */
+
+/* Chipset screens, the bitplanes as they are: no c2p, no palette lookups, no
+ * RGB332. Change detection is a compare of the plane bytes against what the
+ * client already has, so a quiet screen costs one pass over chip RAM and the
+ * reader can sleep. The client gets 1..8 bits a pixel and does the c2p itself;
+ * a PC has cycles to burn, a 7 MHz 68000 has not.
+ *
+ * pref: the planes as the client has them, pcur: the planes as just read, both
+ * [plane][row][pbpr]. pvalid: one byte a tile, set once the client has it. */
+static UBYTE *pref, *pcur, *pvalid, *porder;
+static LONG pw, ph, pbpr, pdepth, pcols, prows;
+static struct BitMap *pbm;
+static ULONG powner, pconn, conn_serial;  /* pref belongs to: CLIENT id, connection */
+static UBYTE ppal[3 * 256];
+static LONG pcolours = -1;
+static ULONG prgb[3 * 256];
+/* ULONG backed: the XOR and the row copies go a long at a time, and a 68000
+ * takes an odd address as a personal insult. */
+#define PENC_LONGS ((8 * 8 * TILE + 8 * TILE / 128 + 16) / 4)
+static ULONG penc_mem[2][PENC_LONGS], ptile_mem[8 * 8 * TILE / 4];
+#define penc(i) ((UBYTE *)penc_mem[i])
+#define ptile ((UBYTE *)ptile_mem)
+
+static void free_planar(void)
+{
+    FreeVec(pref);
+    FreeVec(pcur);
+    FreeVec(pvalid);
+    FreeVec(porder);
+    pref = pcur = pvalid = porder = NULL;
+    pw = ph = 0;
+    pbm = NULL;
+    pcolours = -1;
+}
+
+/* A planar screen we can read straight: chipset, 1..8 planes. */
+static BOOL planar_ok(struct Screen *scr)
+{
+    struct BitMap *bm = scr->RastPort.BitMap;
+    ULONG depth = GetBitMapAttr(bm, BMA_DEPTH);
+
+    return !is_rtg(scr) && depth >= 1 && depth <= 8 &&
+           (GetBitMapAttr(bm, BMA_FLAGS) & BMF_STANDARD);
+}
+
+/* New size, depth or screen: start from scratch, the client gets it all. */
+static BOOL fit_planar(struct Screen *scr)
+{
+    struct BitMap *bm = scr->RastPort.BitMap;
+    LONG w = scr->Width, h = scr->Height, depth = GetBitMapAttr(bm, BMA_DEPTH);
+
+    if (pref && w == pw && h == ph && depth == pdepth && bm == pbm)
+        return TRUE;
+    free_planar();
+    pcols = (w + TILE - 1) / TILE;
+    prows = (h + TILE - 1) / TILE;
+    pbpr = pcols * (TILE / 8);
+    pref = AllocVec(depth * h * pbpr, MEMF_ANY | MEMF_CLEAR);
+    pcur = AllocVec(depth * h * pbpr, MEMF_ANY | MEMF_CLEAR);
+    pvalid = AllocVec(pcols * prows, MEMF_ANY | MEMF_CLEAR);
+    porder = AllocVec(pcols * prows * sizeof(UWORD), MEMF_ANY);
+    if (!pref || !pcur || !pvalid || !porder) {
+        free_planar();
+        return FALSE;
+    }
+    pw = w, ph = h, pdepth = depth, pbm = bm;
+    return TRUE;
+}
+
+/* n longs side by side; -1 if all equal, else n-1 minus the index of the first
+ * that differs. cmpm.l and dbne: the tightest compare loop a 68000 knows,
+ * 30 cycles a long. dbne counts a word, so n stays below 32768. */
+LONG cmp_longs(__reg("a0") const ULONG *a, __reg("a1") const ULONG *b, __reg("d0") LONG n) =
+    "\tsubq.w\t#1,d0\n\tcmpm.l\t(a0)+,(a1)+\n\tdbne\td0,*-2\n\text.l\td0";
+
+/* Marks the tiles of tile row ty, columns tx0..tx1, that moved on from pref.
+ * Row by row across the whole width, as the planes lie in memory: one pass
+ * over chip RAM, and a quiet screen costs nothing more. */
+static void scan_changes(struct BitMap *bm, LONG ty, LONG tx0, LONG tx1)
+{
+    LONG y0 = ty * TILE, th = y0 + TILE < ph ? TILE : ph - y0, p, y, i;
+    LONG full = tx1 - tx0 + 1, edge = -1, ebw = 0;
+    UBYTE *mark = pvalid + ty * pcols;
+
+    if (tx1 * TILE + TILE > pw) {  /* the last column is narrower: bytes for that one */
+        edge = tx1;
+        ebw = (pw - tx1 * TILE + 7) >> 3;
+        full--;
+    }
+    for (p = 0; p < pdepth; p++) {
+        PLANEPTR plane = bm->Planes[p];
+        const UBYTE *old = pref + (p * ph + y0) * pbpr + tx0 * (TILE / 8);
+        const UBYTE *src = plane + y0 * bm->BytesPerRow + tx0 * (TILE / 8);
+
+        for (y = 0; y < th; y++, old += pbpr, src += bm->BytesPerRow) {
+            if (plane == NULL || plane == (PLANEPTR)-1) {  /* V39 constant planes */
+                UBYTE fill = plane ? 0xFF : 0;
+                for (i = 0; i < full * 8 + ebw; i++)
+                    if (old[i] != fill)
+                        mark[tx0 + (i >> 3)] |= DIFF;
+                continue;
+            }
+            if (full > 0) {
+                LONG at = 0, n = full * 2, r;
+                while ((r = cmp_longs((const ULONG *)src + at, (const ULONG *)old + at, n - at)) >= 0) {
+                    LONG k = at + (n - at - 1 - r);  /* the long that differs */
+                    mark[tx0 + (k >> 1)] |= DIFF;
+                    at = (k | 1) + 1;  /* on to the next tile */
+                    if (at >= n)
+                        break;
+                }
+            }
+            for (i = 0; i < ebw; i++)
+                if (src[full * 8 + i] != old[full * 8 + i]) {
+                    mark[edge] |= DIFF;
+                    break;
+                }
+        }
+    }
+}
+
+/* Copies th rows of bw bytes, the strides apart. The common case is a full tile:
+ * two longs a row, pointers only. Multiplies are a library call on a 68000,
+ * so none in here. */
+static void copy_rows(UBYTE *dst, LONG dstep, const UBYTE *src, LONG sstep, LONG bw, LONG th)
+{
+    if (bw == 8) {
+        while (th-- > 0) {
+            ((ULONG *)dst)[0] = ((const ULONG *)src)[0];
+            ((ULONG *)dst)[1] = ((const ULONG *)src)[1];
+            dst += dstep, src += sstep;
+        }
+    } else {
+        while (th-- > 0) {
+            LONG i;
+            for (i = 0; i < bw; i++)
+                dst[i] = src[i];
+            dst += dstep, src += sstep;
+        }
+    }
+}
+
+/* The tile from the screen into pcur, to be packed after Intuition is let go. */
+static void grab_tile(struct BitMap *bm, LONG tx, LONG ty)
+{
+    LONG bx = tx * (TILE / 8), y0 = ty * TILE, p, y;
+    LONG bw = ((tx * TILE + TILE < pw ? TILE : pw - tx * TILE) + 7) >> 3;
+    LONG th = y0 + TILE < ph ? TILE : ph - y0;
+    UBYTE *dst = pcur + y0 * pbpr + bx;
+
+    for (p = 0; p < pdepth; p++, dst += ph * pbpr) {
+        PLANEPTR plane = bm->Planes[p];
+        if (plane == NULL || plane == (PLANEPTR)-1) {  /* V39 constant planes */
+            UBYTE *d = dst;
+            for (y = 0; y < th; y++, d += pbpr)
+                memset(d, plane ? 0xFF : 0, bw);
+        } else
+            copy_rows(dst, pbpr, plane + y0 * bm->BytesPerRow + bx, bm->BytesPerRow, bw, th);
+    }
+}
+
+/* PackBits: n < 128 then n+1 literals, n > 128 then the next byte 257-n times.
+ * A literal byte costs two compares, the bookkeeping only happens at a run:
+ * the 68000 has no time for second looks. */
+static LONG packbits(const UBYTE *s, LONG len, UBYTE *d)
+{
+    const UBYTE *end = s + len, *stop = end - 2, *lit = s, *r, *lim;
+    UBYTE *start = d, c;
+    LONG k;
+
+    while (s < stop) {
+        c = *s;
+        if (s[1] != c || s[2] != c) {  /* no run of three here: literal */
+            s++;
+            continue;
+        }
+        while (lit < s) {  /* literals waiting in front of the run */
+            k = s - lit > 128 ? 128 : s - lit;
+            *d++ = (UBYTE)(k - 1);
+            memcpy(d, lit, k);
+            d += k, lit += k;
+        }
+        lim = end - s > 128 ? s + 128 : end;
+        for (r = s + 3; r < lim && *r == c; r++)
+            ;
+        *d++ = (UBYTE)(257 - (r - s));
+        *d++ = c;
+        s = lit = r;
+    }
+    while (lit < end) {
+        k = end - lit > 128 ? 128 : end - lit;
+        *d++ = (UBYTE)(k - 1);
+        memcpy(d, lit, k);
+        d += k, lit += k;
+    }
+    return d - start;
+}
+
+/* A tile's bytes, plane after plane, row after row, bw bytes a row. */
+static LONG tile_bytes(const UBYTE *planes, LONG tx, LONG ty, LONG bw, LONG th, UBYTE *dst)
+{
+    const UBYTE *src = planes + ty * TILE * pbpr + tx * (TILE / 8);
+    LONG p, plane = ph * pbpr;
+
+    for (p = 0; p < pdepth; p++, src += plane, dst += bw * th)
+        copy_rows(dst, bw, src, pbpr, bw, th);
+    return pdepth * bw * th;
+}
+
+/* Pointer's neighbourhood first: that is where the eye is. */
+static LONG order_tiles(LONG tx0, LONG ty0, LONG tx1, LONG ty1, LONG mx, LONG my)
+{
+    LONG pass, tx, ty, n = 0, ptx = mx / TILE, pty = my / TILE;
+
+    for (pass = 0; pass < 2; pass++)
+        for (ty = ty0; ty <= ty1; ty++)
+            for (tx = tx0; tx <= tx1; tx++) {
+                BOOL near = tx >= ptx - 1 && tx <= ptx + 1 && ty >= pty - 1 && ty <= pty + 1;
+                if (near == (pass == 0) && (pvalid[ty * pcols + tx] & SEND))
+                    ((UWORD *)porder)[n++] = ty * pcols + tx;
+            }
+    return n;
+}
+
+/* FRAME with arg 2: planar tiles for chipset screens, else the classic ones.
+ * See "planar" in docs/PROTOCOL.md. */
+static BOOL frame_planar(BOOL force, LONG x, LONG y, LONG w, LONG h)
+{
+    struct Screen *scr;
+    ULONG lock, mode;
+    LONG x1, y1, tx, ty, tx1, ty1, n, i, count = 0, colours, mx, my;
+    UBYTE head[8], flags = 0, *v;
+    BOOL ok, known;
+
+    lock = LockIBase(0);
+    scr = IntuitionBase->FirstScreen;
+    if (!planar_ok(scr) || !fit_planar(scr)) {
+        UnlockIBase(lock);
+        head[0] = 0;  /* classic tiles follow */
+        if (!put(head, 1))
+            return FALSE;
+        ObtainSemaphore(&picture);
+        ok = frame_locked(force, x, y, w, h);
+        ReleaseSemaphore(&picture);
+        if (wanted)
+            Signal(reader, SIGBREAKF_CTRL_F);
+        return ok;
+    }
+    /* Skipping and XOR need the client to hold pref: same connection, or the
+     * CLIENT id it was made for. Anyone else gets everything. */
+    known = pconn == conn_serial || (client_id && powner == client_id);
+    if (!known)
+        force = TRUE;
+    mode = GetVPModeID(&scr->ViewPort);
+    if ((mode & HAM_KEY) && (pdepth == 6 || pdepth == 8))
+        flags |= 1;
+    if ((mode & EXTRAHALFBRITE_KEY) && pdepth == 6)
+        flags |= 4;
+    colours = 1L << pdepth;
+    if (flags & 4)
+        colours = 32;
+    if (colours > scr->ViewPort.ColorMap->Count)
+        colours = scr->ViewPort.ColorMap->Count;
+    GetRGB32(scr->ViewPort.ColorMap, 0, colours, prgb);
+    for (i = 0; i < 3 * colours; i++)
+        if ((UBYTE)(prgb[i] >> 24) != ppal[i])
+            break;
+    if (force || colours != pcolours || i < 3 * colours) {
+        flags |= 2;
+        for (i = 0; i < 3 * colours; i++)
+            ppal[i] = prgb[i] >> 24;
+        pcolours = colours;
+    }
+    x1 = w ? x + w : 0x7FFF;
+    y1 = h ? y + h : 0x7FFF;
+    if (x1 > pw) x1 = pw;
+    if (y1 > ph) y1 = ph;
+    tx1 = (x1 - 1) / TILE, ty1 = (y1 - 1) / TILE;
+    for (ty = y / TILE; ty <= ty1 && x < x1 && y < y1; ty++) {
+        if (!force)
+            scan_changes(scr->RastPort.BitMap, ty, x / TILE, tx1);
+        for (tx = x / TILE; tx <= tx1; tx++) {
+            v = pvalid + ty * pcols + tx;
+            if (force || !(*v & 1) || (*v & DIFF)) {
+                grab_tile(scr->RastPort.BitMap, tx, ty);
+                *v = (*v & ~DIFF) | SEND;
+                count++;
+            }
+        }
+    }
+    mx = scr->MouseX, my = scr->MouseY;
+    UnlockIBase(lock);  /* the rest is pcur and the wire, Intuition may go on */
+
+    head[0] = 1;
+    head[1] = pdepth;
+    head[2] = flags;
+    head[3] = 0;
+    be16(head + 4, pw);
+    be16(head + 6, ph);
+    if (!put(head, 8))
+        return FALSE;
+    if (flags & 2) {
+        be16(head, pcolours);
+        if (!put(head, 2) || !put(ppal, 3 * pcolours))
+            return FALSE;
+    }
+    n = count ? order_tiles(x / TILE, y / TILE, tx1, ty1, mx, my) : 0;
+    be32(head, n);
+    if (!put(head, 4))
+        return FALSE;
+    for (i = 0; i < n; i++) {
+        LONG t = ((UWORD *)porder)[i], size, raw, best, method, p, yy;
+        LONG ttx = t % pcols, tty = t / pcols, px = ttx * TILE, py = tty * TILE;
+        LONG tw = px + TILE < pw ? TILE : pw - px, th = py + TILE < ph ? TILE : ph - py;
+        LONG bw = (tw + 7) >> 3;
+
+        v = pvalid + t;
+        raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
+        best = packbits(ptile, raw, penc(0));
+        method = 1;
+        if (!force && (*v & 1)) {  /* the client has the old tile: try the XOR */
+            ULONG *a = (ULONG *)ptile, *o = (ULONG *)penc(1);
+            tile_bytes(pref, ttx, tty, bw, th, penc(1));
+            for (p = (raw + 3) >> 2; p > 0; p--)  /* ptile turns into the delta */
+                *a++ ^= *o++;
+            size = packbits(ptile, raw, penc(1));
+            if (size < best)
+                best = size, method = 2;
+        }
+        if (best >= raw && method == 1) {  /* noise beats PackBits: raw then */
+            tile_bytes(pcur, ttx, tty, bw, th, penc(0));
+            best = raw, method = 0;
+        }
+        /* Counted as sent before it is: pref takes the new planes now. */
+        for (p = 0, yy = py * pbpr + ttx * (TILE / 8); p < pdepth; p++, yy += ph * pbpr)
+            copy_rows(pref + yy, pbpr, pcur + yy, pbpr, bw, th);
+        *v = 1;
+        be16(tile_buf, px);
+        be16(tile_buf + 2, py);
+        be16(tile_buf + 4, tw);
+        be16(tile_buf + 6, th);
+        tile_buf[8] = method;
+        be32(tile_buf + 9, best);
+        /* Out the door as soon as there is a packet's worth, and a look for
+         * input between tiles: the pointer must not wait for the picture. */
+        if (!put(tile_buf, 13) || !put(penc(method == 2), best) ||
+            (out_len >= SEND_STEP && !flush()) ||
+            !sneak_input()) {
+            for (p = 0; p < pcols * prows; p++)
+                pvalid[p] &= ~SEND;
+            return FALSE;
+        }
+    }
+    pconn = conn_serial;
+    powner = client_id;
+    return flush();
+}
+
 static BOOL info(void)
 {
     UBYTE msg[8];
@@ -1405,6 +1777,7 @@ static void drop_client(void)
         client = -1;
     }
     out_len = 0;
+    in_have = nacks = 0;
     set_buttons(0);
     ObtainSemaphore(&picture);
     if (want)
@@ -2524,6 +2897,66 @@ static void start_channel(LONG i)
     close_pending(i);
 }
 
+static BOOL is_input(UBYTE cmd)
+{
+    return cmd == CMD_MOVE || cmd == CMD_BUTTON || cmd == CMD_RAWKEY || cmd == CMD_CHAR ||
+           cmd == CMD_MOVE_REL;
+}
+
+/* Mouse and keys: the answer code, nothing sent. */
+static UBYTE do_input(const UBYTE *c)
+{
+    UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
+
+    input_ms = now_ms();
+    switch (c[0]) {
+    case CMD_MOVE:
+        move_to(x, y);
+        break;
+    case CMD_BUTTON:
+        set_buttons(c[1] & 7);
+        break;
+    case CMD_RAWKEY:
+        key(x & 0x7F, c[1] & 1, y);
+        break;
+    case CMD_CHAR:
+        return type_char(x, y) ? 0 : 1;
+    case CMD_MOVE_REL:
+        move_by((WORD)x, (WORD)y);
+        break;
+    }
+    return 0;
+}
+
+/* Bytes from the screen client while a reply is going out. A whole input
+ * command is done right away; anything else waits in in_cmd for its turn. */
+static BOOL sneak_input(void)
+{
+    while (in_have < (LONG)sizeof(in_cmd) && nacks < (LONG)sizeof(acks)) {
+        LONG n = recv(client, in_cmd + in_have, sizeof(in_cmd) - in_have, 0);
+
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            return TRUE;
+        if (n <= 0)
+            return FALSE;
+        in_have += n;
+        if (in_have == sizeof(in_cmd) && authed && is_input(in_cmd[0])) {
+            acks[nacks++] = do_input(in_cmd);
+            in_have = 0;
+        }
+    }
+    return TRUE;
+}
+
+/* The answers of input done while the last reply was on its way. */
+static BOOL send_acks(void)
+{
+    LONG n = nacks;
+
+    nacks = 0;
+    return !n || (put(acks, n) && flush());
+}
+
 static BOOL command(const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -2533,28 +2966,17 @@ static BOOL command(const UBYTE *c)
         return auth(x);
     if (!authed)
         return refuse();
+    if (is_input(c[0]))
+        return reply(do_input(c));
     switch (c[0]) {
     case CMD_INFO:
         return info();
     case CMD_FRAME:
+        if (c[1] & 2)
+            return frame_planar(c[1] & 1, x, y, w, h);
         return frame(c[1] & 1, x, y, w, h);
-    case CMD_MOVE:
-        input_ms = now_ms();
-        move_to(x, y);
-        return reply(0);
-    case CMD_BUTTON:
-        input_ms = now_ms();
-        set_buttons(c[1] & 7);
-        return reply(0);
-    case CMD_RAWKEY:
-        input_ms = now_ms();
-        key(x & 0x7F, c[1] & 1, y);
-        return reply(0);
     case CMD_PING:
         return reply(0);
-    case CMD_CHAR:
-        input_ms = now_ms();
-        return reply(type_char(x, y) ? 0 : 1);
     case CMD_PUT:
         return put_file(x, (ULONG)w << 16 | h);
     case CMD_RUN:
@@ -2568,10 +2990,6 @@ static BOOL command(const UBYTE *c)
         return screen_front((ULONG)x << 16 | y);
     case CMD_FRAME_RGB:
         return frame_rgb(c[1] & 1, x, y, w, h);
-    case CMD_MOVE_REL:
-        input_ms = now_ms();
-        move_by((WORD)x, (WORD)y);
-        return reply(0);
     case CMD_UITREE:
         return ui_tree();
     case CMD_MENUS:
@@ -2585,8 +3003,7 @@ static BOOL command(const UBYTE *c)
 
 static void serve(void)
 {
-    UBYTE cmd[10];
-    LONG have = 0, n, top, i;
+    LONG n, top, i;
     ULONG heard = 0;
 
     while (!quit) {
@@ -2602,15 +3019,19 @@ static void serve(void)
             pend[i].fd = -1;
             authed = TRUE;
             client_id = 0;
-            have = 0;
+            conn_serial++;  /* a new face: pref is not its picture yet */
             heard = now_ms();
-            if (!command(pend[i].cmd))
+            if (!command(pend[i].cmd) || !send_acks())
                 drop_client();
             continue;
         }
-        if (client >= 0 && now_ms() - heard > IDLE_SECONDS * 1000) {
+        if (client >= 0 && now_ms() - heard > IDLE_SECONDS * 1000)
             drop_client();  /* idle */
-            have = 0;
+        if (client >= 0 && in_have == sizeof(in_cmd)) {  /* came in during the last reply */
+            in_have = 0;
+            if (!command(in_cmd) || !send_acks())
+                drop_client();
+            continue;
         }
         FD_ZERO(&r);
         top = watch(&r, client);
@@ -2624,19 +3045,18 @@ static void serve(void)
         newcomers(&r);
         if (client < 0 || !FD_ISSET(client, &r))
             continue;
-        n = recv(client, cmd + have, sizeof(cmd) - have, 0);
+        n = recv(client, in_cmd + in_have, sizeof(in_cmd) - in_have, 0);
         if (n < 0 && Errno() == EWOULDBLOCK)
             continue;
         if (n <= 0) {
             drop_client();
-            have = 0;
             continue;
         }
         heard = now_ms();
-        have += n;
-        if (have == sizeof(cmd)) {
-            have = 0;
-            if (!command(cmd))
+        in_have += n;
+        if (in_have == sizeof(in_cmd)) {
+            in_have = 0;
+            if (!command(in_cmd) || !send_acks())
                 drop_client();
         }
     }

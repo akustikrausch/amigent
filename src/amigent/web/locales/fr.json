@@ -119,5 +119,11 @@
  "clip_empty": "Le presse-papiers est vide.",
  "clip_got": "Presse-papiers de l'Amiga copié sur ce PC.",
  "clip_put_done": "Dans le presse-papiers de l'Amiga. Coller avec Amiga droite+V.",
- "clip_failed": "Presse-papiers : {error}"
+ "clip_failed": "Presse-papiers : {error}",
+ "fleet_run": "Exécuter partout",
+ "fleet_run_placeholder": "Une commande AmigaDOS pour chaque Amiga, p. ex. Version",
+ "fleet_running": "{command} en cours …",
+ "fleet_details": "Détails",
+ "fleet_restart": "Redémarrer",
+ "fleet_restart_confirm": "Écrire les disques et redémarrer {name} ?"
 }

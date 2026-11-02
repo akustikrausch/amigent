@@ -1,39 +1,25 @@
-"""Client for the amigactld wire protocol (files, commands, system state).
+"""Client for the amigactld wire protocol: files, commands, system state. The old-school path.
 
-Written from the published protocol specification (docs/protocol.md and
-docs/protocol-commands.md in the amigactl project), not from its client code.
+Clean-room job from the published spec (docs/protocol.md and
+docs/protocol-commands.md in the amigactl project), not a rip of its client code.
 """
 
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass
+
+from .client import ExecResult, VolumeFlush, join_path
+from .errors import AmigaError
+from .roster import address
+
+__all__ = ["AmigaCtl", "AmigaError", "ExecResult", "join_path"]  # the old addresses still deliver
 
 ENCODING = "iso-8859-1"
 CHUNK_SIZE = 4096
 MAX_LINE = 4096
 
 
-def join_path(folder: str, name: str) -> str:
-    """Amiga path of name inside folder ('RAM:' + 'x' or 'Work:Games' + 'x')."""
-    return folder + name if folder.endswith((":", "/")) else f"{folder}/{name}"
-
-
-class AmigaError(Exception):
-    """The daemon answered with ERR, or the connection failed."""
-
-    def __init__(self, message: str, code: int | None = None):
-        super().__init__(message)
-        self.code = code
-
-
-@dataclass
-class ExecResult:
-    rc: int
-    output: str
-
-
-class AmigaCtl:
+class AmigaCtl(VolumeFlush):
     def __init__(self, host: str, port: int = 6800, timeout: float = 30.0):
         self.host = host
         self.port = port
@@ -45,7 +31,6 @@ class AmigaCtl:
     def connect(self) -> None:
         self.close()
         try:
-            from .machines import address
             self._sock = socket.create_connection((address(self.host), self.port), self.timeout)
             self.banner = self._line()
         except OSError as e:
@@ -93,7 +78,7 @@ class AmigaCtl:
         self._sock.sendall(raw)
 
     def _status(self, line: str) -> str:
-        """Return the info field of an OK line; consume and raise on ERR."""
+        """The info field of an OK line; on ERR eat the sentinel and raise."""
         if line == "OK" or line.startswith("OK "):
             return line[3:]
         if line.startswith("ERR "):
@@ -104,7 +89,7 @@ class AmigaCtl:
         raise AmigaError(f"malformed response: {line!r}")
 
     def _text(self, command: str, *extra_lines: str) -> tuple[str, list[str]]:
-        """Run a command with a dot-stuffed line payload."""
+        """Run a command whose answer is dot-stuffed lines, SMTP style, ended by '.'."""
         self._send_line(command)
         for line in extra_lines:
             self._send_line(line)
@@ -117,7 +102,7 @@ class AmigaCtl:
             lines.append(line[1:] if line.startswith("..") else line)
 
     def _binary(self, command: str, timeout: float | None = None) -> tuple[str, bytes]:
-        """Run a command with a DATA/END chunked payload."""
+        """Run a command whose answer comes in DATA chunks until END."""
         self._send_line(command)
         assert self._sock
         self._sock.settimeout(timeout if timeout is not None else self.timeout)
@@ -172,7 +157,7 @@ class AmigaCtl:
         if self._line() != ".":
             raise AmigaError("missing sentinel")
 
-    def checksum(self, path: str) -> int:
+    def checksum(self, path: str, size: int = 0) -> int:  # size: AmigaChannel uses it for patience
         return int(dict(line.split("=", 1) for line in self._text(f"CHECKSUM {path}")[1])["crc32"], 16)
 
     def delete(self, path: str) -> None:
@@ -190,19 +175,13 @@ class AmigaCtl:
     # commands
 
     def exec(self, command: str, cd: str | None = None, timeout: float | None = None) -> ExecResult:
-        """Run synchronously. Blocks the daemon for all clients until it returns."""
+        """Run synchronously. The daemon is single-tasking here: everyone waits till it returns."""
         prefix = f"CD={cd} " if cd else ""
         info, data = self._binary(f"EXEC {prefix}{command}", timeout)
         return ExecResult(int(info.split("=", 1)[1]), data.decode(ENCODING))
 
-    def flush(self, volumes) -> None:
-        """Write-protecting a volume makes its file system commit pending changes."""
-        for volume in volumes:
-            self.exec(f"Lock {volume} ON")
-            self.exec(f"Lock {volume} OFF")
-
     def exec_async(self, command: str) -> int:
-        """Start without output capture; returns the daemon's process id."""
+        """Fire and forget, no output captured; returns the daemon's process id."""
         return int(self._text(f"EXEC ASYNC {command}")[0])
 
     # system state

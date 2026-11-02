@@ -37,7 +37,11 @@ If EXISTS $SRC/amigactld
 EndIf
 Search >NIL: S:User-Startup "C:amigentd" QUIET
 If WARN
-  Echo >>S:User-Startup "RUN >NIL: C:amigentd"
+  If EXISTS $SRC/amigent.tlsonly
+    Echo >>S:User-Startup "RUN >NIL: C:amigentd TLSONLY"
+  Else
+    Echo >>S:User-Startup "RUN >NIL: C:amigentd"
+  EndIf
 EndIf
 If EXISTS C:amigactld
   Status >NIL: COMMAND=C:amigactld

@@ -119,5 +119,11 @@
  "clip_empty": "Gli appunti sono vuoti.",
  "clip_got": "Appunti dell'Amiga copiati su questo PC.",
  "clip_put_done": "Negli appunti dell'Amiga. Incolla con Amiga destro+V.",
- "clip_failed": "Appunti: {error}"
+ "clip_failed": "Appunti: {error}",
+ "fleet_run": "Esegui su tutti",
+ "fleet_run_placeholder": "Un comando AmigaDOS per ogni Amiga, ad es. Version",
+ "fleet_running": "Esecuzione di {command} …",
+ "fleet_details": "Dettagli",
+ "fleet_restart": "Riavvia",
+ "fleet_restart_confirm": "Scrivere i dischi e riavviare {name}?"
 }

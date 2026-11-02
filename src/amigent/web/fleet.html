@@ -7,6 +7,7 @@
 <title>Amigent</title>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="stylesheet" href="viewer.css">
+<link rel="stylesheet" href="fleet.css">
 </head>
 <body class="fleet">
 <header id="bar">
@@ -16,6 +17,11 @@
   </div>
   <div class="actions"><span id="summary" class="state"></span></div>
 </header>
+<form id="run" class="runbar">
+  <input id="command" autocomplete="off" spellcheck="false" data-i18n-placeholder="fleet_run_placeholder" placeholder="An AmigaDOS command for every Amiga, e.g. Version">
+  <button id="run-go" class="primary" data-i18n="fleet_run">Run on all</button>
+</form>
+<section id="results" aria-live="polite" hidden></section>
 <main id="tiles" aria-live="polite"></main>
 <footer id="status"><span data-i18n="fleet_hint">Previews refresh every 20 seconds. Add Amigas with amigent-fleet --add NAME ADDRESS.</span></footer>
 <script src="fleet.js"></script>

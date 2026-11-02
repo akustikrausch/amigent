@@ -7,16 +7,17 @@ keyboard; up to four more run commands and move files, see
 
 ## starting
 
-    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
+    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
 
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
-included. The service runs at priority 2, waits at boot until
+included. `TLSONLY` closes the plain port to other machines while the TLS port is
+open, see [TLS](#tls). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
 Started from Workbench, the same come from the icon's tool types: `PORT=<n>`,
-`SETUP`, `KEY=<file>`, `QUIET`. Tool types in brackets, like `(SETUP)`, are
+`SETUP`, `KEY=<file>`, `QUIET`, `TLSONLY`. Tool types in brackets, like `(SETUP)`, are
 off. When it can't start (no OS 3.0, port taken, out of memory) it says so in a
 requester, unless `QUIET` is set. A port that is taken is tried for a minute
 first, as at boot.
@@ -57,7 +58,9 @@ with it: the hello waits behind the frame data already queued.
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
 the protocol version, currently `3`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
-certificate is there.
+certificate is there, `4` when the plain port is closed to other machines
+(`TLSONLY`): a plain connection from another machine is closed right after the
+hello, use PORT+1. Over TLS the hello shows `4` as well, and the connection stays.
 
 ## key
 
@@ -83,7 +86,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | nr | command | arg | fields | reply |
 |---|---|---|---|---|
 | 1 | INFO | | | info |
-| 2 | FRAME | 1 = everything | region | frame |
+| 2 | FRAME | 1 = everything, 2 = planar welcome | region | frame, or [planar](#planar) with 2 |
 | 3 | MOVE | | x, y | ok |
 | 4 | BUTTON | mask: 1 left, 2 right, 4 middle | | ok |
 | 5 | RAWKEY | 1 = press | x = rawkey, y = qualifier | ok |
@@ -155,6 +158,59 @@ The fine print:
   every tile.
 - Screens on the chipset are read through their palette, HAM6 and HAM8
   included.
+
+## planar
+
+FRAME with arg bit `2` (so `2`, or `3` for everything) says the client can take
+the bitplanes as they are. For a chipset screen with 1 to 8 planes that is what
+it gets; for anything else (graphics card, more than 8 planes) the classic frame.
+The reply starts with a format byte:
+
+- `0`: a classic [frame](#frame) follows, exactly as for arg 0 or 1.
+- `1`: planar. `u8 depth`, `u8 flags`, `u8 0`, `u16 width`, `u16 height`, then,
+  with flag `2`, the palette: `u16 count`, `count` times `u8 r`, `u8 g`, `u8 b`.
+  Then `u32 tile count`, and for each tile `u16 x`, `u16 y`, `u16 w`, `u16 h`,
+  `u8 method`, `u32 bytes`, data.
+
+Flags: `1` HAM (depth 6 or 8), `2` palette follows, `4` Extra Halfbrite (depth 6,
+32 colours sent; pens 32-63 are the same colours at half brightness). The palette
+comes with arg 1, on a new screen, and whenever it changed; keep it otherwise.
+
+A tile unpacks to `depth` planes, plane 0 first; each plane is `h` rows of
+`(w+7)/8` bytes, leftmost pixel in the top bit, pen bit `p` from plane `p`.
+Methods:
+
+- `0`: raw, those bytes as they are.
+- `1`: PackBits. A byte `n` below 128 is followed by `n+1` literal bytes; above
+  128 by one byte that repeats `257-n` times; 128 is never sent.
+- `2`: PackBits of the XOR with the tile the client already has: unpack, then
+  XOR into the old bytes. Only sent for tiles the client got before.
+
+HAM pixels are worked out along the whole row from the left edge, starting from
+colour 0, so a client keeps all planes and decodes rows across tile borders.
+
+What the planar path does differently, besides the format:
+
+- No reading ahead: the service compares the planes in chip memory against what
+  the client has, when asked, and sends what differs. A quiet screen costs one
+  pass over the planes; between frames nothing runs at all.
+- Skipping unchanged tiles and XOR need the client to hold the picture: the
+  same connection, or the same CLIENT id. Anyone else gets everything, arg 1 or
+  not. Classic and planar frames keep separate pictures.
+- Tiles around the pointer come first, then the rest top to bottom.
+- Sending starts with the first 2 KB, while later tiles are still being packed.
+
+Measured on a 68000 at 7 MHz (WinUAE, cycle exact, Workbench 3.1, 640×256 with
+4 colours): a full frame went from 15.4 s to 0.64 s and from 8484 to 7136 bytes, an
+unchanged screen from 13.1 s to 80 ms, a line of typed text 160-330 bytes.
+
+## input during a reply
+
+MOVE, BUTTON, RAWKEY, CHAR and MOVE_REL that arrive while a reply is still
+going out (a frame, say) are carried out right away, between two tiles. Their
+answers follow that reply, in the order the commands came, so the wire looks
+the same as before; only the pointer moves sooner. Any other command waits its
+turn as usual.
 
 ## screens
 
@@ -344,7 +400,15 @@ seconds. It may be written during SETUP: the port opens within about 10 seconds.
 Up to eight TLS connections at once.
 
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
-an ordinary connection there. TLS 1.2 and 1.3, as AmiSSL offers them.
+an ordinary connection there.
+
+With `TLSONLY`, while the TLS port is open and amigentd is not in SETUP mode, a
+new plain connection from any address but 127.0.0.1 gets the hello with flag `4`
+and is closed at once. Connections already open stay. Without a certificate, or
+without AmiSSL, there is no TLS port and the plain port works as usual, so a lost
+certificate never locks you out. In SETUP mode the plain port stays open, so
+`amigent-setup` can deliver the certificate; after SETUP_END new plain connections
+from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
 
 ## setup
 

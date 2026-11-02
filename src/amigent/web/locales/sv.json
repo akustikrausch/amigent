@@ -119,5 +119,11 @@
  "clip_empty": "Urklipp är tomt.",
  "clip_got": "Amigans urklipp kopierat till den här datorn.",
  "clip_put_done": "Ligger i Amigans urklipp. Klistra in med höger Amiga+V.",
- "clip_failed": "Urklipp: {error}"
+ "clip_failed": "Urklipp: {error}",
+ "fleet_run": "Kör på alla",
+ "fleet_run_placeholder": "Ett AmigaDOS-kommando för varje Amiga, t.ex. Version",
+ "fleet_running": "Kör {command} …",
+ "fleet_details": "Detaljer",
+ "fleet_restart": "Starta om",
+ "fleet_restart_confirm": "Skriva diskarna och starta om {name}?"
 }

@@ -119,5 +119,11 @@
  "clip_empty": "Leikepöytä on tyhjä.",
  "clip_got": "Amigan leikepöytä kopioitu tälle PC:lle.",
  "clip_put_done": "Amigan leikepöydällä. Liitä oikea Amiga+V.",
- "clip_failed": "Leikepöytä: {error}"
+ "clip_failed": "Leikepöytä: {error}",
+ "fleet_run": "Suorita kaikilla",
+ "fleet_run_placeholder": "AmigaDOS-komento jokaiselle Amigalle, esim. Version",
+ "fleet_running": "Suoritetaan {command} …",
+ "fleet_details": "Tiedot",
+ "fleet_restart": "Käynnistä uudelleen",
+ "fleet_restart_confirm": "Kirjoitetaanko levyt ja käynnistetäänkö {name} uudelleen?"
 }

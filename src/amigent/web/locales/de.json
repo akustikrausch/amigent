@@ -119,5 +119,11 @@
  "clip_empty": "Die Zwischenablage ist leer.",
  "clip_got": "Zwischenablage des Amiga auf den PC kopiert.",
  "clip_put_done": "Liegt in der Zwischenablage des Amiga. Einfügen mit Rechts-Amiga+V.",
- "clip_failed": "Zwischenablage: {error}"
+ "clip_failed": "Zwischenablage: {error}",
+ "fleet_run": "Auf allen ausführen",
+ "fleet_run_placeholder": "Ein AmigaDOS-Befehl für alle Amigas, z. B. Version",
+ "fleet_running": "{command} läuft …",
+ "fleet_details": "Details",
+ "fleet_restart": "Neu starten",
+ "fleet_restart_confirm": "Platten schreiben und {name} neu starten?"
 }
