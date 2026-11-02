@@ -124,7 +124,7 @@ class Amigentd:
         assert self._sock
         self._sock.sendall(raw)
         if self._exact(1) != b"\0":
-            raise AmigentdError("amigentd refused the key; AMIGENT_KEY or ~/.config/amigent/key "
+            raise AmigentdError("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
                                 "must match S:amigent.key on the Amiga")
 
     def _info(self) -> tuple[int, int]:

@@ -25,7 +25,7 @@ from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from . import tls
-from .secret import load_key, new_key, save_key
+from .secret import new_key, own_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
 AMIGA = REPO / "amiga"
@@ -150,13 +150,19 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
+def amigentd_build(link: Amigentd) -> str:
+    """amigentd.000 for a plain 68000 or 68010, amigentd for everything from the 68020 on."""
+    return "amigentd.000" if link.run("CPU CHECK 68020") == 5 else "amigentd"
+
+
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
     if with_actld:
         binary = fetch_amigactld()
         print("uploading amigactld")
         link.put("C:amigactld", binary)
-    print("uploading amigentd")
-    link.put("C:amigentd.new", (AMIGA / "bin" / "amigentd").read_bytes())
+    build = amigentd_build(link)
+    print(f"uploading {build}")
+    link.put("C:amigentd.new", (AMIGA / "bin" / build).read_bytes())
     run(link, f"MakeDir >NIL: {home}")
     print("uploading scripts")
     for name in SCRIPTS:
@@ -213,7 +219,6 @@ def main() -> int:
         print("No Amiga in sight. Is `amigentd SETUP` running over there?")
         return 1
     print(f"Amiga at {host}")
-    key = load_key(host) or new_key()
     allow = None if args.no_allow else args.allow
     if not allow and not args.no_allow:
         mine = own_address(host)
@@ -222,9 +227,12 @@ def main() -> int:
         else:
             print(f"This PC talks to the Amiga as {mine}, which looks translated (NAT); amigactld "
                   "stays open to the whole network. Use --allow with the PC's LAN address to change that.")
-    link = Amigentd(host, timeout=60, key=key)
+    link = Amigentd(host, timeout=60)
     try:
         link.connect()
+        # An Amiga that asks for a key was set up before, with the key that just worked.
+        key = link.key if link.flags & 1 else own_key(host) or new_key()
+        link.key = key
         with_actld = args.with_amigactld or link.protocol < CHANNEL_PROTOCOL
         install(link, args.home, key, allow, with_actld)
         if link.flags & 2:
@@ -234,7 +242,7 @@ def main() -> int:
             channel.connect()
             channel.sysinfo()
             link.end_setup()
-            path = save_key(key)
+            path = save_key(key, host)
             print("Done. amigentd handles screen, commands and files, and starts with the machine.")
             print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
             print(f"AMIGENT_HOST={host}")
@@ -252,7 +260,7 @@ def main() -> int:
     except (AmigentdError, AmigaError) as e:
         print(f"{e}\nStart `amigentd SETUP` on the Amiga and try again.")
         return 1
-    path = save_key(key)
+    path = save_key(key, host)
     print(f"Done. {ctl.banner} and amigentd are up, and both start with the machine.")
     print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
     print(f"AMIGENT_HOST={host}")

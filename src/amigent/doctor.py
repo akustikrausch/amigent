@@ -1,4 +1,4 @@
-"""Check both Amiga services and measure what the link can carry.
+"""Check the connection to the Amiga and measure what the link can carry.
 
 Usage: python -m amigent.doctor HOST
 """
@@ -23,10 +23,10 @@ def main() -> int:
     ctl = Commands(host)
     try:
         ctl.connect()
-        print(f"amigactld  OK   {ctl.banner}")
+        print(f"commands   OK   {ctl.banner}" + (", TLS" if hasattr(ctl._sock, "version") else ""))
         print(f"           {ctl.sysinfo()}")
         for volume in ctl.volumes():
-            print(f"           {volume['name']}: {volume['free'] // 2**20} MB free")
+            print(f"           {volume['name'].rstrip(':')}: {volume['free'] // 2**20} MB free")
         payload = bytes(512 * 1024)
         start = time.monotonic()
         ctl.write_file("RAM:amigent-speedtest", payload)
@@ -37,7 +37,7 @@ def main() -> int:
         ctl.delete("RAM:amigent-speedtest")
         print(f"           to Amiga {up / 1024:.0f} KB/s, from Amiga {down / 1024:.0f} KB/s")
     except (AmigaError, OSError) as e:
-        print(f"amigactld  FAIL {e}")
+        print(f"commands   FAIL {e}")
         failed = True
 
     screen = Amigentd(host)
