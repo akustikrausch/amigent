@@ -9,6 +9,8 @@
             your amiga. claude at the keyboard.
 ```
 
+<p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
+
 Sit at your PC, tell Claude Code what you want, and it happens on your real Amiga.
 It opens a Shell, moves files around, looks at the screen, clicks the requester
 away, types into the tracker, puts the new game where it belongs and adds it to
@@ -80,6 +82,8 @@ claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
 Tell Claude "manual control", or "show me the Amiga", and the viewer opens as its
 own window. Or skip Claude and start **Amigent** from the Start menu.
 
+![Amigent with a live Workbench and the keyboard panel](docs/screenshots/viewer.png)
+
 - **the screen, live.** Only changed 64x64 tiles travel, the area around your
   pointer gets looked at first. Moving the mouse costs a few milliseconds.
 - **mouse and keyboard.** Click, drag, right button for menus, wheel. Text mode
@@ -97,8 +101,15 @@ own window. Or skip Claude and start **Amigent** from the Start menu.
 - **the rest.** Fit to window or 1:1, full screen (there the Windows keys become
   the Amiga keys), screenshot to PNG, and a restart button that writes the disks
   first.
-- **about.** The *i* in the toolbar shows the version, the Amiga you're on, and
-  where to read what's new.
+- **the machine at a glance.** OS and CPU next to the name in the toolbar, free
+  memory in the status bar. The *i* shows the rest: Kickstart and Workbench
+  versions, FPU, Chip and Fast RAM, network stack, every volume with its free
+  space. All of it read in well under a second, memory kept fresh every 30 s.
+- **your language.** English, Deutsch, Polski, Français, Español, Italiano,
+  Suomi, Svenska, Dansk, Čeština, Slovenčina and Magyar, picked from your
+  system settings. Change it in the *i* dialog if you like.
+
+![About Amigent: version, system, memory and volumes](docs/screenshots/about.png)
 
 Claude keeps working while the window is open, and you see every click it makes.
 
@@ -205,10 +216,17 @@ alive: the PiStorm and Emu68 crews, the AmiKit people, Aminet.
 
 And to all Amigans out there who still believe.
 
+## translations
+
+Each language is one file in [`src/amigent/web/locales`](src/amigent/web/locales).
+To add yours, copy `en.json`, translate the values, keep the `{placeholders}`,
+and add the code to `LANGUAGES` in `viewer.js`. The tests tell you if a text is
+missing.
+
 ## versions
 
 What changed when is in the [changelog](CHANGELOG.md). Releases are tagged
-`v0.4.0` and so on, `amigent-viewer --version` tells you what you have.
+`v0.5.0` and so on, `amigent-viewer --version` tells you what you have.
 
 ## license
 

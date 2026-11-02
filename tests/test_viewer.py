@@ -124,3 +124,32 @@ def test_no_running_viewer_without_state(monkeypatch, tmp_path):
 
     monkeypatch.setattr(viewer, "STATE", tmp_path / "viewer.json")
     assert viewer.running_viewer("192.168.1.50") is None
+
+
+def test_every_language_has_every_text():
+    import re
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
+    english = json.loads((web / "locales" / "en.json").read_text(encoding="utf-8"))
+    used = set(re.findall(r'data-i18n(?:-title|-label|-aria)?="([a-z_]+)"', (web / "index.html").read_text()))
+    script = (web / "viewer.js").read_text()
+    used |= set(re.findall(r'\bt\("([a-z_]+)"', script))
+    used |= {"restarting", "restart_failed"}  # sent by the server
+    assert used <= english.keys(), used - english.keys()
+    codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))
+    for code in codes:
+        texts = json.loads((web / "locales" / f"{code}.json").read_text(encoding="utf-8"))
+        assert texts.keys() == english.keys(), code
+        for key, text in texts.items():
+            assert set(re.findall(r"{\w+}", text)) == set(re.findall(r"{\w+}", english[key])), (code, key)
+
+
+def test_describe_system():
+    from amigent.viewer import describe_system
+
+    facts = describe_system("Kickstart 47.115, Workbench 47.5\n",
+                            "System: 68040 68882   (INST: Cache Burst) (DATA: Cache Burst)\n")
+    assert facts == {"os": "AmigaOS 3.2", "kickstart": "47.115", "workbench": "47.5",
+                     "cpu": "68040", "fpu": "68882"}
+    assert describe_system("", "")["os"] == ""

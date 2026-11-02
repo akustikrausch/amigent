@@ -3,6 +3,15 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 0.5.0 (2026-11-02)
+
+- Twelve languages: English, German, Polish, French, Spanish, Italian, Finnish,
+  Swedish, Danish, Czech, Slovak and Hungarian. Picked from the system
+  settings, changeable in About. One JSON file per language, checked by tests.
+- The machine at a glance: OS and CPU in the toolbar, free memory in the status
+  bar, Kickstart, Workbench, FPU, memory, network stack and volumes in About.
+- Screenshots in the README.
+
 ## 0.4.0 (2026-11-02)
 
 - About Amigent in the toolbar: version, connected Amiga, credits, a few tips,

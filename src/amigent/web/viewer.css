@@ -281,6 +281,7 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 
 dialog {
   width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   padding: 0;
   color: var(--text);
   background: var(--panel-bg);
@@ -334,6 +335,18 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 .about dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
 .about dt { color: var(--muted); }
 .about dd { margin: 0; }
+.about #about-volumes { display: grid; gap: 1px; }
+.about .vol { display: flex; justify-content: space-between; gap: 12px; }
+.about .vol span { color: var(--muted); }
+.about select {
+  font: inherit;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.about select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .about .tips { margin: 0; padding-left: 18px; color: var(--text); }
 .about .tips li { margin: 2px 0; }
 .about .buttons { align-items: center; }

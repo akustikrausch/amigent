@@ -50,13 +50,13 @@
 
 <div id="body">
   <main id="stage">
-    <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen"></canvas>
+    <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen" data-i18n-aria="screen_label"></canvas>
     <div id="overlay" class="overlay"><div class="spinner"></div><p id="overlay-text"></p></div>
     <div id="drop" class="overlay drop"><p data-i18n="drop_here">Drop to send to the Amiga</p></div>
     <div id="uploads" aria-live="polite"></div>
   </main>
 
-  <aside id="panel" aria-label="Amiga keyboard">
+  <aside id="panel" aria-label="Amiga keyboard" data-i18n-aria="keyboard_panel">
     <section>
       <h2 data-i18n="screens">Screens</h2>
       <div class="grid two">
@@ -133,7 +133,7 @@
 </div>
 
 <footer id="status">
-  <span id="st-size">–</span><span id="st-rate">–</span><span id="st-rtt">–</span><span id="st-version"></span>
+  <span id="st-size">–</span><span id="st-rate">–</span><span id="st-rtt">–</span><span id="st-mem"></span><span id="st-version"></span>
 </footer>
 
 <input id="file" type="file" multiple hidden>
@@ -146,7 +146,7 @@
     <input id="folder" autocomplete="off" spellcheck="false" value="RAM:">
     <div id="volumes" class="chips"></div>
     <div class="browser">
-      <ul id="folders" aria-label="Folders"></ul>
+      <ul id="folders" aria-label="Folders" data-i18n-aria="folders_label"></ul>
     </div>
     <div class="buttons">
       <button value="cancel" data-i18n="cancel">Cancel</button>
@@ -187,12 +187,18 @@
         <p id="about-version">Version –</p>
       </div>
     </div>
-    <p data-i18n="about_text">Watch and drive your real Amiga from this PC. Claude can do it too, and you see every click.</p>
+    <p data-i18n="about_text">Your real Amiga, live on this PC, with mouse and keyboard.</p>
     <dl>
       <dt data-i18n="about_amiga">Amiga</dt><dd id="about-host">–</dd>
       <dt data-i18n="about_screen">Screen</dt><dd id="about-screen">–</dd>
+      <dt data-i18n="about_system">System</dt><dd id="about-system">–</dd>
+      <dt data-i18n="about_cpu">CPU</dt><dd id="about-cpu">–</dd>
+      <dt data-i18n="about_memory">Memory</dt><dd id="about-memory">–</dd>
+      <dt data-i18n="about_network">Network stack</dt><dd id="about-tcp">–</dd>
+      <dt data-i18n="about_volumes">Volumes</dt><dd id="about-volumes">–</dd>
       <dt data-i18n="about_by">Made by</dt><dd>Akustikrausch · Andreas Wendorf</dd>
       <dt data-i18n="about_license">License</dt><dd>MIT</dd>
+      <dt data-i18n="about_language">Language</dt><dd><select id="language" data-i18n-aria="about_language"></select></dd>
       <dt data-i18n="about_thanks">Thanks</dt><dd data-i18n="thanks_text">tbdye for amigactld (GPLv3), Volker Barthelmann for vbcc</dd>
     </dl>
     <h4 data-i18n="about_tips">Good to know</h4>

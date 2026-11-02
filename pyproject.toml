@@ -25,7 +25,7 @@ where = ["src"]
 version = { attr = "amigent.__version__" }
 
 [tool.setuptools.package-data]
-amigent = ["web/*"]
+amigent = ["web/*", "web/locales/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

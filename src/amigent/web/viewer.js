@@ -10,144 +10,66 @@
 
   // ---------------------------------------------------------------- text
 
-  const DE = {
-    connecting: "Verbinde mit dem Amiga…",
-    offline: "Der Amiga antwortet nicht. Neuer Versuch läuft…",
-    disconnected: "Verbindung zu amigent getrennt. Neuer Versuch läuft…",
-    state_offline: "nicht verbunden",
-    send_file: "Datei senden",
-    send_tip: "Dateien von diesem PC auf den Amiga kopieren",
-    type_text: "Text tippen",
-    type_tip: "Text auf dem Amiga tippen lassen",
-    fit: "An Fenster anpassen",
-    fullscreen: "Vollbild",
-    screenshot: "Bildschirmfoto speichern",
-    restart: "Amiga neu starten…",
-    panel: "Tastatur-Leiste ein/aus",
-    about: "Über Amigent",
-    about_text: "Dein echter Amiga, live auf diesem PC, mit Maus und Tastatur. Claude kann ihn auch bedienen, und du siehst jeden Klick.",
-    about_amiga: "Amiga",
-    about_screen: "Bildschirm",
-    about_by: "Von",
-    about_license: "Lizenz",
-    about_thanks: "Dank an",
-    thanks_text: "tbdye für amigactld (GPLv3), Volker Barthelmann für vbcc",
-    about_tips: "Gut zu wissen",
-    tip_paste: "Ctrl+V tippt die Zwischenablage des PCs auf dem Amiga.",
-    tip_keys: "Im Vollbild sind die Windows-Tasten die Amiga-Tasten.",
-    tip_lock: "Doppelklick auf eine Umschalttaste rastet sie ein, ihre LED wird lang.",
-    tip_drop: "Dateien auf den Bildschirm ziehen, um sie zu senden.",
-    about_project: "Projektseite",
-    about_changes: "Was ist neu",
-    close: "Schließen",
-    drop_here: "Loslassen, um es zum Amiga zu senden",
-    screens: "Bildschirme",
-    wb_front: "Workbench vorn",
-    next_screen: "Schirm wechseln",
-    programs: "Programme",
-    open: "Öffnen",
-    save: "Speichern",
-    quit: "Beenden",
-    copy: "Kopieren",
-    cut: "Ausschneiden",
-    paste: "Einfügen",
-    select_all: "Alle wählen",
-    undo: "Widerrufen",
-    break: "Abbrechen",
-    end_input: "Eingabe-Ende",
-    keys: "Tasten",
-    modifiers: "Für die nächste Taste halten",
-    lamiga: "Linke Amiga-Taste",
-    ramiga: "Rechte Amiga-Taste",
-    mod_tip: "Klick: für die nächste Taste. Doppelklick: einrasten.",
-    mouse: "Maus",
-    hold_right: "Rechte Taste halten",
-    middle_click: "Mittelklick",
-    keyboard: "Tastatur",
-    kb_text: "Text",
-    kb_direct: "Direkt (Spiele)",
-    kb_text_tip: "Zeichen über die Tastaturbelegung des Amiga",
-    kb_direct_tip: "Tastenpositionen, gehaltene Tasten bleiben gehalten",
-    send_title: "Zum Amiga senden",
-    target_folder: "Ordner auf dem Amiga",
-    cancel: "Abbrechen",
-    send: "Senden",
-    type_title: "Auf dem Amiga tippen",
-    type_hint: "Der Text geht ins aktive Fenster, Zeilenumbrüche drücken Return.",
-    type_go: "Tippen",
-    restart_title: "Amiga neu starten?",
-    restart_text: "Offene Dateien werden vorher auf die Platte geschrieben. Ungesicherte Arbeit in Programmen geht verloren.",
-    restart_go: "Neu starten",
-    restarting: "Amiga startet neu…",
-    restart_failed: "Neustart fehlgeschlagen",
-    exists: "{path} gibt es schon. Ersetzen?",
-    saved: "Gespeichert: {path}",
-    failed: "{path}: {error}",
-    queued: "wartet",
-    loading: "lädt…",
-    no_folders: "keine Unterordner",
-    folder_error: "Ordner nicht lesbar",
-  };
-
-  const EN = {
-    connecting: "Connecting to the Amiga…",
-    offline: "The Amiga is not answering. Trying again…",
-    disconnected: "Lost the connection to amigent. Trying again…",
-    state_offline: "not connected",
-    fit: "Fit to window",
-    fullscreen: "Full screen",
-    screenshot: "Save screenshot",
-    restart: "Restart Amiga…",
-    panel: "Show or hide the keyboard panel",
-    about: "About Amigent",
-    lamiga: "Left Amiga",
-    ramiga: "Right Amiga",
-    mod_tip: "Click: next key only. Double-click: lock.",
-    restarting: "Restarting the Amiga…",
-    restart_failed: "Restart failed",
-    exists: "{path} exists. Replace it?",
-    saved: "Saved {path}",
-    failed: "{path}: {error}",
-    queued: "waiting",
-    loading: "loading…",
-    no_folders: "no folders",
-    folder_error: "cannot read this folder",
-  };
-
-  const german = (navigator.language || "").toLowerCase().startsWith("de");
-
-  for (const el of document.querySelectorAll("[data-i18n]")) EN[el.dataset.i18n] ??= el.textContent;
-  for (const el of document.querySelectorAll("[data-i18n-title]")) EN[el.dataset.i18nTitle] ??= el.title;
-  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) EN[el.dataset.i18nPlaceholder] ??= el.placeholder;
-
-  function t(key, values = {}) {
-    let text = (german && DE[key]) || EN[key] || key;
-    for (const [name, value] of Object.entries(values)) text = text.replaceAll(`{${name}}`, value);
-    return text;
-  }
-
-  if (german) {
-    document.documentElement.lang = "de";
-    for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
-    for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
-    for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
-  }
-  for (const el of document.querySelectorAll("[data-i18n-label]")) {
-    el.title = t(el.dataset.i18nLabel);
-    el.setAttribute("aria-label", el.title);
-  }
-  for (const el of document.querySelectorAll("[data-mod]")) el.title = `${el.title || el.textContent}. ${t("mod_tip")}`;
-
-  for (const el of document.querySelectorAll("[data-combo]")) {
-    el.title = el.dataset.combo.replace("lamiga", "Amiga links").replace("ramiga", "Amiga rechts")
-      .replace(/\+(.)$/, (_, k) => "+" + k.toUpperCase());
-    if (!german) el.title = el.title.replace("Amiga links", "Left Amiga").replace("Amiga rechts", "Right Amiga");
-  }
-
   const store = {
     get(key, fallback) { try { return localStorage.getItem("amigent." + key) ?? fallback; } catch { return fallback; } },
     set(key, value) { try { localStorage.setItem("amigent." + key, value); } catch { /* private window */ } },
   };
+
+  // Each language is web/locales/<code>.json; English is the default and fills gaps.
+  const LANGUAGES = {
+    en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
+    fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
+  };
+
+  function pickLanguage() {
+    const chosen = store.get("lang", "auto");
+    if (LANGUAGES[chosen]) return chosen;
+    for (const tag of navigator.languages?.length ? navigator.languages : [navigator.language || "en"]) {
+      const code = tag.toLowerCase().split("-")[0];
+      if (LANGUAGES[code]) return code;
+    }
+    return "en";
+  }
+
+  const language = pickLanguage();
+  let EN = {};
+  let TEXT = {};
+
+  async function loadLanguage() {
+    const load = (code) => fetch(`locales/${code}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+    EN = await load("en");
+    TEXT = language === "en" ? EN : await load(language);
+  }
+
+  function t(key, values = {}) {
+    let text = TEXT[key] ?? EN[key] ?? key;
+    for (const [name, value] of Object.entries(values)) text = text.replaceAll(`{${name}}`, value);
+    return text;
+  }
+
+  function applyLanguage() {
+    document.documentElement.lang = language;
+    for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+    for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+    for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
+    for (const el of document.querySelectorAll("[data-i18n-label]")) {
+      el.title = t(el.dataset.i18nLabel);
+      el.setAttribute("aria-label", el.title);
+    }
+    for (const el of document.querySelectorAll("[data-mod]")) {
+      const name = el.dataset.i18nLabel ? t(el.dataset.i18nLabel) : el.textContent;
+      el.title = `${name}. ${t("mod_tip")}`;
+    }
+    for (const el of document.querySelectorAll("[data-combo]")) {
+      el.title = el.dataset.combo.replace("lamiga", t("lamiga")).replace("ramiga", t("ramiga"))
+        .replace(/\+(.)$/, (_, k) => "+" + k.toUpperCase());
+    }
+    const select = $("language");
+    select.innerHTML = "";
+    select.append(new Option(t("language_auto"), "auto"));
+    for (const [code, name] of Object.entries(LANGUAGES)) select.append(new Option(name, code));
+    select.value = store.get("lang", "auto");
+  }
 
   function toast(text, bad = false) {
     const el = document.createElement("div");
@@ -193,7 +115,41 @@
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
     pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
-    $("state-text").textContent = socketOpen && amigaOnline ? host : t("state_offline");
+    $("state-text").textContent = socketOpen && amigaOnline ? [host, amiga.os, amiga.cpu].filter(Boolean).join(" · ") : t("state_offline");
+  }
+
+  let amiga = {};
+
+  function bytes(n) {
+    if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+    if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
+    return `${Math.round(n / 1024)} KB`;
+  }
+
+  function showAmiga(info) {
+    amiga = info;
+    const system = [info.os, info.kickstart && `Kickstart ${info.kickstart}`, info.workbench && `Workbench ${info.workbench}`]
+      .filter(Boolean).join(", ");
+    const cpu = [info.cpu, info.fpu].filter(Boolean).join(" + ");
+    const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
+    $("about-system").textContent = system || "–";
+    $("about-cpu").textContent = cpu || "–";
+    $("about-memory").textContent = memory;
+    $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
+    const list = $("about-volumes");
+    list.innerHTML = "";
+    for (const v of info.volumes || []) {
+      const row = document.createElement("div");
+      row.className = "vol";
+      row.textContent = `${v.name}:`;
+      const free = document.createElement("span");
+      free.textContent = t("free_of", { free: bytes(v.free), size: bytes(v.size) });
+      row.append(free);
+      list.append(row);
+    }
+    $("st-mem").textContent = t("status_free", { size: bytes(info.chip_free + info.fast_free) });
+    $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
+    showState();
   }
 
   function onEvent(m) {
@@ -203,15 +159,19 @@
         document.title = `Amigent · ${host}`;
         if (m.version) {
           $("st-version").textContent = `amigent ${m.version}`;
-          $("about-version").textContent = `Version ${m.version}`;
+          $("about-version").textContent = t("version", { version: m.version });
         }
         $("about-host").textContent = host;
+        if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
         showState();
         break;
       case "size":
         setSize(m.w, m.h);
+        break;
+      case "amiga":
+        showAmiga(m);
         break;
       case "online":
         amigaOnline = m.online;
@@ -593,6 +553,10 @@
   $("panel-toggle").addEventListener("click", () => setPanel(document.body.classList.contains("no-panel")));
 
   $("about").addEventListener("click", () => $("about-dialog").showModal());
+  $("language").addEventListener("change", () => {
+    store.set("lang", $("language").value);
+    location.reload();
+  });
   $("about-dialog").addEventListener("close", () => canvas.focus());
 
   // ---------------------------------------------------------------- restart
@@ -780,6 +744,10 @@
 
   // ---------------------------------------------------------------- start
 
+  loadLanguage().then(() => {
+    applyLanguage();
+    showState();
+  });
   if (store.get("direct", "0") === "1") setDirect(true);
   if (store.get("panel", "1") === "0") setPanel(false);
   showState();

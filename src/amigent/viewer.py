@@ -19,6 +19,7 @@ import json
 import os
 import platform
 import queue
+import re
 import secrets
 import shutil
 import socket
@@ -120,6 +121,25 @@ class WebSocket:
             pass
 
 
+OS_NAMES = {47: "AmigaOS 3.2", 46: "AmigaOS 3.1.4", 45: "AmigaOS 3.9", 44: "AmigaOS 3.5",
+            40: "AmigaOS 3.1", 39: "AmigaOS 3.0", 37: "AmigaOS 2.04", 36: "AmigaOS 2.0", 34: "AmigaOS 1.3"}
+
+
+def describe_system(version: str, cpu: str) -> dict:
+    """Turn the output of the Version and CPU commands into a few named facts."""
+    kick = re.search(r"Kickstart (\d+)\.(\d+)", version)
+    bench = re.search(r"Workbench (\d+\.\d+)", version)
+    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
+    major = int(kick.group(1)) if kick else 0
+    return {
+        "os": OS_NAMES.get(major, f"Kickstart {major}" if major else ""),
+        "kickstart": f"{kick.group(1)}.{kick.group(2)}" if kick else "",
+        "workbench": bench.group(1) if bench else "",
+        "cpu": next((c for c in chips if not c.startswith("688")), ""),
+        "fpu": next((c for c in chips if c.startswith("688")), ""),
+    }
+
+
 def tiles_message(tiles) -> bytes:
     """Binary message 1: x, y, w, h, size and the tile data as amigentd sent it."""
     parts = [b"\x01"]
@@ -169,6 +189,8 @@ class Viewer:
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
         self.ever_joined = False
+        self.amiga: dict = {}
+        self._system: dict = {}
         self.alone_since = time.monotonic()
         self.pointer = (0, 0)
         self.last_input = 0.0
@@ -206,7 +228,7 @@ class Viewer:
         with self.lock():
             picture = self.screen.snapshot()
             ws.send(json.dumps({"type": "hello", "host": self.host, "online": self.online,
-                                "version": __version__,
+                                "version": __version__, "amiga": self.amiga,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -361,14 +383,37 @@ class Viewer:
             self.event("online", online=online, reason=reason)
 
     def _stats(self) -> None:
+        seconds = 0
         while True:
             before = self.received
             time.sleep(1)
             with self.clients_lock:
                 watching = bool(self.clients)
-            if watching:
-                self.event("stats", kbps=round((self.received - before) / 1024, 1),
-                           rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height)
+            if not watching:
+                continue
+            self.event("stats", kbps=round((self.received - before) / 1024, 1),
+                       rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height)
+            if self.online and (not self.amiga or seconds % 30 == 0):
+                try:
+                    self.amiga = self.read_amiga()
+                    self.event("amiga", **self.amiga)
+                except (AmigaError, OSError):
+                    pass  # the next round tries again
+            seconds += 1
+
+    def read_amiga(self) -> dict:
+        """Facts about the Amiga that cost it well under a second to tell."""
+        if not self._system:
+            self._system = describe_system(self._ctl(lambda: self.ctl.exec("Version").output),
+                                           self._ctl(lambda: self.ctl.exec("CPU").output))
+        info = self._ctl(self.ctl.sysinfo)
+        volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
+                   for v in self._ctl(self.ctl.volumes)]
+        number = lambda key: int(info.get(key, "0") or 0)  # noqa: E731
+        return {**self._system, "tcp": info.get("bsdsocket", ""),
+                "chip_free": number("chip_free"), "chip_total": number("chip_total"),
+                "fast_free": number("fast_free"), "fast_total": number("fast_total"),
+                "volumes": sorted(volumes, key=lambda v: v["name"].lower())}
 
     # files
 
@@ -477,6 +522,8 @@ class _Handler(BaseHTTPRequestHandler):
         name = url.path.lstrip("/")
         if name in STATIC:
             return self._reply(200, (WEB / name).read_bytes(), STATIC[name])
+        if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
+            return self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
         if not self._allowed(query):
             return self._reply(403, b"Open the viewer through amigent.", "text/plain")
         if url.path == "/":
