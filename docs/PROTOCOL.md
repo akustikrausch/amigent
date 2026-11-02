@@ -86,7 +86,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | nr | command | arg | fields | reply |
 |---|---|---|---|---|
 | 1 | INFO | | | info |
-| 2 | FRAME | 1 = everything, 2 = planar welcome | region | frame, or [planar](#planar) with 2 |
+| 2 | FRAME | 1 = everything, 2 = planar welcome, 4 = more methods | region | frame, or [planar](#planar) with 2 |
 | 3 | MOVE | | x, y | ok |
 | 4 | BUTTON | mask: 1 left, 2 right, 4 middle | | ok |
 | 5 | RAWKEY | 1 = press | x = rawkey, y = qualifier | ok |
@@ -189,6 +189,52 @@ Methods:
 HAM pixels are worked out along the whole row from the left edge, starting from
 colour 0, so a client keeps all planes and decodes rows across tile borders.
 
+With arg bit `4` as well (`6`, or `7` for everything) the method byte is a set of
+bits, and the service picks whatever comes out shortest for each tile:
+
+- bits 0-1: `0` raw, `1` PackBits, `2` PackBits of an XOR with the old picture.
+- `4`: row XOR. After unpacking, each row was XORed with the row above it in the
+  same plane; undo it from the top: `row[y] ^= row[y-1]`, per plane.
+- `8`: shifted (only with `2`). The data start with an `s16 dy`, then the PackBits.
+  The XOR partner is not the tile's own old rows but the old picture `dy` rows
+  further down, same columns: row `y` of the tile pairs with old row `y+dy`.
+  Rows outside the screen count as zeros. That is a scrolled window.
+
+The order to undo: unpack, undo the row XOR, then XOR with the partner. "Old
+picture" always means the picture as it was before this frame, also for tiles
+earlier in the same frame, so a client copies its planes when a frame starts and
+takes the partners from that copy. Methods `0`, `1` and `2` mean exactly what
+they meant without bit `4`.
+
+With bit `4`, screens that aren't planar (graphics cards, more than 8 planes)
+answer in format `2` instead of `0`:
+
+- `2`: chunky. `u8 8`, `u8 0`, `u8 0`, `u16 width`, `u16 height`, `u32 tile
+  count`, then tiles as in planar: `u16 x`, `u16 y`, `u16 w`, `u16 h`,
+  `u8 method`, `u32 bytes`, data. A tile is `h` rows of `w` RGB332 bytes, the
+  colour byte of the classic [frame](#frame). No palette.
+
+The method bits are the same, a row being `w` bytes, plus:
+
+- `16`: indexed, only with `0` or `1` in bits 0-1. The data start with `u8 k`
+  (1 to 16) and `k` RGB332 colours; the rest is the tile as indices into them,
+  `1` bit a pixel for up to 2 colours, `2` for up to 4, `4` for up to 16, the
+  leftmost pixel in the top bits, each row starting on a new byte. Bits 0-1 and
+  `4` apply to these index rows: unpack, undo the row XOR, then look up.
+
+Format `2` shares its picture with the classic frame (CLIENT and arg 1 work the
+same way), and like that one reads ahead in the background. A desktop tile has
+a handful of colours more often than not: the 640×256 Workbench above came to
+5.7 instead of 11.4 KB. A 1920×1080 graphics card Workbench over plipbox took
+87.6 KB and 3.0 to 4.7 s, against 127.8 KB and 9.6 to 13.1 s for the classic
+frame, measured in turns.
+
+The service looks for a scroll with one changed row of a tile the client
+already has and checks that eight rows in a row agree; it looks up to 256 rows
+either way. Measured on Workbench 3.1, 640×256 with 4 colours: a full frame with
+two Shell windows went from 10.7 to 5.0 KB, a Shell that scrolled by one line
+from 5.7 to 1.9 KB. Fresh text gains little, it is information after all.
+
 What the planar path does differently, besides the format:
 
 - No reading ahead: the service compares the planes in chip memory against what
@@ -198,7 +244,9 @@ What the planar path does differently, besides the format:
   same connection, or the same CLIENT id. Anyone else gets everything, arg 1 or
   not. Classic and planar frames keep separate pictures.
 - Tiles around the pointer come first, then the rest top to bottom.
-- Sending starts with the first 2 KB, while later tiles are still being packed.
+- Sending starts once 8 KB are packed, while later tiles are still being packed.
+  Not earlier: a slow link pays for every packet, and small sends make half
+  empty ones.
 
 Measured on a 68000 at 7 MHz (WinUAE, cycle exact, Workbench 3.1, 640×256 with
 4 colours): a full frame went from 15.4 s to 0.64 s and from 8484 to 7136 bytes, an

@@ -100,8 +100,17 @@ claude mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
 codex mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
 ```
 
-Other agents need that command. With several Amigas, give each entry
-`AMIGENT_HOST` with the Amiga's name.
+Codex asks before every tool call. To let it work on the Amiga on its own,
+add to its entry in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.amigent]
+default_tools_approval_mode = "approve"
+```
+
+Antigravity reads its servers from `~/.gemini/antigravity/mcp_config.json`, in
+the usual `mcpServers` format. Other agents need that command. With several
+Amigas, give each entry `AMIGENT_HOST` with the Amiga's name.
 
 ### When the address changes
 
