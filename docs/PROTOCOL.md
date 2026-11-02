@@ -494,6 +494,11 @@ of a frame going out.
     'CLIENTS'
     say result
 
+`amigent-status` shows the same in a window and asks again every two seconds:
+GadTools, OS 2.04 or newer, any 68000. It needs `rexxsyslib.library` but not
+RexxMast. `amigent-status PORT AMIGENT.6811`, or the tool type `PORT=`, watches
+a second copy. Esc or the close gadget ends it.
+
 ## setup
 
 - PUT writes the file in one go. If it can't (no SETUP mode, bad path, disk

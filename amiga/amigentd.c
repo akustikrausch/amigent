@@ -426,13 +426,20 @@ static LONG wanted;
 static struct Screen *seen;
 static ULONG input_ms;
 
+/* Milliseconds from the E clock: it only ever goes forward. The system time
+ * doesn't; a clock sync can put it back, and then an uptime comes out shorter
+ * than a connection that started after it. Wraps after 49 days, harmless for
+ * differences. */
 static ULONG now_ms(void)
 {
-    struct timeval tv;
+    static ULONG khz;
+    struct EClockVal ev;
     ULONG ms;
 
-    GetSysTime(&tv);
-    ms = tv.tv_secs * 1000 + tv.tv_micro / 1000;
+    if (!khz)
+        khz = ReadEClock(&ev) / 1000;
+    ReadEClock(&ev);
+    ms = (ULONG)((((unsigned long long)ev.ev_hi << 32) | ev.ev_lo) / khz);
     return ms ? ms : 1;  /* 0 means never read */
 }
 
