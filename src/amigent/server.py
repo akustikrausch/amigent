@@ -348,9 +348,9 @@ def amiga_inventory(max_wait: float = 1800) -> str:
     folder = inventory_folder()
     folder.mkdir(parents=True, exist_ok=True)
     scans = sorted(folder.glob("*.json"))
-    previous = json.loads(scans[-1].read_text()) if scans else None
+    previous = json.loads(scans[-1].read_text(encoding="utf-8")) if scans else None
     target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
-    target.write_text(json.dumps(items, indent=1, ensure_ascii=False))
+    target.write_text(json.dumps(items, indent=1, ensure_ascii=False), encoding="utf-8")
     summary = {"file": str(target), "files": len(items),
                "with_version": sum(1 for i in items.values() if i["version"])}
     if previous is not None:

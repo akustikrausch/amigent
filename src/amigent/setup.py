@@ -153,7 +153,7 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
     run(link, f"MakeDir >NIL: {home}")
     print("uploading scripts")
     for name in SCRIPTS:
-        text = (AMIGA / name).read_text().replace("SYS:amigent", home)
+        text = (AMIGA / name).read_text(encoding="iso-8859-1").replace("SYS:amigent", home)
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
     print("setting the key")

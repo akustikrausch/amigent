@@ -46,7 +46,7 @@ def list_file():
 
 def load() -> list[dict]:
     try:
-        amigas = json.loads(list_file().read_text())
+        amigas = json.loads(list_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     return [a for a in amigas if isinstance(a, dict) and a.get("name") and a.get("host")]
@@ -56,7 +56,7 @@ def save(amigas: list[dict]) -> None:
     path = list_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(amigas, indent=1))
+    tmp.write_text(json.dumps(amigas, indent=1), encoding="utf-8")
     os.replace(tmp, path)
 
 

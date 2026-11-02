@@ -1,3 +1,5 @@
+import os
+
 from amigent import secret
 
 
@@ -10,7 +12,8 @@ def test_each_amiga_keeps_its_own_key(tmp_path, monkeypatch):
     assert secret.load_key("10.0.0.2") == "second"
     assert secret.own_key("10.0.0.3") is None
     assert secret.load_key("my-amiga") == "first"  # the first key serves other names
-    assert (tmp_path / "key-10.0.0.2").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":  # Windows keeps its own ACLs, no Unix mode bits to check
+        assert (tmp_path / "key-10.0.0.2").stat().st_mode & 0o777 == 0o600
 
 
 def test_host_names_stay_inside_the_folder(tmp_path, monkeypatch):
