@@ -115,6 +115,7 @@ def _install_mac(host: str) -> list[str]:
   <key>CFBundleIconFile</key><string>amigent</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSUIElement</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>Amigent connects to your Amiga on the home network.</string>
 </dict></plist>
 """)
     subprocess.run(["touch", str(MAC_APP)], check=False)  # Finder picks up the icon
