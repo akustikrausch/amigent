@@ -11,12 +11,12 @@
 
 <p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
 
-Amigent connects your PC to your real Amiga over the home network. Then you can:
+Amigent connects your PC or Mac to your real Amiga over the home network. Then you can:
 
 - **let an AI agent do the work**, for example Claude Code or Codex: install
   software, update programs, change settings, copy files, click through
   programs. Just tell it what you want.
-- **use the Amiga yourself from the PC**, in a window with the live screen, your
+- **use the Amiga yourself from your computer**, in a window with the live screen, your
   own mouse and keyboard, file transfer and a shared clipboard.
 
 Both at the same time: you see every click the agent makes and can take over at
@@ -34,7 +34,7 @@ any moment.
 
 **2.** Start it with `amigentd SETUP` in a Shell, or double-click its icon.
 
-### On the PC
+### On the PC or Mac
 
 **3.** Paste this into your AI agent:
 
@@ -68,7 +68,7 @@ Without an AI agent: see [installation by hand](docs/GUIDE.md#installation-by-ha
 - An Amiga with AmigaOS 3.x, any CPU from the 68000 on, a network connection
   (a plipbox on the parallel port is enough) and a TCP/IP stack such as Roadshow.
   The faster the CPU, the smoother the screen.
-- A PC with Windows, macOS or Linux and Python 3.10 or newer.
+- A PC or Mac with Windows, macOS or Linux and Python 3.10 or newer.
 
 ## What you can ask for
 
