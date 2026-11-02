@@ -74,7 +74,9 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
 
 
 def find_openssl() -> str | None:
-    """openssl from the PATH, else the copy Git for Windows smuggles in."""
+    """AMIGENT_OPENSSL, else openssl from the PATH, else the copy Git for Windows smuggles in."""
+    if chosen := os.environ.get("AMIGENT_OPENSSL"):
+        return chosen
     if tool := shutil.which("openssl"):
         return tool
     for root in (os.environ.get("ProgramFiles", r"C:\Program Files"),

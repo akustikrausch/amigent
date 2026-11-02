@@ -26,6 +26,13 @@ jobs:
         run: openssl version
       - name: test
         run: python -m pytest -q -rs
+      - name: certificates with the Mac's own LibreSSL
+        if: runner.os == 'macOS'
+        env:
+          AMIGENT_OPENSSL: /usr/bin/openssl
+        run: |
+          /usr/bin/openssl version
+          python -m pytest -q -rs tests/test_channel.py -k "certificate or tls"
 
   package:
     runs-on: ubuntu-latest
