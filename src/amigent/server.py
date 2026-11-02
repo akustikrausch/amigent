@@ -433,17 +433,19 @@ def amiga_mouse_relative(dx: int, dy: int) -> str:
 
 
 @mcp.tool()
-def amiga_ui_tree() -> str:
-    """The front screen's windows and gadgets as text, with labels and boxes.
+def amiga_ui_tree(pictures: bool = True) -> list:
+    """The front screen's windows and gadgets as text, with labels, boxes and numbers.
 
     Labels come from classic Intuition gadgets and GadTools checkboxes, strings
-    and sliders. GadTools buttons, BOOPSI, ReAction and MUI gadgets (and
-    requesters patched by tools like ReqAttack) show an empty label but still
-    their box and number: look at that area with amiga_screenshot_color and
-    click with amiga_ui_click(number=..., window=...).
+    and sliders. Gadgets whose label can't be read (GadTools buttons, BOOPSI,
+    ReAction, MUI, requesters patched by tools like ReqAttack) come with a
+    picture: each one cut out of the screen next to its #number, so you can
+    read what it says and click it with amiga_ui_click(number=..., window=...).
+    Only the active window's gadgets get pictures.
     """
+    tree = _with_screen(screen.ui_tree)
     lines = []
-    for item in _with_screen(screen.ui_tree):
+    for item in tree:
         box = f"({item.get('x', 0)},{item.get('y', 0)} {item.get('w', item.get('width', 0))}x" \
               f"{item.get('h', item.get('height', 0))})"
         if item["kind"] == "screen":
@@ -454,7 +456,40 @@ def amiga_ui_tree() -> str:
             state = " disabled" if item["disabled"] else ""
             state += " selected" if item["selected"] else ""
             lines.append(f"    #{item['id']} {item['type']} {item['label']!r} {box}{state}")
-    return "\n".join(lines) or "no windows"
+    text = "\n".join(lines) or "no windows"
+    sheet = _gadget_sheet(tree) if pictures else None
+    return [text, sheet] if sheet else [text]
+
+
+def _gadget_sheet(tree: list):
+    """One picture of the active window's unlabelled gadgets, each beside its number."""
+    from PIL import Image, ImageDraw
+
+    active = next((w["id"] for w in tree if w["kind"] == "window" and w["active"]), None)
+    gadgets = [g for g in tree if g["kind"] == "gadget" and g["window"] == active
+               and not g["label"] and g["type"] != "sys" and 4 <= g["w"] <= 600 and 4 <= g["h"] <= 120]
+    if not gadgets:
+        return None
+    picture = _with_screen(lambda: screen.capture())
+    rows, width = [], 0
+    for g in gadgets[:40]:
+        crop = picture.crop((g["x"], g["y"], g["x"] + g["w"], g["y"] + g["h"]))
+        scale = min(2.0, 48 / max(g["h"], 1))
+        if scale > 1:
+            crop = crop.resize((round(g["w"] * scale), round(g["h"] * scale)), Image.NEAREST)
+        rows.append((g["id"], crop))
+        width = max(width, crop.width)
+    height = sum(c.height + 8 for _, c in rows) + 8
+    sheet = Image.new("RGB", (width + 70, height), (255, 255, 255))
+    draw = ImageDraw.Draw(sheet)
+    y = 8
+    for number, crop in rows:
+        draw.text((8, y + crop.height // 2 - 6), f"#{number}", fill=(0, 0, 0))
+        sheet.paste(crop, (62, y))
+        y += crop.height + 8
+    out = io.BytesIO()
+    sheet.save(out, "PNG", optimize=True)
+    return McpImage(data=out.getvalue(), format="png")
 
 
 def _centre(item: dict) -> tuple[int, int]:

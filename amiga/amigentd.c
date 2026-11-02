@@ -46,7 +46,7 @@ extern struct Library *CyberGfxBase;
 #define PROTOCOL_VERSION 2
 #define DEFAULT_PORT 6801
 #define TILE 64
-#define RGB_MAX 512  /* FRAME_RGB: largest side in pixels */
+#define RGB_MAX (512L * 512)  /* FRAME_RGB: most pixels at once */
 /* Menu boxes relative to Intuition's layout numbers, found on OS 3.2. */
 #define MENU_X 0
 #define MENU_Y 0
@@ -923,25 +923,61 @@ static BOOL screen_front(ULONG handle)
     return reply(0);
 }
 
-static BOOL frame_rgb(LONG x, LONG y, LONG w, LONG h)
+/* Runs of equal pixels as u8 count-1, r, g, b, crossing row ends. Returns the
+   packed length, or 0 once it would reach len, the raw size. */
+static ULONG pack_rgb(const UBYTE *p, ULONG len, UBYTE *out)
+{
+    const UBYTE *end = p + len;
+    ULONG n = 0;
+
+    while (p < end) {
+        const UBYTE *q = p + 3;
+        while (q < end && q - p < 256 * 3 && q[0] == p[0] && q[1] == p[1] && q[2] == p[2])
+            q += 3;
+        if (n + 4 >= len)
+            return 0;
+        out[n] = (q - p) / 3 - 1;
+        out[n + 1] = p[0];
+        out[n + 2] = p[1];
+        out[n + 3] = p[2];
+        n += 4;
+        p = q;
+    }
+    return n;
+}
+
+static BOOL frame_rgb(BOOL packed, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
-    ULONG lock;
-    UBYTE head[4], *buf = NULL;
+    ULONG lock, len, n = 0;
+    UBYTE head[8], *buf = NULL, *runs = NULL;
     BOOL ok;
 
     lock = LockIBase(0);
     scr = IntuitionBase->FirstScreen;
     if (!w || x + w > scr->Width) w = scr->Width - x;
     if (!h || y + h > scr->Height) h = scr->Height - y;
-    if (w <= 0 || h <= 0 || w > RGB_MAX || h > RGB_MAX || !(buf = AllocVec(w * h * 3, MEMF_ANY)))
+    if (w <= 0 || h <= 0 || w * h > RGB_MAX || !(buf = AllocVec(w * h * 3, MEMF_ANY)))
         w = h = 0;
     else
         read_rgb(scr, x, y, w, h, buf);
     UnlockIBase(lock);
+    len = w * h * 3;
+    if (packed && len && (runs = AllocVec(len, MEMF_ANY)))
+        n = pack_rgb(buf, len, runs);
     be16(head, w);
     be16(head + 2, h);
-    ok = put(head, 4) && put(buf, w * h * 3) && flush();
+    if (!packed)
+        ok = put(head, 4) && put(buf, len);
+    else if (n) {
+        be32(head + 4, n);
+        ok = put(head, 8) && put(runs, n);
+    } else {
+        be32(head + 4, len);
+        ok = put(head, 8) && put(buf, len);
+    }
+    ok = ok && flush();
+    FreeVec(runs);
     FreeVec(buf);
     return ok;
 }
@@ -1373,7 +1409,7 @@ static BOOL command(const UBYTE *c)
     case CMD_SCREEN_FRONT:
         return screen_front((ULONG)x << 16 | y);
     case CMD_FRAME_RGB:
-        return frame_rgb(x, y, w, h);
+        return frame_rgb(c[1] & 1, x, y, w, h);
     case CMD_MOVE_REL:
         input_ms = now_ms();
         move_by((WORD)x, (WORD)y);

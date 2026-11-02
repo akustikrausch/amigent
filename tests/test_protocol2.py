@@ -241,3 +241,24 @@ def test_typing_goes_out_in_one_batch():
     before = len(seen)
     amiga.type_text("ab\n")
     assert [c[0] for c in seen[before:]] == [7, 7, 5, 5]
+
+
+def test_unlabelled_gadgets_come_with_a_picture(monkeypatch):
+    from PIL import Image
+
+    class Screen(FakeScreen):
+        def capture(self):
+            return Image.new("RGB", (640, 256), (200, 200, 200))
+
+    fake = Screen(tree=[
+        {"kind": "screen", "title": "Workbench", "width": 640, "height": 256},
+        {"kind": "window", "id": "w1", "title": "Ask", "active": True, "x": 0, "y": 0, "w": 300, "h": 100},
+        {"kind": "gadget", "window": "w1", "id": "4", "label": "", "type": "other", "x": 10, "y": 50,
+         "w": 100, "h": 20, "disabled": False, "selected": False},
+        {"kind": "gadget", "window": "w1", "id": "5", "label": "OK", "type": "button", "x": 150, "y": 50,
+         "w": 100, "h": 20, "disabled": False, "selected": False},
+    ])
+    monkeypatch.setattr(server, "screen", fake)
+    result = server.amiga_ui_tree()
+    assert "#4 other ''" in result[0] and len(result) == 2
+    assert server.amiga_ui_tree(pictures=False) == [result[0]]

@@ -67,7 +67,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 10 | SETUP_END | | | ok |
 | 11 | SCREENS | | | screens |
 | 12 | SCREEN_FRONT | | x = handle high word, y = handle low word | ok |
-| 13 | FRAME_RGB | | region | rgb |
+| 13 | FRAME_RGB | 1 = packed | region | rgb |
 | 14 | MOVE_REL | | x = dx, y = dy, signed | ok |
 | 15 | UITREE | | | text |
 | 16 | MENUS | | | text |
@@ -143,9 +143,18 @@ it is still open. `1` if it isn't. The next FRAME then reads everything fresh.
 
 FRAME_RGB answers `u16 w`, `u16 h`, then `w*h*3` bytes RGB888, rows top to
 bottom. The region is clipped to the front screen like FRAME's, `w` or `h` of `0`
-reaching to the edge. A region wider or taller than 512 pixels after clipping
-gets `w` = `h` = `0` and no data. It reads straight from the screen and leaves
-FRAME's picture and reference alone. Chipset and HAM screens come in full 24 bit.
+reaching to the edge. A region of more than 512×512 = 262144 pixels after
+clipping gets `w` = `h` = `0` and no data; any shape that fits counts, 1920×136
+as well as 700×300. It reads straight from the screen and leaves FRAME's
+picture and reference alone. Chipset and HAM screens come in full 24 bit.
+
+With arg 1 the pixels come packed: `u16 w`, `u16 h`, `u32 bytes`, data. The data
+are runs of equal pixels, `u8 count-1`, `u8 r`, `u8 g`, `u8 b`, row by row over
+the whole region; a run is at most 256 pixels and carries on into the next row.
+If packing doesn't make it shorter, as with gradients and photos, `bytes` is
+`w*h*3` and the data is raw RGB888 as with arg 0. So the length alone tells which
+it is, and nothing ever gets bigger than raw. Text and windows mostly pack to a
+tenth or less: a 512×512 piece of the desktop went from 786432 to 47080 bytes.
 
 ## text
 
