@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 324" width="760" height="324" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="t d">
+<title id="t">Seconds per screen update over a plipbox</title>
+<desc id="d">Whole screen as raw pixels: 124 s per update. Amigent: first picture 1.9 s, one line typed in a shell 170 ms, nothing changed 7 ms.</desc>
+<style>
+  .bg{fill:#fcfcfb}.title{fill:#0b0b0b;font-size:17px;font-weight:600}
+  .sub,.tick{fill:#52514e;font-size:12px}.case{fill:#0b0b0b;font-size:13px}
+  .value{fill:#0b0b0b;font-size:12px;font-variant-numeric:tabular-nums}
+  .grid{stroke:#e1e0d9;stroke-width:1}.axis{stroke:#c3c2b7;stroke-width:1}
+  .raw{fill:#eb6834}.ours{fill:#2a78d6}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#1a1a19}.title,.case,.value{fill:#f0efec}.sub,.tick{fill:#c3c2b7}
+    .grid{stroke:#2c2c2a}.axis{stroke:#383835}.raw{fill:#d95926}.ours{fill:#3987e5}}
+</style>
+<rect class="bg" width="760" height="324" rx="10"/>
+<text class="title" x="20" y="32">Seconds per screen update over a plipbox (50 KB/s)</text>
+<text class="sub" x="20" y="52">Lower is better. 1920×1080 Workbench on a real A1200, logarithmic scale.</text>
+<rect class="raw" x="210" y="64" width="12" height="12" rx="3"/><text class="sub" x="228" y="75">Whole screen as raw pixels</text>
+<rect class="ours" x="420" y="64" width="12" height="12" rx="3"/><text class="sub" x="438" y="75">Amigent</text>
+<line class="grid" x1="240.2" y1="88" x2="240.2" y2="276"/>
+<text class="tick" x="240.2" y="292" text-anchor="middle">10 ms</text>
+<line class="grid" x1="340.7" y1="88" x2="340.7" y2="276"/>
+<text class="tick" x="340.7" y="292" text-anchor="middle">100 ms</text>
+<line class="grid" x1="441.2" y1="88" x2="441.2" y2="276"/>
+<text class="tick" x="441.2" y="292" text-anchor="middle">1 s</text>
+<line class="grid" x1="541.6" y1="88" x2="541.6" y2="276"/>
+<text class="tick" x="541.6" y="292" text-anchor="middle">10 s</text>
+<line class="grid" x1="642.1" y1="88" x2="642.1" y2="276"/>
+<text class="tick" x="642.1" y="292" text-anchor="middle">100 s</text>
+<line class="axis" x1="210" y1="88" x2="210" y2="276"/>
+<text class="case" x="198" y="114" text-anchor="end">First picture</text>
+<path class="raw" d="M210 92h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="105">124 s</text>
+<path class="ours" d="M210 114h256.1a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-256.1z"><title>Amigent: 1.9 s</title></path><text class="value" x="476.1" y="127">1.9 s</text>
+<text class="case" x="198" y="178" text-anchor="end">One line typed in a Shell</text>
+<path class="raw" d="M210 156h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="169">124 s</text>
+<path class="ours" d="M210 178h149.8a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-149.8z"><title>Amigent: 170 ms</title></path><text class="value" x="369.8" y="191">170 ms</text>
+<text class="case" x="198" y="242" text-anchor="end">Nothing changed</text>
+<path class="raw" d="M210 220h437.6a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-437.6z"><title>Whole screen as raw pixels: 124 s</title></path><text class="value" x="657.6" y="233">124 s</text>
+<path class="ours" d="M210 242h10.7a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-10.7z"><title>Amigent: 7 ms</title></path><text class="value" x="230.7" y="255">7 ms</text>
+</svg>

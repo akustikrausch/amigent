@@ -100,8 +100,14 @@ Measured with a 640×256 Workbench screen:
 | 68000, 7 MHz | 0.6 s | 80 ms | under 10 % |
 | A1200, 68020 at 14 MHz | 0.1 s | 15 ms | 2–3 % |
 
-On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s) the whole
-picture takes about 3 seconds, a pointer move a few milliseconds.
+On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s):
+
+![Seconds per screen update over a plipbox: whole screen as raw pixels 124 s each time; Amigent 1.9 s for the first picture, 170 ms for a typed line, 7 ms when nothing changed](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/speed.svg)
+
+The orange bars are what moving the whole screen as raw 24-bit pixels costs on
+that wire, every time; the blue ones are Amigent, measured on a real A1200.
+`scripts/bench_viewer.py` and `scripts/bench_mcp.py` repeat the measurements
+on a simulated slow link.
 
 ## Good to know
 
