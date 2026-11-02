@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "amigent": {
+      "type": "stdio",
+      "command": "amigent-server",
+      "args": [],
+      "env": {
+        "AMIGENT_HOST": "192.168.1.50",
+        "AMIGENT_AMIGA_DIR": "SYS:amigent",
+        "AMIGENT_FLUSH_VOLUMES": "SYS:",
+        "AMIGENT_POWER_CMD": ""
+      }
+    }
+  }
+}

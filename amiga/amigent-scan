@@ -1,0 +1,9 @@
+; amigent-scan: inventory of programs and their $VER strings.
+; Writes RAM:amigent-inventory.txt, then RAM:amigent-scan.done
+FailAt 21
+Delete >NIL: RAM:amigent-inventory.txt RAM:amigent-scan.script RAM:amigent-scan.done QUIET
+Echo >RAM:amigent-scan.script "FailAt 21"
+ChangeTaskPri -5
+List >>RAM:amigent-scan.script SYS:C SYS:L SYS:Libs SYS:Classes SYS:Devs SYS:Expansion SYS:Internet SYS:Prefs SYS:Rexxc SYS:Storage SYS:System SYS:Tools SYS:Utilities SYS:WBStartup ALL FILES PAT=~(#?.(info|guide|txt|doc|readme|pdf|html|htm|png|jpg|jpeg|gif|iff|ilbm|mod|wav|mp3|h|c|i|s|asm|fd|cat|catalog|font|pfb|ttf|cfg|prefs|lha|lzx|zip)) LFORMAT "Echo >>RAM:amigent-inventory.txt *"@%p%n|%l*"*NVersion >>RAM:amigent-inventory.txt *"%p%n*""
+Execute >NIL: RAM:amigent-scan.script
+Echo >RAM:amigent-scan.done "done"

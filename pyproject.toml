@@ -1,0 +1,25 @@
+[project]
+name = "amigent"
+version = "0.1.0"
+description = "Claude at the keyboard of your real Amiga"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Andreas Wendorf (Akustikrausch)" }]
+dependencies = ["mcp>=1.2", "pillow>=10"]
+
+[project.scripts]
+amigent-server = "amigent.server:main"
+amigent-doctor = "amigent.doctor:main"
+amigent-setup = "amigent.setup:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

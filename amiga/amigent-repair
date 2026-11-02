@@ -1,0 +1,41 @@
+; amigent-repair: restores amigent after a system update. Safe to run twice.
+FailAt 21
+Set SRC Stuff:amigent
+If NOT EXISTS Stuff:amigent/amigactld
+  Set SRC FAT:amigent
+EndIf
+If NOT EXISTS C:amigactld
+  Copy $SRC/amigactld C: CLONE
+  Protect C:amigactld rwed
+EndIf
+If NOT EXISTS C:amigentd
+  Copy $SRC/amigentd C: CLONE
+  Protect C:amigentd rwed
+EndIf
+Delete >NIL: S:amigent-start QUIET
+Search >NIL: S:User-Startup "C:amigactld" QUIET
+If WARN
+  Echo >>S:User-Startup "RUN >NIL: C:amigactld"
+EndIf
+Search >NIL: S:User-Startup "C:amigentd" QUIET
+If WARN
+  Echo >>S:User-Startup "RUN >NIL: C:amigentd"
+EndIf
+Status >NIL: COMMAND=C:amigactld
+If WARN
+  Run >NIL: C:amigactld
+EndIf
+Status >NIL: COMMAND=C:amigentd
+If WARN
+  Run >NIL: C:amigentd
+EndIf
+; every installed program brings its own module
+List Stuff:amigent/repair.d PAT=#?.repair LFORMAT "Execute %p%n" >T:amigent-modules
+Execute T:amigent-modules
+Delete >NIL: T:amigent-modules QUIET
+Search >NIL: S:Startup-Sequence "S:User-Startup" QUIET
+If WARN
+  RequestChoice >NIL: "amigent" "Startup-Sequence ruft S:User-Startup*Nnicht mehr auf. Bitte Claude Bescheid geben." "OK"
+Else
+  RequestChoice >NIL: "amigent" "amigent ist repariert.*NBitte den Amiga neu starten." "OK"
+EndIf

@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+bootstrap/
+inventory/
+private/
+CLAUDE.local.md
+.mcp.json

@@ -1,0 +1,10 @@
+; Copy to NAME.repair in the repair.d folder on the Amiga, one module per installed program.
+; Restore the program if it is missing:
+;   If NOT EXISTS SYS:Utilities/MyApp/MyApp
+;     Copy Stuff:amigent/apps/MyApp SYS:Utilities/MyApp ALL CLONE QUIET
+;   EndIf
+; Restore its AmiStart menu entry if it is missing:
+;   Search >NIL: SYS:Utilities/Expansion/AmiStart/sm.prefs "My App" QUIET
+;   If WARN
+;     rx Stuff:amigent/menu-add.rexx AUDIO|My App|SYS:Utilities/MyApp/MyApp
+;   EndIf
