@@ -16,9 +16,9 @@ and files on one port. Older installs also had amigactld; it keeps working.
 
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:
-`SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands then only find
-what is in `C:`, because Workbench passes no command path on; started from
-`S:User-Startup`, as `amigent-setup` arranges, it has the full path.
+`SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands started through it
+use the Workbench's command path, so `rx` and the like are found as in a
+Shell.
 
 **Does it run on a 68000?**
 Use `amigentd.000`. Commands and files are fine; the screen is slow, so the
