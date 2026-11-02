@@ -226,7 +226,7 @@ missing.
 ## versions
 
 What changed when is in the [changelog](CHANGELOG.md). Releases are tagged
-`v0.5.0` and so on, `amigent-viewer --version` tells you what you have.
+`v1.0.0` and so on, `amigent-viewer --version` tells you what you have.
 
 ## license
 

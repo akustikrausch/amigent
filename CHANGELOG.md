@@ -3,6 +3,20 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.0.0 (2026-11-02)
+
+The first full release. Everything from the 0.x line, now considered stable:
+
+- **Claude at the keyboard**: MCP server with Shell, files, screen, mouse and
+  keys on a real Amiga over the LAN, through `amigactld` and our own `amigentd`.
+- **You at the keyboard**: Amigent, the live viewer with mouse, keyboard, Amiga
+  shortcuts, file upload and the machine's details, in twelve languages.
+- **On Windows**: installed like a program, with Start menu, desktop and
+  Installed apps entries and an uninstaller.
+- **Install in three steps**: one small file on the Amiga, the rest done by
+  `amigent-setup` over the network.
+- **Repair after system updates**: `amigent-repair` and a module per program.
+
 ## 0.5.0 (2026-11-02)
 
 - Twelve languages: English, German, Polish, French, Spanish, Italian, Finnish,
