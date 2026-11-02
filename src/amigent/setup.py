@@ -26,8 +26,7 @@ from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from . import machines, tls
 from .secret import new_key, own_key, save_key
 
-REPO = Path(__file__).resolve().parents[2]
-AMIGA = REPO / "amiga"
+AMIGA = Path(__file__).resolve().parent / "amiga"  # the Amiga half rides inside the package
 UPSTREAM = "https://api.github.com/repos/tbdye/amigactl/releases/latest"
 SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 

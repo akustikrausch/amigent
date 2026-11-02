@@ -8,14 +8,15 @@ MCP bridge to a real Amiga. Start with [README.md](README.md).
 |---|---|
 | `src/amigent/` | MCP server, clients, installer, viewer |
 | `src/amigent/web/` | the viewer's page (plain HTML, CSS, JS) and the app icon |
-| `amiga/` | `amigentd.c`, scripts, prebuilt binary in `bin/` |
+| `src/amigent/amiga/` | what goes onto the Amiga: prebuilt `amigentd` builds in `bin/`, icons, scripts |
+| `amiga/` | `amigentd.c`, its build script, an example repair module |
 | `tests/` | run without an Amiga |
 | `private/`, `CLAUDE.local.md`, `.mcp.json` | personal setup, not in git |
 
 Anything about one specific machine goes into `private/`. Public code stays generic
 and takes machine details from environment variables.
 
-Rebuild `amiga/bin/amigentd` with `amiga/build-amigentd` on the Amiga after changing the C code.
+Rebuild `src/amigent/amiga/bin/amigentd` with `amiga/build-amigentd` on the Amiga after changing the C code.
 
 When working on an Amiga:
 
@@ -32,7 +33,7 @@ When working on an Amiga:
 
 Releases: raise `__version__` in `src/amigent/__init__.py`, add the changelog entry,
 tag `vX.Y.Z`, then run `--install` again so Installed apps shows the new number.
-- AmiStart's `sm.prefs` is changed with `amiga/menu-add.rexx` only.
+- AmiStart's `sm.prefs` is changed with `src/amigent/amiga/menu-add.rexx` only.
 
 Spelling: the product is **Amigent** with a capital A in text and UI. Lowercase only
 where it is a technical name: the Python package, commands such as `amigent-viewer`,

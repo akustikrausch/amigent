@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import inventory, machines
+from . import inventory, machines, secret
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands
@@ -30,7 +30,11 @@ LOCK_FILE = "/tmp/amigent.lock"
 VIEWER_PORT = int(os.environ.get("AMIGENT_VIEWER_PORT", "6810"))
 FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
-INVENTORY_DIR = Path(__file__).resolve().parents[2] / "inventory"
+
+def inventory_folder() -> Path:
+    """One shelf per Amiga for its scans, next to keys and certificates."""
+    return secret.FOLDER / "inventory" / secret.safe(machines.name_of(HOST) or "Amiga")
+
 
 mcp = FastMCP("amigent")
 ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld on older installs
@@ -346,10 +350,11 @@ def amiga_inventory(max_wait: float = 1800) -> str:
             time.sleep(10)
     text = _with_ctl(lambda: ctl.read_file("RAM:amigent-inventory.txt")).decode("iso-8859-1")
     items = inventory.parse(text)
-    INVENTORY_DIR.mkdir(exist_ok=True)
-    scans = sorted(INVENTORY_DIR.glob("*.json"))
+    folder = inventory_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    scans = sorted(folder.glob("*.json"))
     previous = json.loads(scans[-1].read_text()) if scans else None
-    target = INVENTORY_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
+    target = folder / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
     target.write_text(json.dumps(items, indent=1, ensure_ascii=False))
     summary = {"file": str(target), "files": len(items),
                "with_version": sum(1 for i in items.values() if i["version"])}

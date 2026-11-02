@@ -54,7 +54,7 @@ def server_command(port: int) -> tuple[list[str], Path]:
                        if shutil.which(p) or Path(p).exists()), "")
         if not python:
             raise SystemExit("No Windows Python found. Install it from python.org, or copy "
-                             "amiga/bin/amigentd to the Amiga another way.")
+                             "amigentd to the Amiga another way.")
         folder, shown = _windows_folder()
         args = ["-3"] if python.lower().endswith("py.exe") else []
         command = [python, *args, "-m", "http.server", str(port), "--bind", "0.0.0.0",

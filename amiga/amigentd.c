@@ -3,10 +3,12 @@
  * channels for command lines and files, over TCP; with AmiSSL also over TLS.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
- *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
+ *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
- * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET.
+ * TLSONLY: once the TLS port is up, the plain one talks to localhost only.
+ * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
+ * TLSONLY.
  */
 
 #include <exec/types.h>
@@ -69,6 +71,9 @@ extern struct Library *CyberGfxBase;
 #define CHUNK 32768
 #define PENDING 4  /* connections that have not said yet what they are */
 #define CHANNELS 4  /* command channels next to the screen client */
+#ifndef INADDR_LOOPBACK
+#define INADDR_LOOPBACK 0x7F000001
+#endif
 #define HELLO_SECONDS 5  /* a newcomer's key has to arrive this fast */
 
 #ifndef UNIQUE_ID
@@ -99,7 +104,7 @@ static struct IOStdReq *input_io;
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
-static BOOL setup_mode, quit, authed, from_wb, quiet;
+static BOOL setup_mode, quit, authed, from_wb, quiet, tls_only;
 static ULONG client_id, owner;  /* CLIENT ids: this connection's, and whose picture ref is */
 
 /* With a key file, every connection has to send the key first. */
@@ -139,6 +144,7 @@ static ULONG runs;  /* numbers temporary names, under Forbid */
 
 static LONG watch(fd_set *r, LONG top);
 static volatile BOOL tls_ready;
+static volatile BOOL tls_open;  /* the TLS port listens right now */
 static BOOL newcomers(fd_set *r);
 
 static UBYTE out[OUT_SIZE];
@@ -1566,6 +1572,7 @@ static void accept_pending(void)
 {
     struct sockaddr_in addr;
     LONG len = sizeof(addr), fd, one = 1, low = SEND_STEP, buffer = SEND_BUFFER, i, old = 0;
+    BOOL locked;
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
 
@@ -1584,10 +1591,14 @@ static void accept_pending(void)
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
     load_key();
-    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0);
+    locked = tls_only && tls_open && !setup_mode;
+    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0);
     l.base = SocketBase;
     l.fd = fd;
-    if (!l_send(&l, hello, 8, HELLO_SECONDS)) {
+    /* TLSONLY: strangers get the hello, so they know where the door is, then out.
+     * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga. */
+    if (!l_send(&l, hello, 8, HELLO_SECONDS) ||
+        (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK))) {
         close_fd(fd);
         return;
     }
@@ -2702,9 +2713,6 @@ int __SSL_pending(__reg("a6") struct Library *, __reg("a0") const SSL *s) = "\tj
 #define TLS_CHECK_SECONDS 10
 #define TLS_PUMPS 8
 #define TLS_BUFFER 4096
-#ifndef INADDR_LOOPBACK
-#define INADDR_LOOPBACK 0x7F000001
-#endif
 
 static struct Task *volatile tls_task;
 /* tls_ready, declared above: AmiSSL is open, hello flag 2 */
@@ -2961,6 +2969,7 @@ static void __saveds tls_main(void)
                         CloseSocket(listen_fd);
                         listen_fd = -1;
                     }
+                    tls_open = listen_fd >= 0;
                     sigs = SIGBREAKF_CTRL_C;
                     if (listen_fd >= 0) {
                         FD_ZERO(&r);
@@ -2975,6 +2984,7 @@ static void __saveds tls_main(void)
                     if (n > 0 && listen_fd >= 0 && FD_ISSET(listen_fd, &r))
                         tls_accept(SocketBase, listen_fd, ctx);
                 }
+                tls_open = FALSE;
                 if (listen_fd >= 0)
                     CloseSocket(listen_fd);
                 for (;;) {  /* the pumps run in AmiSSL: it stays open until they end */
@@ -3112,6 +3122,8 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
                 setup_mode = TRUE;
             if (FindToolType(tt, "QUIET"))
                 quiet = TRUE;
+            if (FindToolType(tt, "TLSONLY"))
+                tls_only = TRUE;
             if ((v = FindToolType(tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
@@ -3124,7 +3136,7 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
 
 int main(int argc, char **argv)
 {
-    LONG args[4] = {0, 0, 0, 0};
+    LONG args[5] = {0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     int rc = RETURN_FAIL;
@@ -3134,7 +3146,7 @@ int main(int argc, char **argv)
         from_wb = TRUE;
         tool_types((struct WBStartup *)argv, &port);
     } else {
-        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S", args, NULL);
+        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
@@ -3145,6 +3157,7 @@ int main(int argc, char **argv)
         if (args[2])
             set_key_file((const char *)args[2]);
         quiet = args[3] != 0;
+        tls_only = args[4] != 0;
         FreeArgs(rda);
     }
 

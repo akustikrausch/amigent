@@ -19,7 +19,7 @@ on the Amiga.
 
 ### On the Amiga
 
-Copy [`amiga/bin/amigentd`](../amiga/bin/amigentd) to the Amiga, or unpack
+Copy [`amigentd`](../src/amigent/amiga/bin/amigentd) to the Amiga, or unpack
 `amigent-1.0.0.lha` from the releases. If the Amiga has a browser or wget but
 no other way in, `amigent-setup --serve` (see below) offers both builds on the
 network for 30 minutes and prints the address to open. Then start it:

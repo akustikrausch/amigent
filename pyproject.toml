@@ -4,15 +4,29 @@ dynamic = ["version"]
 description = "Complete remote control for a real Amiga, by AI or manually"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Andreas Wendorf (Akustikrausch)" }]
+keywords = ["amiga", "amigaos", "mcp", "remote-desktop", "retrocomputing", "ai-agent"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
-  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Emulators",
   "Topic :: System :: Networking",
 ]
 dependencies = ["mcp>=1.2,<2", "pillow>=10"]
+
+[project.urls]
+Homepage = "https://github.com/akustikrausch/amigent"
+Documentation = "https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md"
+Changelog = "https://github.com/akustikrausch/amigent/blob/main/CHANGELOG.md"
+Issues = "https://github.com/akustikrausch/amigent/issues"
 
 [project.scripts]
 amigent-server = "amigent.server:main"
@@ -22,7 +36,7 @@ amigent-viewer = "amigent.viewer:main"
 amigent-fleet = "amigent.fleet:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -32,7 +46,7 @@ where = ["src"]
 version = { attr = "amigent.__version__" }
 
 [tool.setuptools.package-data]
-amigent = ["web/*", "web/locales/*", "macos/*"]
+amigent = ["web/*", "web/locales/*", "macos/*", "amiga/*", "amiga/bin/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

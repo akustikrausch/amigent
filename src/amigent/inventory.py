@@ -1,4 +1,4 @@
-"""Parse the output of amiga/amigent-scan and compare two scans."""
+"""Parse the output of the amigent-scan script and compare two scans."""
 
 from __future__ import annotations
 

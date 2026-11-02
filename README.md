@@ -9,7 +9,7 @@
      complete remote control for a real Amiga, by AI or manually
 ```
 
-<p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/akustikrausch/amigent/main/src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
 
 Amigent connects your PC or Mac to your real Amiga over the home network. Then you can:
 
@@ -23,13 +23,13 @@ Amigent connects your PC or Mac to your real Amiga over the home network. Then y
 Both at the same time: you see every click the agent makes and can take over at
 any moment.
 
-![Amigent with a Workbench screen and the keyboard panel](docs/screenshots/viewer.png)
+![Amigent with a Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
 
 ## Installation
 
 ### On the Amiga
 
-**1.** Copy [`amigentd`](amiga/bin/amigentd) to the Amiga (`amigentd.000` on a
+**1.** Copy [`amigentd`](https://github.com/akustikrausch/amigent/blob/main/src/amigent/amiga/bin/amigentd) to the Amiga (`amigentd.000` on a
 68000), or unpack the archive from the
 [releases](https://github.com/akustikrausch/amigent/releases).
 
@@ -62,7 +62,7 @@ Amiga key.
 **Linux:** there is no program entry; start the remote desktop with
 `amigent-viewer`.
 
-Without an AI agent: see the [manual installation](docs/GUIDE.md#manual-installation).
+Without an AI agent: see the [manual installation](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md#manual-installation).
 
 ## What you need
 
@@ -88,7 +88,7 @@ Without an AI agent: see the [manual installation](docs/GUIDE.md#manual-installa
 - **Safe at home.** A key keeps other computers on the network out, and the
   connection can be encrypted. Don't open the Amiga to the internet.
 
-More in the [guide](docs/GUIDE.md) and the [FAQ](docs/FAQ.md).
+More in the [guide](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md) and the [FAQ](https://github.com/akustikrausch/amigent/blob/main/docs/FAQ.md).
 
 ## Other projects
 
@@ -109,5 +109,5 @@ and Aminet people.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). By Andreas Wendorf (Akustikrausch).
-Changes are in the [changelog](CHANGELOG.md).
+MIT, see [LICENSE](https://github.com/akustikrausch/amigent/blob/main/LICENSE). By Andreas Wendorf (Akustikrausch).
+Changes are in the [changelog](https://github.com/akustikrausch/amigent/blob/main/CHANGELOG.md).

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BIN = ROOT / "src" / "amigent" / "amiga" / "bin"
 sys.path.insert(0, str(ROOT / "src"))
 
 from amigent import __version__  # noqa: E402
@@ -51,15 +52,15 @@ def main() -> None:
     ctl.exec(f"Delete >NIL: {stage} ALL QUIET")
     ctl.makedir(stage)
     ctl.makedir(folder)
-    files = {"amigentd": ROOT / "amiga/bin/amigentd", "amigentd.info": ROOT / "amiga/bin/amigentd.info",
+    files = {"amigentd": BIN / "amigentd", "amigentd.info": BIN / "amigentd.info",
              "LICENSE": ROOT / "LICENSE"}
-    if (ROOT / "amiga/bin/amigentd.000").exists():
-        files["amigentd.000"] = ROOT / "amiga/bin/amigentd.000"
-        files["amigentd.000.info"] = ROOT / "amiga/bin/amigentd.info"
+    if (BIN / "amigentd.000").exists():
+        files["amigentd.000"] = BIN / "amigentd.000"
+        files["amigentd.000.info"] = BIN / "amigentd.info"
     for name, source in files.items():
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
-    ctl.write_file(f"{stage}/Amigent.info", (ROOT / "amiga/bin/Amigent.info").read_bytes())
+    ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
     for name in ("amigentd", "amigentd.000"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
