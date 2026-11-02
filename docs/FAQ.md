@@ -60,12 +60,13 @@ ask Claude for the viewer instead: it shares one connection with Claude.
 Switch the keyboard to *Direct*. Text mode presses and releases every character
 at once, which is right for typing and wrong for games.
 
-**Where does Amiga Remote live on Windows?**
-The shortcuts are in the Start menu and on the desktop, the launcher and icon in
-`%LOCALAPPDATA%\amigent`. Settings such as `AMIGENT_FLUSH_VOLUMES` are taken over
+**Where does Amigent live on Windows?**
+The shortcuts are in the Start menu and on the desktop, the launcher, icon and
+uninstaller in `%LOCALAPPDATA%\amigent`, the entry for *Installed apps* in
+`HKEY_CURRENT_USER`. No admin rights needed. Settings such as `AMIGENT_FLUSH_VOLUMES` are taken over
 from the shell you ran `--install` in. Changed something? Run `--install` again.
 
-**Amiga Remote does nothing when I click it.**
+**Amigent does nothing when I click it.**
 Run `amigent-viewer <address>` in a terminal once and read what it says. Under
 WSL the shortcut starts your default distribution's Python, so amigent must be
 installed there.

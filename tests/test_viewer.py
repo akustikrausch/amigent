@@ -113,7 +113,7 @@ def test_windows_launcher_quotes_for_vbs(monkeypatch):
     monkeypatch.setenv("WSL_DISTRO_NAME", "Debian")
     monkeypatch.setenv("AMIGENT_FLUSH_VOLUMES", "Work: SYS:")
     name, text = desktop._launcher("192.168.1.50")
-    assert name == "Amiga Remote.vbs"
+    assert name == "Amigent.vbs"
     assert text.startswith('CreateObject("WScript.Shell").Run "wsl.exe -d Debian ')
     assert '""AMIGENT_FLUSH_VOLUMES=Work: SYS:""' in text
     assert text.rstrip().endswith('192.168.1.50 --exit-when-closed", 0, False')

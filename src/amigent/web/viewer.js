@@ -183,7 +183,8 @@
     switch (m.type) {
       case "hello":
         host = m.host;
-        document.title = `Amiga ${host} · amigent`;
+        document.title = `Amigent · ${host}`;
+        if (m.version) $("st-version").textContent = `amigent ${m.version}`;
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
         showState();

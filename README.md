@@ -78,14 +78,14 @@ claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
 ## take the wheel
 
 Tell Claude "manual control", or "show me the Amiga", and the viewer opens as its
-own window. Or skip Claude and start **Amiga Remote** from the Start menu.
+own window. Or skip Claude and start **Amigent** from the Start menu.
 
 - **the screen, live.** Only changed 64x64 tiles travel, the area around your
   pointer gets looked at first. Moving the mouse costs a few milliseconds.
 - **mouse and keyboard.** Click, drag, right button for menus, wheel. Text mode
   types through the Amiga's own keymap, so umlauts and AltGr just work. Direct
   mode sends raw key positions and holds keys for as long as you do. For games.
-- **a slice of Amiga keyboard** on the right: Esc, Tab, Del, Help, Return, the
+- **a slice of Amiga keyboard** on the right, in A1200 beige: Esc, Tab, Del, Help, Return, the
   wide F-keys, and the two Amiga keys with their solid and hollow A. Click a
   modifier once for the next key, double-click to lock it. Its LED tells you
   which is which. Above that the usual combinations: Workbench to front, next
@@ -106,11 +106,14 @@ Claude keeps working while the window is open, and you see every click it makes.
 amigent-viewer 192.168.1.50 --install
 ```
 
-puts **Amiga Remote** with its own icon into the Start menu and on the desktop.
-It starts without a console, works from WSL as well as from a Windows Python,
-and quits by itself when you close the window. Started twice, it just brings up
-the window of the one that's running, and that includes the one Claude opened.
-`amigent-viewer --uninstall` takes it all away again.
+puts **Amigent** with its own icon into the Start menu, on the desktop and into
+*Installed apps*, where it can be removed like any other program. It starts
+without a console, works from WSL as well as from a Windows Python, and quits
+by itself when you close the window. Started twice, it just brings up the window
+of the one that's running, and that includes the one Claude opened.
+
+New version? Pull, then run `--install` again: shortcuts and the version shown in
+*Installed apps* follow. `amigent-viewer --uninstall` takes it all away.
 
 Elsewhere, or just once, `amigent-viewer 192.168.1.50` opens the window directly.
 
@@ -199,6 +202,11 @@ tbdye for amigactld. Volker Barthelmann for vbcc. Everybody keeping this machine
 alive: the PiStorm and Emu68 crews, the AmiKit people, Aminet.
 
 And to all Amigans out there who still believe.
+
+## versions
+
+What changed when is in the [changelog](CHANGELOG.md). Releases are tagged
+`v0.3.0` and so on, `amigent-viewer --version` tells you what you have.
 
 ## license
 

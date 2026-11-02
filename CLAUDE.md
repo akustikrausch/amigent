@@ -22,4 +22,7 @@ When working on an Amiga:
 - Prefer `amiga_restart` over cutting the power.
 - When the user wants to see or drive the Amiga themselves, call `amiga_viewer`.
   For a Start menu entry on Windows run `amigent-viewer <address> --install`.
+
+Releases: raise `__version__` in `src/amigent/__init__.py`, add the changelog entry,
+tag `vX.Y.Z`, then run `--install` again so Installed apps shows the new number.
 - AmiStart's `sm.prefs` is changed with `amiga/menu-add.rexx` only.

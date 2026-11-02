@@ -34,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import __version__
 from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
 
@@ -205,6 +206,7 @@ class Viewer:
         with self.lock():
             picture = self.screen.snapshot()
             ws.send(json.dumps({"type": "hello", "host": self.host, "online": self.online,
+                                "version": __version__,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -595,8 +597,9 @@ def main() -> None:
     parser.add_argument("--exit-when-closed", action="store_true",
                         help="stop once the window has been closed")
     parser.add_argument("--install", action="store_true",
-                        help="add 'Amiga Remote' to the Windows Start menu and desktop")
+                        help="install Amigent as a Windows program (Start menu, desktop, Installed apps)")
     parser.add_argument("--uninstall", action="store_true", help="remove those shortcuts again")
+    parser.add_argument("--version", action="version", version=f"amigent {__version__}")
     args = parser.parse_args()
     if args.uninstall:
         from .desktop import uninstall

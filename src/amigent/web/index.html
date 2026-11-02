@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<title>Amiga · amigent</title>
+<meta name="color-scheme" content="light">
+<title>Amigent</title>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
 <link rel="stylesheet" href="viewer.css">
@@ -79,7 +79,7 @@
 
     <section>
       <h2>Shell</h2>
-      <div class="grid three">
+      <div class="grid three shell">
         <button data-combo="ctrl+c" data-i18n="break">Break</button>
         <button data-combo="ctrl+d">Ctrl-D</button>
         <button data-combo="ctrl+\" data-i18n="end_input">End input</button>
@@ -114,7 +114,7 @@
 
     <section>
       <h2 data-i18n="mouse">Mouse</h2>
-      <div class="grid two">
+      <div class="grid two mouse">
         <button id="hold-right" class="led" aria-pressed="false" data-i18n="hold_right">Hold right button</button>
         <button id="middle" data-i18n="middle_click">Middle click</button>
       </div>
@@ -131,7 +131,7 @@
 </div>
 
 <footer id="status">
-  <span id="st-size">–</span><span id="st-rate">–</span><span id="st-rtt">–</span>
+  <span id="st-size">–</span><span id="st-rate">–</span><span id="st-rtt">–</span><span id="st-version"></span>
 </footer>
 
 <input id="file" type="file" multiple hidden>

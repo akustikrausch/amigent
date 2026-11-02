@@ -1,24 +1,28 @@
-/* Dark on purpose: the Amiga's screen is the content, the frame recedes around it. */
+/* Workbench grey around a dimmed stage: the frame is calm and mid-toned, the
+   Amiga's screen stays the brightest, most colourful thing in the window. */
 :root {
-  --surface-0: #07090c;   /* behind the screen */
-  --surface-1: #12161c;   /* toolbar, panel, status bar */
-  --surface-2: #1b212a;   /* controls */
-  --surface-3: #252d38;   /* controls, hover */
-  --line: #29313c;
-  --text: #e8ecf1;        /* 15.6:1 on surface-1 */
-  --muted: #9aa5b4;       /* 7.1:1 on surface-1 */
+  --stage: #2b2f36;       /* behind the screen */
+  --chrome: #b9bec5;      /* toolbar and status bar */
+  --panel-bg: #c5c9ce;    /* keyboard panel and dialogs */
+  --control: #dde0e4;     /* buttons */
+  --control-hover: #e9ebee;
+  --line: #8d939b;        /* borders, 2.3:1 on the panel */
+  --text: #16191d;        /* 10.6:1 on the panel, 9.4:1 on the chrome */
+  --muted: #3f454e;       /* 5.8:1 on the panel */
   --accent: #ff8a1f;      /* primary action and lit LEDs only */
   --on-accent: #1a0d00;   /* 8.1:1 on accent */
-  --focus: #5b9dff;
-  --ok: #39d27a;
-  --bad: #ff6159;
-  --keycap-top: #2a333f;
-  --keycap-bottom: #1f2630;
-  --keycap-edge: #090b0f;
-  --led-off: #3b4552;
+  --focus: #1d5fd0;
+  --ok: #1e8a4c;
+  --bad: #c62f28;
+  --keycap-top: #f1ece0;  /* A1200 beige */
+  --keycap-bottom: #e2dbcb;
+  --keycap-edge: #9d9585;
+  --fkey-top: #dcd5c5;
+  --fkey-bottom: #cbc3b1;
+  --led-off: #8a8f96;
   --radius: 7px;
   --panel: 316px;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +30,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--surface-0);
+  background: var(--stage);
   color: var(--text);
   font: 13px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   overflow: hidden;
@@ -44,7 +48,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   gap: 16px;
   height: 46px;
   padding: 0 10px 0 14px;
-  background: var(--surface-1);
+  background: var(--chrome);
   border-bottom: 1px solid var(--line);
 }
 
@@ -66,7 +70,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .state i { width: 8px; height: 8px; border-radius: 50%; background: var(--led-off); flex: none; }
 .state.ok i { background: var(--ok); }
 .state.bad i { background: var(--bad); }
-.state.bad { color: #ffb0ab; }
+.state.bad { color: #7d1712; }
 
 .actions { display: flex; gap: 8px; margin-left: auto; }
 .tools { display: flex; align-items: center; gap: 2px; }
@@ -77,7 +81,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 button {
   font: inherit;
   color: var(--text);
-  background: var(--surface-2);
+  background: var(--control);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   min-height: 30px;
@@ -90,12 +94,12 @@ button {
   gap: 7px;
 }
 
-button:hover { background: var(--surface-3); }
+button:hover { background: var(--control-hover); }
 button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 button.primary:hover { background: #ff9d47; }
-button.destructive { background: var(--bad); border-color: var(--bad); color: #1d0503; font-weight: 600; }
+button.destructive { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
 
 button.icon {
   width: 32px;
@@ -107,8 +111,8 @@ button.icon {
   color: var(--muted);
 }
 
-button.icon:hover { background: var(--surface-2); color: var(--text); }
-button.icon[aria-pressed="true"] { background: var(--surface-2); border-color: var(--line); color: var(--text); }
+button.icon:hover { background: var(--control); border-color: var(--line); color: var(--text); }
+button.icon[aria-pressed="true"] { background: var(--control); border-color: var(--line); color: var(--text); }
 
 /* screen */
 
@@ -138,21 +142,21 @@ button.icon[aria-pressed="true"] { background: var(--surface-2); border-color: v
   justify-content: center;
   gap: 14px;
   padding: 24px;
-  background: rgba(7, 9, 12, .82);
-  color: var(--muted);
+  background: rgba(43, 47, 54, .86);
+  color: #e9edf2;
   font-size: 14px;
   text-align: center;
 }
 
 .overlay.show { display: flex; }
-.drop { margin: 14px; border: 2px dashed var(--accent); border-radius: 12px; color: var(--text); font-size: 16px; }
+.drop { margin: 14px; border: 2px dashed var(--accent); border-radius: 12px; color: #fff; font-size: 16px; }
 
 .spinner {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 3px solid var(--line);
-  border-top-color: var(--muted);
+  border: 3px solid #4a505a;
+  border-top-color: #e9edf2;
   animation: spin .9s linear infinite;
 }
 
@@ -165,7 +169,7 @@ button.icon[aria-pressed="true"] { background: var(--surface-2); border-color: v
   flex: none;
   overflow-y: auto;
   padding: 6px 14px 16px;
-  background: var(--surface-1);
+  background: var(--panel-bg);
   border-left: 1px solid var(--line);
 }
 
@@ -178,6 +182,8 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .grid { display: grid; gap: 6px; }
 .two { grid-template-columns: repeat(2, 1fr); }
 .three { grid-template-columns: repeat(3, 1fr); }
+.shell { grid-template-columns: 1fr .75fr 1.25fr; }
+.mouse { grid-template-columns: 1.45fr 1fr; }
 
 .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .keys + .keys { margin-top: 6px; }
@@ -191,14 +197,14 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
   font-weight: 600;
   letter-spacing: .2px;
   background: linear-gradient(var(--keycap-top), var(--keycap-bottom));
-  border: 1px solid #333d4a;
+  border: 1px solid #a99f8c;
   border-radius: 6px;
-  box-shadow: 0 2px 0 var(--keycap-edge), inset 0 1px 0 rgba(255, 255, 255, .05);
+  box-shadow: 0 2px 0 var(--keycap-edge), inset 0 1px 0 rgba(255, 255, 255, .7);
 }
 
-.key:hover { background: linear-gradient(#323c49, #262e39); }
+.key:hover { background: linear-gradient(#f8f4ea, #e9e3d4); }
 .key:active { transform: translateY(2px); box-shadow: 0 0 0 var(--keycap-edge); }
-.key.f { background: linear-gradient(#20262f, #181d24); color: #c9d1dc; }
+.key.f { background: linear-gradient(var(--fkey-top), var(--fkey-bottom)); }
 .key .a { width: 16px; height: 16px; }
 
 /* LEDs: on, off and locked differ in shape, not only in colour */
@@ -213,9 +219,9 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
   border-radius: 2px;
   background: var(--led-off);
 }
-.led[aria-pressed="true"]::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.led[aria-pressed="true"]::before { background: #ff6a00; box-shadow: 0 0 5px rgba(255, 106, 0, .9); }
 .led.locked::before { width: 14px; }
-.led[aria-pressed="true"] { border-color: #6b4a2a; }
+.led[aria-pressed="true"] { border-color: #b4621a; }
 #hold-right { padding-left: 18px; }
 #hold-right::before { top: 50%; margin-top: -1.5px; }
 
@@ -223,8 +229,8 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .segmented button { border-radius: 0; }
 .segmented button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .segmented button:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: 0; }
-.segmented button[aria-checked="true"] { background: var(--surface-3); border-color: #3d4856; font-weight: 600; }
-.segmented button[aria-checked="true"]::before { content: "●"; font-size: 8px; color: var(--accent); }
+.segmented button[aria-checked="true"] { background: #fff; border-color: var(--line); font-weight: 600; }
+.segmented button[aria-checked="true"]::before { content: "●"; font-size: 8px; color: #d96800; }
 
 /* status bar: nothing here is needed to work */
 
@@ -234,11 +240,13 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
   height: 24px;
   align-items: center;
   padding: 0 14px;
-  background: var(--surface-1);
+  background: var(--chrome);
   border-top: 1px solid var(--line);
   color: var(--muted);
   font: 11.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
+
+#st-version { margin-left: auto; }
 
 /* transfers float over the screen */
 
@@ -255,16 +263,16 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .upload {
   padding: 9px 11px;
   border-radius: 10px;
-  background: rgba(18, 22, 28, .96);
+  background: rgba(221, 224, 228, .97);
   border: 1px solid var(--line);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
   font-size: 12px;
 }
 
 .upload .name { display: flex; justify-content: space-between; gap: 8px; }
 .upload .name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .upload .name span { color: var(--muted); flex: none; }
-.bar { height: 4px; margin-top: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar { height: 4px; margin-top: 7px; background: #b3b8bf; border-radius: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 .upload.done .bar i { background: var(--ok); }
 .upload.failed .bar i { background: var(--bad); width: 100%; }
@@ -275,13 +283,13 @@ dialog {
   width: min(520px, calc(100vw - 32px));
   padding: 0;
   color: var(--text);
-  background: var(--surface-1);
+  background: var(--panel-bg);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
 }
 
-dialog::backdrop { background: rgba(0, 0, 0, .55); }
+dialog::backdrop { background: rgba(20, 22, 26, .5); }
 dialog form { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
 dialog h3 { margin: 0; font-size: 15px; font-weight: 600; }
 dialog p { margin: 0; color: var(--muted); }
@@ -290,7 +298,7 @@ dialog label { font-size: 12px; color: var(--muted); }
 textarea, input {
   font: 13px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
   color: var(--text);
-  background: var(--surface-0);
+  background: #f4f5f7;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 7px 9px;
@@ -306,12 +314,12 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { min-height: 26px; padding: 2px 10px; border-radius: 99px; font-size: 12px; }
-.chips button[aria-current="true"] { border-color: var(--accent); }
+.chips button[aria-current="true"] { border-color: #d96800; background: #fff; }
 
-.browser { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-0); }
+.browser { border: 1px solid var(--line); border-radius: var(--radius); background: #f4f5f7; }
 #folders { list-style: none; margin: 0; padding: 4px; height: 180px; overflow: auto; }
 #folders li { padding: 5px 8px; border-radius: 5px; cursor: pointer; display: flex; gap: 8px; }
-#folders li:hover, #folders li:focus-visible { background: var(--surface-2); outline: none; }
+#folders li:hover, #folders li:focus-visible { background: #dfe3e8; outline: none; }
 #folders li::before { content: "▸"; color: var(--muted); }
 #folders li.up::before { content: "↰"; }
 #folders li.note { color: var(--muted); cursor: default; }
@@ -337,19 +345,19 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 .toast {
   padding: 8px 16px;
   border-radius: 99px;
-  background: rgba(27, 33, 42, .97);
+  background: rgba(233, 235, 238, .98);
   border: 1px solid var(--line);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .35);
   animation: rise .18s ease-out;
 }
 
-.toast.bad { border-color: rgba(255, 97, 89, .6); }
+.toast.bad { border-color: var(--bad); color: #7d1712; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before { animation-duration: 0s !important; transition: none !important; }
-  .spinner { animation: none; border-top-color: var(--line); }
+  .spinner { animation: none; }
 }
 
 @media (max-width: 900px) {
