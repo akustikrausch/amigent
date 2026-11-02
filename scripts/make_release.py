@@ -55,6 +55,7 @@ def main() -> None:
              "LICENSE": ROOT / "LICENSE"}
     if (ROOT / "amiga/bin/amigentd.000").exists():
         files["amigentd.000"] = ROOT / "amiga/bin/amigentd.000"
+        files["amigentd.000.info"] = ROOT / "amiga/bin/amigentd.info"
     for name, source in files.items():
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
