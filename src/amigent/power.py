@@ -14,10 +14,15 @@ import time
 
 OFF_SECONDS = 30
 BOOT_WAIT = 300
+RESTART_WAIT = 120  # after a restart: how long to wait before cutting the power, if we can
 
 
 class PowerError(Exception):
     pass
+
+
+def available() -> bool:
+    return bool(os.environ.get("AMIGENT_POWER_CMD"))
 
 
 def set_power(on: bool) -> None:

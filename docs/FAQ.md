@@ -49,6 +49,8 @@ Use `amiga_restart`, which commits first. Or by hand: `Lock SYS: ON`, `Lock SYS:
 **No network after a boot.**
 Some setups need a cold start: 30 seconds without power. Set `AMIGENT_POWER_CMD`
 to a script for your smart plug and `amiga_power('cycle')` does it for you.
+With it set, `amiga_restart` also cycles the power by itself when the Amiga has
+not answered two minutes after a restart.
 
 **How do I add a program to the AmiStart menu?**
 

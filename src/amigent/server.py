@@ -17,7 +17,8 @@ from . import inventory
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands
-from .power import power_cycle, set_power, wait_for_port
+from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port
+from .power import available as power_available
 from .viewer import Viewer, open_window
 
 HOST = os.environ.get("AMIGENT_HOST", "")
@@ -661,7 +662,12 @@ def amiga_viewer() -> str:
 
 @mcp.tool()
 def amiga_restart() -> str:
-    """Restart cleanly through the system and wait until the Amiga answers."""
+    """Restart cleanly through the system and wait until the Amiga answers.
+
+    Some Amigas come back without network after a warm restart. With power
+    control set up, the power is cycled after two minutes without an answer;
+    the disks were written before the restart, so nothing is lost.
+    """
     with _exclusive():
         ctl.flush(FLUSH_VOLUMES)
         try:
@@ -672,9 +678,13 @@ def amiga_restart() -> str:
         with _screen_lock():
             screen.close()
         time.sleep(10)
-        if not wait_for_port(HOST, SCREEN_PORT, 300):  # amigentd greets even before a key
+        # amigentd greets even before a key
+        if wait_for_port(HOST, SCREEN_PORT, RESTART_WAIT if power_available() else BOOT_WAIT):
+            return "Amiga restarted"
+        if not power_available():
             raise AmigaError("no answer after restart; amiga_power('cycle') may be needed")
-    return "Amiga restarted"
+        attempts = power_cycle(HOST, SCREEN_PORT)
+    return f"Amiga restarted; it came back without network, so the power was cycled ({attempts}x)"
 
 
 @mcp.tool()
