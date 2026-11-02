@@ -48,6 +48,9 @@ version = { attr = "amigent.__version__" }
 [tool.setuptools.package-data]
 amigent = ["web/*", "web/locales/*", "macos/*", "amiga/*", "amiga/bin/*"]
 
+[tool.setuptools.exclude-package-data]
+amigent = ["amiga/bin/amigentd.080"]  # untested without Vampire hardware; a 68080 runs amigentd
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
