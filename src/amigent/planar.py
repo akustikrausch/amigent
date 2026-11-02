@@ -1,8 +1,15 @@
-"""Planar frames: the Amiga's bitplanes as they are, turned into pixels on the PC.
+"""Planar and chunky frames: tiles as amigentd packs them, turned into pixels on the PC.
 
 amigentd sends chipset screens as bitplanes (FRAME arg 2, docs/PROTOCOL.md
-"planar"): no chunky conversion on a 7 MHz box, the PC does the c2p. Planes
-are kept whole, so XOR tiles and HAM rows that cross tile borders just work.
+"planar"): no chunky conversion on a 7 MHz box, the PC does the c2p. Graphics
+cards come as RGB332 rows (format 2). Both are a Surface: rows of bytes, one
+set per plane, and one tile pipeline undoes what the Amiga did, step by step:
+
+    unpack (raw, PackBits)  ->  undo the row XOR  ->  XOR with the partner
+    (the old picture, maybe scrolled by dy)       or  look up the index
+
+"Old" means as before this frame: every tile saves what it overwrites, so a
+partner in a tile already redrawn this frame still comes out as it was.
 """
 
 from __future__ import annotations
@@ -11,7 +18,11 @@ import struct
 
 from PIL import Image, ImageChops
 
-HAM, HAS_PALETTE, EHB = 1, 2, 4  # header flags
+HAM, HAS_PALETTE, EHB = 1, 2, 4  # planar header flags
+PACKING = 3  # method bits 0-1: 0 raw, 1 PackBits, 2 PackBits of a delta
+RAW, PACKBITS, DELTA = 0, 1, 2
+ROW_XOR, SHIFTED, INDEXED = 4, 8, 16
+KNOWN_METHODS = PACKING | ROW_XOR | SHIFTED | INDEXED
 
 
 class PlanarError(ValueError):
@@ -37,10 +48,6 @@ def unpackbits(data: bytes, size: int) -> bytes:
     return bytes(out)
 
 
-PACKING = 3  # method bits 0-1
-RAW, PACKBITS, DELTA = 0, 1, 2
-
-
 def _unpack(packing: int, data: bytes, size: int) -> bytes:
     raw = data if packing == RAW else unpackbits(data, size)
     if len(raw) != size:
@@ -53,6 +60,144 @@ def _xor(a: bytes, b: bytes) -> bytes:
     return (int.from_bytes(a, "big") ^ int.from_bytes(b, "big")).to_bytes(len(a), "big")
 
 
+def _undo_row_xor(raw: bytes, row: int) -> bytes:
+    """row[y] ^= row[y-1] from the top, block after block of rows (one block per plane)."""
+    out = bytearray(len(raw))
+    prev = None
+    for at in range(0, len(raw), row):
+        cur = int.from_bytes(raw[at:at + row], "big")
+        if prev is not None:
+            cur ^= prev
+        out[at:at + row] = cur.to_bytes(row, "big")
+        prev = cur
+    return bytes(out)
+
+
+def _undo_row_xor_planes(raw: bytes, row: int, rows: int) -> bytes:
+    block = row * rows
+    return b"".join(_undo_row_xor(raw[at:at + block], row) for at in range(0, len(raw), block)) if block else raw
+
+
+def _index_table(colours: bytes, bits: int) -> list:
+    """Byte of packed indices -> the RGB332 bytes it stands for, leftmost pixel first."""
+    per = 8 // bits
+    mask = (1 << bits) - 1
+    pad = colours.ljust(1 << bits, b"\0")
+    return [bytes(pad[b >> (8 - bits * (i + 1)) & mask] for i in range(per)) for b in range(256)]
+
+
+class Surface:
+    """Rows of bytes, one set per plane, and the tile pipeline that fills them."""
+
+    def __init__(self, nplanes: int, width: int, height: int, stride: int):
+        self.width, self.height, self.stride = width, height, stride
+        self.planes = [bytearray(stride * height) for _ in range(nplanes)]
+        self._before: dict = {}  # tile -> its bytes before this frame touched it
+
+    def span(self, x: int, w: int) -> tuple[int, int]:
+        """Byte offset in a row and bytes a row, for columns x..x+w."""
+        raise NotImplementedError
+
+    def begin_frame(self) -> None:
+        self._before = {}
+
+    def tile(self, x: int, y: int, w: int, h: int) -> bytes:
+        """A tile as the wire lays it out: plane after plane, h rows each."""
+        left, n = self.span(x, w)
+        return b"".join(plane[r * self.stride + left:r * self.stride + left + n]
+                        for plane in self.planes for r in range(y, y + h))
+
+    def _old_row(self, p: int, row: int, x: int, w: int) -> bytes:
+        """Row of plane p in columns x..x+w as it was before this frame; zeros off screen."""
+        left, n = self.span(x, w)
+        if not 0 <= row < self.height:
+            return bytes(n)
+        key = (x, row // 64 * 64)
+        saved = self._before.get(key)
+        if saved is not None and row - key[1] < saved[0]:
+            th, data = saved
+            at = (p * th + row - key[1]) * n
+            return data[at:at + n]
+        at = row * self.stride + left
+        return bytes(self.planes[p][at:at + n])
+
+    def _partner(self, x: int, y: int, w: int, h: int, dy: int) -> bytes:
+        return b"".join(self._old_row(p, y + r + dy, x, w) for p in range(len(self.planes)) for r in range(h))
+
+    def _store(self, x: int, y: int, w: int, h: int, raw: bytes) -> None:
+        key = (x, y)
+        if key not in self._before:
+            self._before[key] = (h, self.tile(x, y, w, h))
+        left, n = self.span(x, w)
+        at = 0
+        for plane in self.planes:
+            for row in range(y, y + h):
+                start = row * self.stride + left
+                plane[start:start + n] = raw[at:at + n]
+                at += n
+
+    def apply(self, x: int, y: int, w: int, h: int, method: int, data: bytes) -> None:
+        """One tile through the pipeline; method is the wire's bit field."""
+        if method & ~KNOWN_METHODS or (method & PACKING) == 3:
+            raise PlanarError(f"tile method {method} not known here")
+        packing = method & PACKING
+        dy = 0
+        if method & SHIFTED:
+            if packing != DELTA:
+                raise PlanarError("a shifted tile without a delta")
+            dy = struct.unpack(">h", data[:2])[0]
+            data = data[2:]
+        if method & INDEXED:
+            raw = self._indexed(w, h, packing, method & ROW_XOR, data)
+        else:
+            _, n = self.span(x, w)
+            raw = _unpack(packing, data, len(self.planes) * h * n)
+            if method & ROW_XOR:
+                raw = _undo_row_xor_planes(raw, n, h)
+            if packing == DELTA:
+                raw = _xor(raw, self._partner(x, y, w, h, dy))
+        self._store(x, y, w, h, raw)
+
+    def _indexed(self, w: int, h: int, packing: int, row_xor: int, data: bytes) -> bytes:
+        raise PlanarError("indexed tiles only come in chunky frames")
+
+
+class Chunky(Surface):
+    """Format 0 and 2: one byte a pixel, RGB332, the classic frame's colours."""
+
+    def __init__(self, width: int, height: int):
+        super().__init__(1, width, height, width)
+
+    def span(self, x: int, w: int) -> tuple[int, int]:
+        return x, w
+
+    def _indexed(self, w, h, packing, row_xor, data) -> bytes:
+        """u8 k, k colours, then rows of 1, 2 or 4 bit indices, each row on a fresh byte."""
+        if packing == DELTA:
+            raise PlanarError("indexed tiles are never deltas")
+        k = data[0]
+        if not 1 <= k <= 16:
+            raise PlanarError(f"{k} colours in an indexed tile")
+        colours, data = data[1:1 + k], data[1 + k:]
+        bits = 1 if k <= 2 else 2 if k <= 4 else 4
+        row = (w * bits + 7) // 8
+        raw = _unpack(packing, data, row * h)
+        if row_xor:
+            raw = _undo_row_xor(raw, row)
+        table = _index_table(colours, bits)
+        return b"".join(b"".join(map(table.__getitem__, raw[at:at + row]))[:w]
+                        for at in range(0, len(raw), row))
+
+    def paint(self, x: int, y: int, w: int, h: int, pixels: bytes) -> None:
+        """Plain RGB332 rows, as a classic frame's tile unpacks to."""
+        self._store(x, y, w, h, pixels)
+
+    def image(self, palette: bytes) -> Image.Image:
+        picture = Image.frombytes("P", (self.width, self.height), bytes(self.planes[0]))
+        picture.putpalette(palette)
+        return picture
+
+
 def _layer(bit: int) -> list:
     """Lookup for Image.point: a set pixel (255) becomes this plane's pen bit."""
     table = [0] * 256
@@ -63,16 +208,20 @@ def _layer(bit: int) -> list:
 _LAYERS = [_layer(p) for p in range(8)]
 
 
-class Planes:
-    """A screen as bitplanes plus palette, updated tile by tile."""
+class Planes(Surface):
+    """Format 1: a screen as bitplanes plus palette."""
 
     def __init__(self, depth: int, width: int, height: int):
-        self.depth, self.width, self.height = depth, width, height
-        self.stride = (width + 7) // 8
-        self.planes = [bytearray(self.stride * height) for _ in range(depth)]
+        super().__init__(depth, width, height, (width + 7) // 8)
+        self.depth = depth
         self.flags = 0
         self.palette = b""  # r, g, b per pen as sent
         self.repaint = False  # colours or mode changed: every pixel on the PC is stale
+
+    def span(self, x: int, w: int) -> tuple[int, int]:
+        if x % 8:
+            raise PlanarError(f"tile at x {x} is not byte aligned")
+        return x // 8, (w + 7) // 8
 
     def fits(self, depth: int, width: int, height: int) -> bool:
         return (depth, width, height) == (self.depth, self.width, self.height)
@@ -82,39 +231,6 @@ class Planes:
         changed = rgb != self.palette
         self.palette = rgb
         return changed
-
-    def apply(self, x: int, y: int, w: int, h: int, method: int, data: bytes) -> None:
-        """One tile through the stages: unpack, then XOR onto what we hold if it's a delta.
-
-        The method byte is a bit field: bits 0-1 the packing (0 raw, 1 PackBits,
-        2 PackBits of a delta). Higher bits (row XOR, shifted reference) are
-        reserved for later stages and refused until PROTOCOL.md has them.
-        """
-        if x % 8:
-            raise PlanarError(f"tile at {x},{y} is not byte aligned")
-        if method & ~PACKING:
-            raise PlanarError(f"tile method {method} not known here")
-        packing = method & PACKING
-        size = self.depth * h * ((w + 7) // 8)
-        raw = _unpack(packing, data, size)
-        if packing == DELTA:
-            raw = _xor(raw, self.tile(x, y, w, h))
-        self._store(x, y, w, h, raw)
-
-    def tile(self, x: int, y: int, w: int, h: int) -> bytes:
-        """A tile as the wire lays it out: plane 0 first, h rows of (w+7)/8 bytes each."""
-        bw, left = (w + 7) // 8, x // 8
-        return b"".join(plane[r * self.stride + left:r * self.stride + left + bw]
-                        for plane in self.planes for r in range(y, y + h))
-
-    def _store(self, x: int, y: int, w: int, h: int, raw: bytes) -> None:
-        bw, left = (w + 7) // 8, x // 8
-        at = 0
-        for plane in self.planes:
-            for row in range(y, y + h):
-                start = row * self.stride + left
-                plane[start:start + bw] = raw[at:at + bw]
-                at += bw
 
     def _pens(self, x: int, y: int, w: int, h: int) -> Image.Image:
         """Pen numbers of a region as an L image: the c2p, done by Pillow a plane at a time."""

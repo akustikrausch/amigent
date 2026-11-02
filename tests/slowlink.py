@@ -320,8 +320,11 @@ class FakeAmiga:
         if cmd == 1:
             return struct.pack(">HHHH", self.w, self.h, TILE, 0)
         if cmd == 2:
+            extra = bool(arg & 4) and self.planar != "old"
             if arg & 2 and self.planar == "yes":
-                self._planar_frame(c, arg & 1, x, y, w, h)
+                self._planar_frame(c, arg & 1, x, y, w, h, extra)
+            elif arg & 2 and self.planar == "rtg" and extra:
+                self._frame(c, arg & 1, x, y, w, h, chunky=True)
             else:
                 if arg & 2 and self.planar == "rtg":
                     c.sock.sendall(b"\0")  # format 0: the classic frame follows
@@ -375,7 +378,8 @@ class FakeAmiga:
             time.sleep(seconds)
             self.cpu_time += seconds
 
-    def _frame(self, c, force, x, y, w, h) -> None:
+    def _frame(self, c, force, x, y, w, h, chunky: bool = False) -> None:
+        """Classic tiles, or format 2: the same picture, the planar methods plus indexed."""
         self.frames += 1
         tiles = self._tiles(x, y, w, h)
         now = time.perf_counter()
@@ -385,17 +389,23 @@ class FakeAmiga:
         def pieces():
             for t in send:
                 self._spend(self.pack_cost)
-                data = pack(self.cur[t])
+                old = None if force else self.ref.get(t)
                 self.ref[t] = self.cur[t]
                 tw, th = self._size(t)
-                yield struct.pack(">HHHHI", t[0] * TILE, t[1] * TILE, tw, th, len(data)) + data
+                if chunky:
+                    method, data = best_method(self.cur[t], old, tw, None, chunky=True)
+                    yield struct.pack(">HHHHBI", t[0] * TILE, t[1] * TILE, tw, th, method, len(data)) + data
+                else:
+                    data = pack(self.cur[t])
+                    yield struct.pack(">HHHHI", t[0] * TILE, t[1] * TILE, tw, th, len(data)) + data
 
-        self._send_tiles(c, bytearray(struct.pack(">I", len(send))), pieces())
+        head = struct.pack(">BBBBHH", 2, 8, 0, 0, self.w, self.h) if chunky else b""
+        self._send_tiles(c, bytearray(head + struct.pack(">I", len(send))), pieces())
         for t in tiles:
             self.wanted.setdefault(t, True)
         self.wake_reader.set()
 
-    def _planar_frame(self, c, force, x, y, w, h) -> None:
+    def _planar_frame(self, c, force, x, y, w, h, extra: bool = False) -> None:
         """Bitplanes straight from chip RAM: compare, pack, no reading ahead."""
         self.frames += 1
         tiles = self._tiles(x, y, w, h)
@@ -415,23 +425,46 @@ class FakeAmiga:
                 v for pen in range(colours) for v in (_LUT_R[pen], _LUT_G[pen], _LUT_B[pen]))
             c.palette_sent = True
 
+        before = dict(known)  # "old picture" means before this frame, for every tile in it
+
         def pieces():
             for t in send:
                 self._spend(self.planar_pack)
                 raw = now[t]
-                method, data = 1, packbits(raw)
-                old = known.get(t)
-                if old is not None and not force:
-                    delta = packbits(bytes(a ^ b for a, b in zip(raw, old)))
-                    if len(delta) < len(data):
-                        method, data = 2, delta
-                if method == 1 and len(data) >= len(raw):
-                    method, data = 0, raw
-                known[t] = raw
                 tw, th = self._size(t)
+                old = None if force else known.get(t)
+                if not extra:
+                    method, data = 1, packbits(raw)
+                    if old is not None:
+                        delta = packbits(bytes(a ^ b for a, b in zip(raw, old)))
+                        if len(delta) < len(data):
+                            method, data = 2, delta
+                    if method == 1 and len(data) >= len(raw):
+                        method, data = 0, raw
+                else:
+                    scrolled = {dy: self._old_planes(before, t, dy) for dy in (8, -8)} if old else None
+                    method, data = best_method(raw, old, (tw + 7) // 8, scrolled, rows=th)
+                known[t] = raw
                 yield struct.pack(">HHHHBI", t[0] * TILE, t[1] * TILE, tw, th, method, len(data)) + data
 
         self._send_tiles(c, bytearray(head + struct.pack(">I", len(send))), pieces())
+
+    def _old_planes(self, before: dict, t, dy: int) -> bytes:
+        """Tile t's partner dy rows further down in the picture before this frame; zeros off it."""
+        tw, th = self._size(t)
+        bw = (tw + 7) // 8
+        out = bytearray()
+        for p in range(self.depth):
+            for r in range(th):
+                row = t[1] * TILE + r + dy
+                src = before.get((t[0], row // TILE)) if 0 <= row < self.h else None
+                if src is None:
+                    out += bytes(bw)
+                    continue
+                sh = self._size((t[0], row // TILE))[1]
+                at = (p * sh + row % TILE) * bw
+                out += src[at:at + bw]
+        return bytes(out)
 
     def _planes(self, t) -> bytes:
         """A tile as amigentd sends it: plane 0 first, rows of (w+7)/8 bytes, top bit leftmost."""
@@ -456,6 +489,56 @@ def mark_rgb(n: int) -> tuple:
     """Mark n as the page sees it, whichever way it came."""
     c = mark_colour(n)
     return _LUT_R[c], _LUT_G[c], _LUT_B[c]
+
+
+def row_xor(data: bytes, row: int, rows: int) -> bytes:
+    """Each row XORed with the one above it, per block of rows (a plane)."""
+    out = bytearray(data)
+    for block in range(0, len(data), row * rows):
+        for r in range(rows - 1, 0, -1):
+            at = block + r * row
+            out[at:at + row] = bytes(a ^ b for a, b in zip(data[at:at + row], data[at - row:at]))
+    return bytes(out)
+
+
+def indexed(tile: bytes, w: int) -> bytes | None:
+    """u8 k, k colours, rows of 1/2/4 bit indices on fresh bytes; None for more than 16 colours."""
+    colours = sorted(set(tile))
+    if len(colours) > 16:
+        return None
+    bits = 1 if len(colours) <= 2 else 2 if len(colours) <= 4 else 4
+    index = {c: i for i, c in enumerate(colours)}
+    out = bytearray()
+    for at in range(0, len(tile), w):
+        acc = n = 0
+        for c in tile[at:at + w]:
+            acc, n = acc << bits | index[c], n + bits
+            if n == 8:
+                out.append(acc)
+                acc = n = 0
+        if n:
+            out.append(acc << (8 - n))
+    return bytes([len(colours)]) + bytes(colours) + bytes(out)
+
+
+def best_method(raw: bytes, old, row: int, scrolled=None, rows: int = 0, chunky: bool = False):
+    """amigentd with FRAME arg 4: whatever comes out shortest, method bits and all."""
+    rows = rows or len(raw) // row
+    tries = [(0, raw), (1, packbits(raw)), (5, packbits(row_xor(raw, row, rows)))]
+    if old is not None:
+        delta = bytes(a ^ b for a, b in zip(raw, old))
+        tries += [(2, packbits(delta)), (6, packbits(row_xor(delta, row, rows)))]
+    for dy, partner in (scrolled or {}).items():
+        delta = bytes(a ^ b for a, b in zip(raw, partner))
+        tries.append((10, struct.pack(">h", dy) + packbits(delta)))
+    if chunky:
+        index = indexed(raw, row)
+        if index is not None:
+            k = index[0]
+            head, body = index[:1 + k], index[1 + k:]
+            irow = len(body) // rows
+            tries += [(16, index), (17, head + packbits(body)), (21, head + packbits(row_xor(body, irow, rows)))]
+    return min(tries, key=lambda m: len(m[1]))
 
 
 def packbits(data: bytes) -> bytes:

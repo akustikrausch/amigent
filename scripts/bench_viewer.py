@@ -36,6 +36,7 @@ LINKS = {  # name: (bytes per second, one-way delay, screen, profile[, amigentd 
     "15K/100ms": (15_000, 0.100, (640, 512), "68020"),
     "68000 15K/100ms": (15_000, 0.100, (640, 256), "68000"),
     "68000 15K/100ms chunky": (15_000, 0.100, (640, 256), "68000", "old"),  # amigentd before planar
+    "RTG 15K/100ms": (15_000, 0.100, (1024, 768), "68020", "rtg"),  # graphics card: format 2
 }
 TIMEOUT = 20.0
 

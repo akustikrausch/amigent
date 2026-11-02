@@ -13,7 +13,7 @@ from collections import deque
 from PIL import Image
 
 from . import tls
-from .planar import HAM, HAS_PALETTE, Planes, PlanarError
+from .planar import HAM, HAS_PALETTE, Chunky, Planes, PlanarError
 from .planar import header as planar_header
 from .secret import load_key
 
@@ -22,7 +22,7 @@ CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
 CMD_AUTH, CMD_CLIENT = 17, 18
 RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
-FRAME_PLANAR = 2  # FRAME arg bit: bitplanes welcome, see docs/PROTOCOL.md "planar"
+FRAME_PLANAR = 2 | 4  # FRAME arg bits: planes or chunky tiles, all methods; PROTOCOL.md "planar"
 
 RAWKEYS = {
     "space": 0x40, "backspace": 0x41, "tab": 0x42, "enter": 0x43, "return": 0x44,
@@ -108,10 +108,10 @@ class Amigentd:
         self._sock: socket.socket | None = None
         self.width = 0
         self.height = 0
-        self._frame: Image.Image | None = None  # classic picture, mode P, see PALETTE
+        self._frame: Chunky | None = None  # classic picture, RGB332 rows, see PALETTE
         self._planes: Planes | None = None  # planar picture, when amigentd sends bitplanes
         self._rendered: Image.Image | None = None  # the planes as RGB, until the next tile
-        self.planar = False  # amigentd takes FRAME arg 2: found out on connect
+        self.planar = False  # amigentd takes FRAME arg 2|4: found out on connect
         self._missing: set = set()  # tiles the picture still lacks, by origin
         self._unpainted: dict = {}  # tiles received but not yet painted: paid for on look only
         self._buttons = 0
@@ -165,22 +165,22 @@ class Amigentd:
     def _probe_planar(self) -> tuple[int, int]:
         """Does amigentd speak planar? Ask for an empty planar frame, then INFO.
 
-        An amigentd from before planar ignores bit 2 and answers a classic empty
-        frame, u32 0; a newer one puts a format byte first. INFO's tile size (64)
-        tells the two apart without a guess, and the size comes for free.
+        An amigentd from before planar ignores the bits and answers a classic
+        empty frame, u32 0; a newer one puts a format byte first. INFO's tile
+        size (64) tells the two apart without a guess, and the size comes free.
         """
         self._send(CMD_FRAME, FRAME_PLANAR, 0x7FFF, 0x7FFF, 1, 1)  # off screen: no tiles
         self._send(CMD_INFO)
         first = self._exact(1)
-        if first == b"\1":
+        if first in (b"\1", b"\2"):
             self.planar = True
-            self._drive(self._planar_reply(lambda tile: None))
+            self._drive(self._format_reply(first[0], lambda tile: None))
             return struct.unpack(">HH", self._exact(8)[:4])
         head = first + self._exact(11)
         if head[9] == 64 and head[8] == 0:  # u32 0, then INFO: the old kind
             self.planar = False
             return struct.unpack(">HH", head[4:8])
-        self.planar = True  # format 0, u32 0, INFO: new, but a screen planes can't show
+        self.planar = True  # format 0, u32 0, INFO: planar, but a screen planes can't show
         self._exact(1)  # INFO's last byte
         return struct.unpack(">HH", head[5:9])
 
@@ -190,7 +190,8 @@ class Amigentd:
             self.width, self.height = width, height
             self._notify("size", (width, height))
 
-    # the picture: tiles land in _unpainted and are painted only when someone looks
+    # the picture: chunky (formats 0 and 2) or planes (format 1). Classic tiles
+    # wait in _unpainted and are unpacked only when someone looks.
 
     def drop_picture(self) -> None:
         self._frame = None
@@ -203,10 +204,20 @@ class Amigentd:
         return self._frame is not None or self._planes is not None
 
     def _start_picture(self) -> None:
-        self._frame = Image.new("P", (self.width, self.height))
-        self._frame.putpalette(PALETTE)
+        self._frame = Chunky(self.width, self.height)
         self._missing = self._all_tiles()
         self._unpainted = {}
+
+    def _chunky(self) -> Chunky:
+        """The chunky picture, up to date: planes out if they were in, late tiles painted."""
+        if self._planes is not None:
+            self.drop_picture()  # planes out, chunky in: another screen came to the front
+        if self._frame is None:
+            self._start_picture()
+        for x, y, w, h, data in self._unpainted.values():
+            self._frame.paint(x, y, w, h, unpack_tile(data, w, h))
+        self._unpainted = {}
+        return self._frame
 
     def _all_tiles(self) -> set:
         return {(x, y) for y in range(0, self.height, 64) for x in range(0, self.width, 64)}
@@ -216,7 +227,7 @@ class Amigentd:
         return self._missing if self.has_picture() else self._all_tiles()
 
     def _take_tiles(self, tiles: list) -> None:
-        """Tiles of the last reply: classic ones wait unpainted, planar ones are in already."""
+        """Tiles of the last reply: classic ones wait unpainted, the others are in already."""
         repaint = self._planes is not None and self._planes.repaint
         if not tiles and not repaint:
             return
@@ -227,7 +238,7 @@ class Amigentd:
             self._start_picture()
         for tile in tiles:
             if self._planes is None:
-                self._unpainted[tile[:2]] = tile
+                self._unpainted[tile[:2]] = tile  # RGB332, packed or raw: unpack_tile takes both
             self._missing.discard(tile[:2])
         now = time.monotonic()
         self.changes.extend((now, t[0], t[1], t[2], t[3]) for t in tiles)
@@ -250,25 +261,27 @@ class Amigentd:
             if self._rendered is None:
                 self._rendered = self._planes.image()
             return self._rendered
-        if self._frame is not None:
-            for x, y, w, h, data in self._unpainted.values():
-                self._frame.paste(_tile_image(data, w, h), (x, y))
-        self._unpainted = {}
-        return self._frame
+        if self._frame is None:
+            return None
+        return self._chunky().image(PALETTE)
 
     def _frame_reply(self, take, planar: bool = False):
         """Parser for one FRAME answer: yields bytes wanted, gets them sent in.
 
-        take(tile) gets each tile the moment it is complete. Returns the tile
-        count, the bytes and the seconds from header to last byte. With planar
-        the format byte says which of the two follows.
+        take(tile) gets each tile the moment it is complete, as RGB332 for the
+        chunky formats. Returns the tile count, the bytes and the seconds from
+        header to last byte. With planar the format byte says what follows.
         """
-        if planar:
-            kind = (yield 1)[0]
-            if kind == 1:
-                return (yield from self._planar_reply(take))
-            if kind != 0:
-                raise AmigentdError(f"unknown frame format {kind}")
+        kind = (yield 1)[0] if planar else 0
+        return (yield from self._format_reply(kind, take))
+
+    def _format_reply(self, kind: int, take):
+        if kind == 1:
+            return (yield from self._planar_reply(take))
+        if kind == 2:
+            return (yield from self._chunky_reply(take))
+        if kind != 0:
+            raise AmigentdError(f"unknown frame format {kind}")
         if self._planes is not None:
             self.drop_picture()  # planes out, chunky in: another screen came to the front
         count = struct.unpack(">I", (yield 4))[0]
@@ -283,11 +296,29 @@ class Amigentd:
         self.received += size
         return count, size, time.perf_counter() - start
 
+    def _tiles_into(self, surface, take, size: int):
+        """The tile list of format 1 and 2: each one through the pipeline at once,
+        its partners are the picture as it was before this frame."""
+        surface.begin_frame()
+        start = time.perf_counter()
+        count = struct.unpack(">I", (yield 4))[0]
+        size += 4
+        for _ in range(count):
+            x, y, w, h, method, n = struct.unpack(">HHHHBI", (yield 13))
+            data = yield n
+            try:
+                surface.apply(x, y, w, h, method, data)
+            except PlanarError as e:
+                raise AmigentdError(str(e)) from e
+            size += 13 + n
+            take((x, y, w, h, surface.tile(x, y, w, h) if isinstance(surface, Chunky) else data))
+        self.received += size
+        return count, size, time.perf_counter() - start
+
     def _planar_reply(self, take):
-        """The planar frame after its format byte. Tiles go into the planes at once:
-        an XOR tile needs the one before it."""
+        """Format 1: the planes, maybe a palette, then tiles."""
         depth, flags, width, height = planar_header((yield 7))
-        start, size = time.perf_counter(), 8
+        size = 8
         if (width, height) != (self.width, self.height):
             self._apply_size(width, height)
         if self._planes is None or not self._planes.fits(depth, width, height):
@@ -303,18 +334,14 @@ class Amigentd:
             if planes.set_palette((yield 3 * count)) and not fresh:
                 planes.repaint = True
             size += 2 + 3 * count
-        count = struct.unpack(">I", (yield 4))[0]
-        for _ in range(count):
-            x, y, w, h, method, n = struct.unpack(">HHHHBI", (yield 13))
-            data = yield n
-            try:
-                planes.apply(x, y, w, h, method, data)
-            except PlanarError as e:
-                raise AmigentdError(str(e)) from e
-            size += 13 + n
-            take((x, y, w, h, data))
-        self.received += size
-        return count, size, time.perf_counter() - start
+        return (yield from self._tiles_into(planes, take, size))
+
+    def _chunky_reply(self, take):
+        """Format 2: RGB332 tiles for graphics cards, sharing the classic picture."""
+        _, _, _, width, height = struct.unpack(">BBBHH", (yield 7))
+        if (width, height) != (self.width, self.height):
+            self._apply_size(width, height)
+        return (yield from self._tiles_into(self._chunky(), take, 8))
 
     def _screens_reply(self):
         found = []
