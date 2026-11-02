@@ -29,9 +29,9 @@ mouse. The numbers and how they were taken are in
   with a 7 MHz 68000 and 1 MB of chip RAM: commands, files, ARexx, windows,
   menus and the remote desktop. Encryption still needs OS 3.0 and AmiSSL.
 - **On the Amiga:** the ARexx port `AMIGENT` (STATUS, CLIENTS, VERSION, HELP,
-  QUIT), the window `amigent-status` showing who is connected, a build for the
-  68080, and the clock taken from the E clock so time limits survive a clock
-  sync.
+  QUIT), the window `amigent-status` showing who is connected, and the clock
+  taken from the E clock so time limits survive a clock sync. A Vampire's
+  68080 runs the plain `amigentd`.
 - **TLS only:** once encryption works, `amigent-setup` closes the plain port
   to other computers (`--allow-plain` keeps it open), and `amigent-repair`
   keeps it that way.

@@ -9,8 +9,8 @@ Amiga: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL), a TCP/IP
 stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in builds for the 68020 and up and, as `amigentd.000`, for a
-plain 68000; `amigent-setup` picks the right one. `amigentd.080` in the archive is
-a build for the Vampire's 68080, which runs the plain `amigentd` as well. An RTG graphics card is optional: chipset screens, HAM included, are
+plain 68000; `amigent-setup` picks the right one. A Vampire's 68080 runs the
+plain `amigentd`. An RTG graphics card is optional: chipset screens, HAM included, are
 read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
 about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 
