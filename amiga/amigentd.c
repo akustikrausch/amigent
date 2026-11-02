@@ -358,12 +358,15 @@ static void key(UBYTE code, BOOL down, UWORD qualifier)
 
 static BOOL type_char(UWORD ch, UWORD extra)
 {
-    UBYTE c = ch, keys[16];
+    /* Both buffers as words: on a 68000 keymap.library may access them by the
+     * word, and a UBYTE array on the stack can sit at an odd address. */
+    UWORD in = ch << 8, buf[8];
+    UBYTE *keys = (UBYTE *)buf;
     LONG n, i;
 
     if (ch > 255)
         return FALSE;
-    n = MapANSI(&c, 1, keys, sizeof(keys) / 2, NULL);
+    n = MapANSI((STRPTR)&in, 1, (STRPTR)keys, sizeof(buf) / 2, NULL);
     if (n <= 0)
         return FALSE;
     for (i = 0; i < n; i++) {
@@ -1378,14 +1381,15 @@ static void drop_client(void)
  * every connection, so a key put there during SETUP counts from the next one on. */
 static void load_key(void)
 {
-    UBYTE buf[KEY_MAX];
+    ULONG words[KEY_MAX / 4];  /* even address for the 68000 */
+    UBYTE *buf = (UBYTE *)words;
     BPTR fh = Open(secret_file, MODE_OLDFILE);
     LONG n = 0, i;
 
     secret_len = 0;
     if (!fh)
         return;
-    n = Read(fh, buf, sizeof(buf));
+    n = Read(fh, buf, KEY_MAX);
     Close(fh);
     if (n <= 0)
         return;
@@ -1673,11 +1677,12 @@ static BOOL c_fail(struct link *l, UBYTE status, const char *text)
 /* The AmigaDOS text for an error code. */
 static BOOL c_fault(struct link *l, LONG code)
 {
-    char buf[100];
+    ULONG words[25];  /* even address for the 68000 */
+    char *buf = (char *)words;
 
     if (!code)
         return c_fail(l, 1, "failed");
-    Fault(code, NULL, buf, sizeof(buf));
+    Fault(code, NULL, buf, sizeof(words));
     return c_fail(l, 1, buf);
 }
 
