@@ -71,3 +71,25 @@ from the shell you ran `--install` in. Changed something? Run `--install` again.
 Run `amigent-viewer <address>` in a terminal once and read what it says. Under
 WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.
+
+**"amigentd refused the key" or "amigentd wants a key".**
+The key on the PC (`~/.config/amigent/key`, or `AMIGENT_KEY`) must match
+`S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
+again with `amigentd SETUP` running. Deleting `S:amigent.key` switches the key
+off.
+
+**amigactld no longer answers this PC.**
+It only accepts the addresses in `S:amigactld.conf`. If your PC got a new
+address, add an `ALLOW` line for it there (or delete the file) and restart the
+Amiga. `amigent-setup` keeps a copy in its folder on the Amiga.
+
+**After a right click nothing opens any more.**
+On a Directory Opus desktop a short right click leaves Opus' popup menu open,
+and Intuition holds back every new window and screen until it is closed. Press
+Esc. Menus are opened by holding the right button, moving and releasing.
+
+**Which programs give their buttons a name in amiga_ui_tree?**
+Classic Intuition gadgets and GadTools checkboxes, string gadgets and sliders.
+GadTools buttons, BOOPSI, ReAction and MUI gadgets, and requesters changed by
+tools such as ReqAttack, show up with their box but without a label; the agent
+then clicks them by number after a look at the screen.

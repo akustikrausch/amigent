@@ -23,6 +23,10 @@ change without pictures, a list of screens with switching, relative mouse
 movement for games, ARexx to any program, and Ctrl-C for running commands. The
 remote desktop gets a screen switcher and a mouse mode for games.
 
+Security: `amigentd` asks for a key that `amigent-setup` creates; `amigactld`
+is limited to the PC's address through its `ALLOW` list. `amigent-repair`
+restores both after an OS update.
+
 `amigentd` in this release:
 
 - Written from scratch, from the protocol alone
@@ -34,6 +38,7 @@ remote desktop gets a screen switcher and a mouse mode for games.
   games and demos on native screens show up too.
 - Protocol 2: screen list and switching, full-colour regions, relative mouse,
   windows, gadgets and menus as data.
+- Runs on a 68020 or better with OS 3.0 or newer; RTG is optional.
 - `amigentd PORT <n>` runs a second copy on another port;
   `amiga/build-amigentd` takes `SOURCE` and `TO`.
 

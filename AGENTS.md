@@ -23,6 +23,8 @@ When working on an Amiga:
 - For standard windows prefer `amiga_ui_tree` with `amiga_ui_click` and
   `amiga_menu_select` over clicking pixels; use `amiga_wait_change` instead of
   repeated screenshots, and `amiga_screenshot_color` to read small text.
+- No short right clicks on the desktop: Directory Opus leaves a popup open that
+  blocks new windows until `amiga_key('esc')`.
 - Every install gets a repair module, see `amiga/repair.d/example.repair.txt`.
 - Prefer `amiga_restart` over cutting the power.
 - When the user wants to see or drive the Amiga themselves, call `amiga_viewer`.

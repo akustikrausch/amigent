@@ -46,13 +46,16 @@ By Andreas Wendorf (Akustikrausch).
   everything else is copied and set up from the PC.
 
 It is made for accelerated Amigas running AmigaOS 3.x, such as PiStorm systems
-or 68040/060 cards. Tested on an A1200 with PiStorm.
+or 68030/040/060 cards. Tested on an A1200 with PiStorm and in WinUAE with AmiKit.
 
 ## Requirements
 
-Amiga: AmigaOS 3.x, a 68040 or faster (for example a PiStorm), an RTG graphics
-card, a TCP/IP stack such as Roadshow, and a network connection. A plipbox on the
-parallel port is enough.
+Amiga: AmigaOS 3.0 or newer, a 68020 or faster, a TCP/IP stack with
+`bsdsocket.library` such as Roadshow, and a network connection. A plipbox on the
+parallel port is enough. An RTG graphics card is optional: chipset screens,
+HAM included, are read too, but so far everything was tested with RTG. A fast
+CPU makes the screen noticeably quicker, so a PiStorm or a 68040/060 card is
+recommended.
 
 PC: Python 3.10 or newer, and an AI agent with MCP support, for example
 [Claude Code](https://claude.com/claude-code) or
@@ -63,7 +66,7 @@ and works without an AI agent.
 
 **1. Copy one file to the Amiga**
 
-[`amiga/bin/amigentd`](amiga/bin/amigentd), about 14 KB, for example to `RAM:`.
+[`amiga/bin/amigentd`](amiga/bin/amigentd), about 20 KB, for example to `RAM:`.
 Any way works: browser, USB stick, SD card, null modem cable.
 
 **2. Start it in a Shell**
@@ -84,7 +87,8 @@ Paste this into your AI agent:
 `amigent-setup` looks for the Amiga on the local network, downloads the current
 [amigactld](https://github.com/tbdye/amigactl) from its project page, copies both
 services to the Amiga and adds them to `S:User-Startup`, so they start with the
-machine.
+machine. It also creates a key that `amigentd` asks for from then on, and lets
+`amigactld` accept only this PC (see [Security](#security)).
 
 The same steps by hand:
 
@@ -238,24 +242,38 @@ restores the program, its settings and its menu entry. See
 | `AMIGENT_FLUSH_VOLUMES` | `SYS:` | volumes written to disk before a restart |
 | `AMIGENT_POWER_CMD` | | command taking `on` or `off`, for a smart plug |
 | `AMIGENT_VIEWER_PORT` | `6810` | port of the remote desktop, on 127.0.0.1 only |
+| `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/key` |
 
 ## Security
 
-Anyone who can reach these ports controls the Amiga. Use them only in your home
-network and do not forward them to the internet. `amigactld` accepts `ALLOW`
-lines in `S:amigactld.conf` to limit access to your PC. `amigentd` accepts files
-and commands only in `SETUP` mode, which `amigent-setup` switches off when it is
-done. The remote desktop listens only on the PC itself and requires the token in
-its address.
+Anyone who can reach the two services can control the Amiga. Keep them in your
+home network and do not forward the ports to the internet. Within the network,
+`amigent-setup` closes them as far as the two programs allow:
+
+- `amigentd` asks every connection for a key first. `amigent-setup` creates it
+  and stores it in `S:amigent.key` on the Amiga and in `~/.config/amigent/key` on
+  the PC. A wrong key costs a one-second pause and closes the connection.
+- `amigactld` has no password, but accepts only the addresses listed as `ALLOW`
+  in `S:amigactld.conf`. `amigent-setup` adds this PC there and keeps your other
+  settings. If the Amiga sees the PC under a different address (for example
+  behind NAT), it leaves the list open and says so.
+- `amigentd` accepts files and commands only in `SETUP` mode, which
+  `amigent-setup` switches off when it is done.
+- The remote desktop listens only on the PC itself and needs the token in its
+  address.
+
+The connections are not encrypted. The key keeps strangers out, but someone who
+can read your network traffic could read it too.
 
 More in the [FAQ](docs/FAQ.md); the wire format is described in
 [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Building amigentd
 
-vbcc and the NDK are needed. On AmiKit both are included and
-[`amiga/build-amigentd`](amiga/build-amigentd) builds it; on other systems adjust
-the paths at the top of the script.
+vbcc and the NDK are needed. On AmiKit both are included, and the AmigaDOS script
+[`amiga/build-amigentd`](amiga/build-amigentd) builds it on the Amiga
+(`build-amigentd CPU 68000` for a 68000 build, untested on a real 68000). On
+other systems adjust the assigns at the top of the script.
 
 Tests for the PC side:
 
