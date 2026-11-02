@@ -1,9 +1,7 @@
 ; amigent-repair: restores Amigent after a system update. Safe to run twice.
 FailAt 21
-Set SRC Stuff:amigent
-If NOT EXISTS Stuff:amigent/amigentd
-  Set SRC FAT:amigent
-EndIf
+; amigent-setup puts its folder here (SYS:amigent unless --home says otherwise)
+Set SRC SYS:amigent
 ; amigactld only where an older setup installed it
 If EXISTS $SRC/amigactld
   If NOT EXISTS C:amigactld
@@ -52,12 +50,12 @@ If WARN
   Run >NIL: C:amigentd
 EndIf
 ; every installed program brings its own module
-List Stuff:amigent/repair.d PAT=#?.repair LFORMAT "Execute %p%n" >T:amigent-modules
+List $SRC/repair.d PAT=#?.repair LFORMAT "Execute %p%n" >T:amigent-modules
 Execute T:amigent-modules
 Delete >NIL: T:amigent-modules QUIET
 Search >NIL: S:Startup-Sequence "S:User-Startup" QUIET
 If WARN
-  RequestChoice >NIL: "amigent" "Startup-Sequence ruft S:User-Startup*Nnicht mehr auf. Bitte der KI Bescheid geben." "OK"
+  RequestChoice >NIL: "Amigent" "Startup-Sequence no longer runs S:User-Startup.*NPlease tell the AI agent." "OK"
 Else
-  RequestChoice >NIL: "amigent" "amigent ist repariert.*NBitte den Amiga neu starten." "OK"
+  RequestChoice >NIL: "Amigent" "Amigent is repaired.*NPlease restart the Amiga." "OK"
 EndIf

@@ -1,17 +1,18 @@
-.KEY SOURCE/K,TO/K,CPU/K
+.KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K
 .DEF SOURCE amigentd.c
 .DEF TO amigentd
 .DEF CPU 68020
-; Builds amigentd on the Amiga with the vbcc from AmiKit's DevPack
+.DEF DEVPACK SYS:DevPack
+; Builds amigentd on the Amiga with vbcc and the SDKs from AmiKit's DevPack.
+; Run it in the folder with amigentd.c; DEVPACK names the DevPack folder.
 FailAt 21
 Stack 65536
-Assign VBCC: Stuff:DevPack/vbcc
+Assign VBCC: <DEVPACK>/vbcc
 Assign vincludeos3: VBCC:targets/m68k-amigaos/include
-Assign vincludeos3: "Stuff:DevPack/SDK/NDK 3.9/Include/include_h" ADD
-Assign vincludeos3: "Stuff:DevPack/SDK/NDK 3.9/Include/include_i" ADD
+Assign vincludeos3: "<DEVPACK>/SDK/NDK 3.9/Include/include_h" ADD
+Assign vincludeos3: "<DEVPACK>/SDK/NDK 3.9/Include/include_i" ADD
 Assign vlibos3: VBCC:targets/m68k-amigaos/lib
-Assign AGNET: "Stuff:DevPack/SDK/RoadShow SDK 1.5/netinclude"
-Assign AGP96: "Stuff:DevPack/SDK/P96/P96 SDK"
+Assign AGNET: "<DEVPACK>/SDK/RoadShow SDK 1.5/netinclude"
+Assign AGP96: "<DEVPACK>/SDK/P96/P96 SDK"
 Path VBCC:bin ADD
-CD Stuff:amigent
 VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=<CPU> -IAGNET: -o <TO> <SOURCE> -lamiga

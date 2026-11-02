@@ -2,7 +2,7 @@
 
 ~/.config/amigent/amigas.json lists the known Amigas (it is also the fleet's list):
 
-    [{"name": "A1200", "host": "192.168.178.180", "seen": ["192.168.178.180"], "default": true}]
+    [{"name": "A1200", "host": "192.168.1.50", "seen": ["192.168.1.50"], "default": true}]
 
 Every client takes a name or an address. A name stands for its last known
 address. Key and certificate are found under the name and under every address
