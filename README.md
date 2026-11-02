@@ -11,335 +11,81 @@
 
 <p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
 
-Amigent lets you remote-control a real Amiga completely from your PC, either
-through an AI agent or by hand. It works over the local network and has two parts:
+Amigent connects your PC to your real Amiga over the home network. Then you can:
 
-1. **Control by AI.** An MCP server gives an AI agent such as Claude Code or
-   Codex full access to the Amiga: Shell commands, files, installing and updating
-   software, settings and menus, and the screen with mouse and keyboard for
-   programs that need it. Any agent that supports MCP can use it.
-2. **Remote desktop for control by hand.** A window on the PC shows the Amiga's
-   screen live. You use it with your own mouse and keyboard, send Amiga key
-   combinations from a side panel and copy files to a folder of your choice.
+- **let an AI agent do the work**, for example Claude Code or Codex: install
+  software, update programs, change settings, copy files, click through
+  programs. Just tell it what you want.
+- **use the Amiga yourself from the PC**, in a window with the live screen, your
+  own mouse and keyboard, file transfer and a shared clipboard.
 
-Both work at the same time and share one connection to the Amiga.
+Both at the same time: you see every click the agent makes and can take over at
+any moment.
 
-By Andreas Wendorf (Akustikrausch).
-
-## What Amigent is built for
-
-- **AI and hands-on control in one tool.** The agent and you use the same
-  connection. You see every click the agent makes in the remote desktop and can
-  take over at any moment, or ask the agent to open the window for you.
-- **A remote desktop for Windows and any browser.** On Windows, Amigent installs
-  like a normal program with Start menu entry and uninstaller. On Linux and macOS
-  it runs in Chrome or Edge. On the Amiga only the two small services that
-  Amigent installs anyway are needed, no VNC server.
-- **Slow networks.** Only the parts of the screen that changed are sent, in small
-  compressed tiles. A full 1920×1080 Workbench takes a few hundred kilobytes and
-  about four seconds over a plipbox on the parallel port (about 50 KB/s);
-  checking an unchanged screen takes about 5 ms.
-- **Looking after the machine.** A scan of installed programs and versions,
-  comparison with the last scan, repair after OS updates, a restart that writes
-  pending data to disk first, and mains power through a smart plug.
-- **Installation over the network.** One small file goes onto the Amiga by hand,
-  everything else is copied and set up from the PC.
-
-It is made for accelerated Amigas running AmigaOS 3.x, such as PiStorm systems
-or 68030/040/060 cards.
-
-## Requirements
-
-Amiga: AmigaOS 3.0 or newer, a 68020 or faster, a TCP/IP stack with
-`bsdsocket.library` such as Roadshow, and a network connection. A plipbox on the
-parallel port is enough. An RTG graphics card is optional: chipset screens,
-HAM included, are read too, though a machine without any RTG card has not been
-tried yet. A fast
-CPU makes the screen noticeably quicker, so a PiStorm or a 68040/060 card is
-recommended.
-
-PC: Python 3.10 or newer, and an AI agent with MCP support, for example
-[Claude Code](https://claude.com/claude-code) or
-[Codex](https://github.com/openai/codex). The remote desktop uses Edge or Chrome
-and works without an AI agent.
+![Amigent with a Workbench screen and the keyboard panel](docs/screenshots/viewer.png)
 
 ## Installation
 
-**1. Copy one file to the Amiga**
+**1.** Copy [`amigentd`](amiga/bin/amigentd) to your Amiga, for example to
+`RAM:`. A browser, USB stick or SD card all work. Or take the archive with icon
+from the [releases](https://github.com/akustikrausch/amigent/releases).
 
-[`amiga/bin/amigentd`](amiga/bin/amigentd), about 20 KB, for example to `RAM:`.
-Any way works: browser, USB stick, SD card, null modem cable.
-
-**2. Start it in a Shell**
+**2.** Start it in a Shell, or double-click its icon:
 
     RAM:amigentd SETUP
 
-**3. Let your AI agent do the rest**
+On a plain 68000, take `amigentd.000` instead.
 
-Paste this into your AI agent:
+**3.** Paste this into your AI agent on the PC:
 
     Install Amigent from https://github.com/akustikrausch/amigent for me.
     Clone it, run pip install -e . in it, then run amigent-setup. It finds my
     Amiga by itself and prints the address. Register the MCP server "amigent"
     with the command amigent-server and the environment variable
-    AMIGENT_HOST=<address>. If I'm on Windows, also run
-    amigent-viewer <address> --install. Tell me if you need to be restarted.
+    AMIGENT_HOST=<address>. Then run amigent-viewer <address> --install so the
+    remote desktop shows up as a program. Tell me if you need to be restarted.
 
-`amigent-setup` looks for the Amiga on the local network, downloads the current
-[amigactld](https://github.com/tbdye/amigactl) from its project page, copies both
-services to the Amiga and adds them to `S:User-Startup`, so they start with the
-machine. It also creates a key that `amigentd` asks for from then on, and lets
-`amigactld` accept only this PC (see [Security](#security)).
+That's it. The Amiga is set up from the PC and Amigent starts with it from now
+on. You'll find **Amigent** in the Start menu or the Applications folder.
 
-The same steps by hand:
+No AI agent? The [guide](docs/GUIDE.md#installation-by-hand) has the same steps
+by hand.
 
-```bash
-pip install -e .
-```
+## What you need
 
-```bash
-amigent-setup 192.168.1.50
-```
+- An Amiga with AmigaOS 3.x, any CPU from the 68000 on, a network connection
+  (a plipbox on the parallel port is enough) and a TCP/IP stack such as Roadshow.
+  The faster the CPU, the smoother the screen.
+- A PC with Windows, macOS or Linux and Python 3.10 or newer.
 
-Then register the MCP server with your agent, for example:
-
-```bash
-claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
-```
-
-```bash
-codex mcp add amigent --env AMIGENT_HOST=192.168.1.50 -- amigent-server
-```
-
-Other agents need the command `amigent-server` and the environment variable
-`AMIGENT_HOST`.
-
-## Control by AI
-
-The AI agent gets these tools:
-
-| tool | purpose |
-|---|---|
-| `amiga_exec`, `amiga_job`, `amiga_start` | run commands, long jobs and programs |
-| `amiga_list`, `amiga_read_text`, `amiga_write_text` | read directories and files |
-| `amiga_put`, `amiga_get` | copy files and directory trees in both directions |
-| `amiga_mkdir`, `amiga_move`, `amiga_delete` | manage files |
-| `amiga_screenshot` | look at the screen or a part of it, 256 colours |
-| `amiga_screenshot_color` | a region in full colour, for small text and exact colours |
-| `amiga_wait_change` | wait until something on the screen changes, without sending pictures |
-| `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
-| `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label |
-| `amiga_menus`, `amiga_menu_select` | menus as text, pick an item by name |
-| `amiga_click`, `amiga_drag`, `amiga_mouse_move`, `amiga_button` | mouse, including menus and icons |
-| `amiga_type`, `amiga_key` | keyboard, through the Amiga's keymap |
-| `amiga_mouse_relative` | mouse movement for games that ignore the pointer position |
-| `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
-| `amiga_break` | Ctrl-C (or D, E, F) for a running command |
-| `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions |
-| `amiga_viewer` | open the remote desktop |
-| `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up |
-
-Examples of requests:
+## What you can ask for
 
     "Check which programs on the Amiga are outdated."
     "Install the game from my Downloads folder and add it to the Games menu."
     "Copy the demo to the Amiga and start it."
     "Open the remote desktop."
 
-For large files, `python -m amigent.transfer` can resume an interrupted copy.
+## Good to know
 
-## Remote desktop
+- **Slow networks are fine.** Only the parts of the screen that change are sent.
+- **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
+- **After a big OS update**, `amigent-repair` puts back what the update removed.
+- **Safe at home.** A key keeps other computers on the network out, and the
+  connection can be encrypted. Don't open the Amiga to the internet.
 
-Ask the AI agent to open it, or start **Amigent** from the Start menu.
+More in the [guide](docs/GUIDE.md) and the [FAQ](docs/FAQ.md).
 
-![Amigent with a Workbench screen and the keyboard panel](docs/screenshots/viewer.png)
+## Other projects
 
-- **Screen.** Only the 64x64 pixel tiles that changed are transferred, the area
-  around the mouse pointer first. Colours are reduced to 256.
-- **Screens.** A list in the toolbar shows all open screens and brings the one
-  you pick to the front.
-- **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel.
-  *Mouse for games* captures the mouse and sends its movement instead of a
-  position, which games need; Esc releases it. In
-  text mode, characters are typed through the Amiga's keymap, so umlauts and
-  AltGr characters arrive correctly. Direct mode sends key positions and keeps
-  keys pressed for as long as you hold them, which games need.
-- **Keyboard panel.** Esc, Tab, Del, Help, Return, F1 to F10 and both Amiga keys.
-  Amiga, Ctrl, Alt and Shift can be held for the next key (one click) or locked
-  (double click). There are also buttons for common combinations such as
-  Workbench to front, next screen, Open, Save, Quit, Copy, Paste and Ctrl-C.
-- **Files.** *Send file* in the toolbar, or drag files onto the screen. You
-  choose the target folder on the Amiga; the default is `RAM:`. The transfer
-  shows its progress, is checked with a checksum at the end and asks before
-  replacing an existing file.
+- [amimcp](https://github.com/thomas-luebker/amimcp) by Thomas Luebker also lets
+  an AI agent control a real Amiga, from OS 2.04 on, with amifleet as a native
+  Mac app for several machines. Use it if your Amiga runs OS 2.x or you want
+  nothing but Python's standard library on the PC.
+- [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4) is for AmigaOS 4.1.
+- For emulators such as WinUAE and Amiberry there are MCP servers of their own.
 
-  ![Choosing the target folder on the Amiga](docs/screenshots/send.png)
-
-  Volumes are listed at the top, folders open with a click, and the path of an
-  existing folder such as `Work:Games` can be typed into the field.
-- **Text.** *Type text* sends a block of text; Ctrl+V sends the PC's clipboard.
-- **View.** Fit to window or 1:1, full screen (where the Windows keys act as the
-  Amiga keys), screenshot as PNG, and a restart that writes pending data to disk
-  first.
-- **System information.** OS and CPU in the toolbar, free memory in the status
-  bar. The *i* button shows Kickstart and Workbench versions, FPU, Chip and Fast
-  memory, the network stack and the free space of each volume.
-
-![System information in the About window](docs/screenshots/about.png)
-
-While the window is open, the AI agent can keep working, and its actions show up
-in the window.
-
-### Windows program
-
-```bash
-amigent-viewer 192.168.1.50 --install
-```
-
-adds **Amigent** to the Start menu, the desktop and *Installed apps*, where it can
-be uninstalled like other programs. It starts without a console window, works
-from WSL and from a Windows Python installation, and ends when its window is
-closed. Starting it a second time brings up the window that is already open.
-
-After an update, run `--install` again to refresh the shortcuts and the version
-shown in *Installed apps*. `amigent-viewer --uninstall` removes everything.
-
-On other systems, `amigent-viewer 192.168.1.50` opens the window directly.
-
-## How it works
-
-Two small services run on the Amiga, one server on the PC.
-
-```
-  AI agent ---- MCP ---- amigent-server ---+--- :6800 --- amigactld   commands, files
-                                |           +--- :6801 --- amigentd    screen, mouse, keys
-  browser window --- :6810 -----+  (remote desktop, local only)
-```
-
-`amigentd` is part of this project, a small daemon written in C. It keeps the
-last picture and sends only the 64×64 tiles that changed, run-length encoded with
-256 colours; a region can also be fetched in full colour. Between requests a
-helper process at the lowest priority reads the screen ahead, using only CPU time
-nobody else wants, so asking about an unchanged screen costs one network round
-trip. A full screen takes a few seconds over a slow link. The remote desktop
-asks again and again while it is open and waits longer when nothing changes.
-It also reports the screens, windows, gadgets and menus that Intuition knows, for
-the AI agent to work with names instead of pixels.
-
-`amigactld` by tbdye handles commands and files.
-
-## After a system update
-
-A large OS or AmiKit update can remove startup entries. `amigent-repair` restores
-what is missing and leaves everything else unchanged, so it can be run at any
-time. [`scripts/make_icon.py`](scripts/make_icon.py) creates a desktop icon for it.
-
-Installed programs can be covered too: a small module per program in `repair.d`
-restores the program, its settings and its menu entry. See
-[`amiga/repair.d/example.repair.txt`](amiga/repair.d/example.repair.txt).
-
-## Settings
-
-| variable | default | meaning |
-|---|---|---|
-| `AMIGENT_HOST` | | address of the Amiga |
-| `AMIGENT_AMIGA_DIR` | `SYS:amigent` | folder for the scripts on the Amiga |
-| `AMIGENT_FLUSH_VOLUMES` | `SYS:` | volumes written to disk before a restart |
-| `AMIGENT_POWER_CMD` | | command taking `on` or `off`, for a smart plug |
-| `AMIGENT_VIEWER_PORT` | `6810` | port of the remote desktop, on 127.0.0.1 only |
-| `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/key` |
-
-## Security
-
-Anyone who can reach the two services can control the Amiga. Keep them in your
-home network and do not forward the ports to the internet. Within the network,
-`amigent-setup` closes them as far as the two programs allow:
-
-- `amigentd` asks every connection for a key first. `amigent-setup` creates it
-  and stores it in `S:amigent.key` on the Amiga and in `~/.config/amigent/key` on
-  the PC. A wrong key costs a one-second pause and closes the connection.
-- `amigactld`, the separate program that handles commands and files, has no
-  password of its own. Instead it accepts only the addresses listed as `ALLOW`
-  in `S:amigactld.conf`; `amigent-setup` adds this PC there and keeps your other
-  settings. If the Amiga sees the PC under a different address (for example
-  behind NAT), it leaves the list open and says so.
-- `amigentd` accepts files and commands only in `SETUP` mode, which
-  `amigent-setup` switches off when it is done.
-- The remote desktop listens only on the PC itself and needs the token in its
-  address.
-
-The connections are not encrypted. The key keeps strangers out, but someone who
-can read your network traffic could read it too.
-
-More in the [FAQ](docs/FAQ.md); the wire format is described in
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
-
-## Building amigentd
-
-vbcc and the NDK are needed. On AmiKit both are included, and the AmigaDOS script
-[`amiga/build-amigentd`](amiga/build-amigentd) builds it on the Amiga
-(`build-amigentd CPU 68000` for a 68000 build, untested on a real 68000). On
-other systems adjust the assigns at the top of the script.
-
-Tests for the PC side:
-
-```bash
-python3 -m pytest -q
-```
-
-## Translations
-
-Each language of the remote desktop is one file in
-[`src/amigent/web/locales`](src/amigent/web/locales). To add one, copy `en.json`,
-translate the values, keep the `{placeholders}` and add the language code to
-`LANGUAGES` in `viewer.js`. The tests report missing texts.
-
-## Versions
-
-Changes are listed in the [changelog](CHANGELOG.md). Releases are tagged
-`v1.0.0` and so on; `amigent-viewer --version` shows the installed version.
-
-## Related projects
-
-Others work on the same idea, and depending on your machine their projects may
-suit you better:
-
-- [amimcp](https://github.com/thomas-luebker/amimcp) by Thomas Luebker: an MCP
-  server with one small daemon for every Amiga from a 68000 with OS 2.04 on,
-  with token and optional TLS, GUI access by object and ARexx. Its companion
-  amifleet is a macOS app for watching and controlling several Amigas.
-- [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4): an MCP server for
-  AmigaOS 4.1, on real hardware and in QEMU.
-- Several MCP servers for emulators such as WinUAE and Amiberry.
-
-Amigent overlaps with these. It concentrates on accelerated Amigas, slow
-networks, a remote desktop for Windows and browsers, and keeping the machine in
-shape. Ideas are welcome to travel in both directions.
-
-### Which one fits?
-
-amimcp and Amigent both let an AI agent work on a real AmigaOS 3 machine. A
-rough guide:
-
-amimcp is likely the better choice if
-
-- your Amiga has a 68000 or runs OS 2.x,
-- you want encrypted connections (TLS), or one password on every connection,
-- you use a Mac and want to watch several Amigas side by side (amifleet),
-- you want nothing on the PC but Python's standard library.
-
-Amigent is likely the better choice if
-
-- you want to work on the Amiga yourself as well, like with a remote desktop
-  program: your mouse and keyboard, Amiga keys, file transfer into a folder of
-  your choice, on Windows as a normal program or in a browser on any system, with
-  no extra server on the Amiga, and the AI agent's actions visible in the same
-  window,
-- your network is slow, for example a plipbox on the parallel port: only the
-  parts of the screen that changed are sent,
-- you want help keeping the machine in shape: version scans, repair after OS
-  updates, a restart that writes the disks first, mains power through a smart
-  plug.
+Amigent is the one to pick if you want to use the Amiga by hand as well, have a
+slow network, or want help keeping the machine in shape.
 
 ## Thanks
 
@@ -348,6 +94,5 @@ and Aminet people.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). `amigactld` is a separate program under GPLv3. It is
-downloaded from its author during installation and is not part of this
-repository.
+MIT, see [LICENSE](LICENSE). By Andreas Wendorf (Akustikrausch).
+Changes are in the [changelog](CHANGELOG.md).

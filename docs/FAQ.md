@@ -4,9 +4,34 @@
 Check that `amigentd SETUP` is running, then give it the address by hand:
 `amigent-setup 192.168.1.50`. The search only covers your own /24.
 
-**The AI agent says amigactld isn't answering.**
-It does one command at a time. If something long is running, it waits. Long work
-belongs in `amiga_job`, which runs at low priority and keeps the line free.
+**What runs on the Amiga?**
+Only `amigentd`, started from `S:User-Startup`. It handles the screen, commands
+and files on one port. Older installs also had amigactld; it keeps working.
+
+**Can I start amigentd from Workbench?**
+Yes, from the icon in the archive. Its tool types work like the Shell options:
+`SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands then only find
+what is in `C:`, because Workbench passes no command path on; started from
+`S:User-Startup`, as `amigent-setup` arranges, it has the full path.
+
+**Does it run on a 68000?**
+Use `amigentd.000`. Commands and files are fine; the screen is slow, so the
+remote desktop is more useful on a faster CPU.
+
+**The AI agent waits for a command.**
+A command holds its channel until it ends. Long work belongs in `amiga_job`,
+which runs at low priority and keeps the line free.
+
+**Is the connection encrypted?**
+If `amigent-setup` found `openssl` on the PC and AmiSSL is installed on the
+Amiga, yes: it then says so at the end. Run it again after installing either one.
+On Windows without WSL, `openssl` comes with Git for Windows. `AMIGENT_TLS=off`
+switches encryption off for a test.
+
+**How do I add a second Amiga?**
+Run `amigent-setup` with its address, then `amigent-fleet --add NAME ADDRESS`.
+Each Amiga gets its own key. The AI agent works with one Amiga per MCP server
+entry, so register a second entry with the other `AMIGENT_HOST`.
 
 **Directory Opus says it has waited long enough for a program.**
 Something in `SYS:WBStartup` never exits. Services go into `S:User-Startup`.
@@ -44,6 +69,12 @@ The side panel has them as sticky buttons, plus the usual combinations ready to
 click. In full screen the browser hands over the Windows keys: left Windows is
 left Amiga, right Windows or the menu key is right Amiga.
 
+**How do I copy text between the PC and the Amiga?**
+Ctrl+V in the remote desktop types the PC's clipboard into the active window.
+The *Clipboard* buttons in the side panel copy the clipboard itself in either
+direction; on the Amiga it is pasted with Right Amiga+V. Copying text out of a
+Shell window needs ConClip running, which Workbench starts by default.
+
 **Ctrl+W closed the viewer.**
 Browsers keep a few shortcuts for themselves outside full screen. Go full screen,
 or use the sticky Ctrl button.
@@ -67,19 +98,22 @@ uninstaller in `%LOCALAPPDATA%\amigent`, the entry for *Installed apps* in
 `HKEY_CURRENT_USER`. No admin rights needed. Settings such as `AMIGENT_FLUSH_VOLUMES` are taken over
 from the shell you ran `--install` in. Changed something? Run `--install` again.
 
+**Where does Amigent live on macOS?**
+`~/Applications/Amigent.app`. `amigent-viewer --uninstall` removes it.
+
 **Amigent does nothing when I click it.**
 Run `amigent-viewer <address>` in a terminal once and read what it says. Under
 WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.
 
 **"amigentd refused the key" or "amigentd wants a key".**
-The key on the PC (`~/.config/amigent/key`, or `AMIGENT_KEY`) must match
-`S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
+The key on the PC (`~/.config/amigent/key-<address>`, or `AMIGENT_KEY`) must
+match `S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
 again with `amigentd SETUP` running. Deleting `S:amigent.key` switches the key
 off.
 
 **amigactld no longer answers this PC.**
-It only accepts the addresses in `S:amigactld.conf`. If your PC got a new
+Only for older installs that still use amigactld: it only accepts the addresses in `S:amigactld.conf`. If your PC got a new
 address, add an `ALLOW` line for it there (or delete the file) and restart the
 Amiga. `amigent-setup` keeps a copy in its folder on the Amiga.
 
@@ -90,6 +124,6 @@ Esc. Menus are opened by holding the right button, moving and releasing.
 
 **Which programs give their buttons a name in amiga_ui_tree?**
 Classic Intuition gadgets and GadTools checkboxes, string gadgets and sliders.
-GadTools buttons, BOOPSI, ReAction and MUI gadgets, and requesters changed by
-tools such as ReqAttack, show up with their box but without a label; the agent
-then clicks them by number after a look at the screen.
+BOOPSI, ReAction and MUI gadgets, and requesters changed by tools such as
+ReqAttack, show up with their box but without a label. The agent then gets a
+small picture of each one with its number and clicks by number.

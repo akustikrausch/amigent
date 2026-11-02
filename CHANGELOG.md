@@ -7,25 +7,38 @@ Versions follow [semver](https://semver.org). The number lives in
 
 The first full release. Everything from the 0.x line, now considered stable:
 
-- **Control by AI**: MCP server with Shell, files, screen, mouse and
-  keys on a real Amiga over the LAN, through `amigactld` and our own `amigentd`.
-- **You at the keyboard**: Amigent, the live viewer with mouse, keyboard, Amiga
-  shortcuts, file upload and the machine's details, in twelve languages.
-- **On Windows**: installed like a program, with Start menu, desktop and
-  Installed apps entries and an uninstaller.
-- **Install in three steps**: one small file on the Amiga, the rest done by
-  `amigent-setup` over the network.
+- **Control by AI**: MCP server with Shell, files, screen, mouse and keys on a
+  real Amiga over the LAN.
+- **One service on the Amiga**: `amigentd` handles screen, commands and files
+  on one port. amigactld is no longer needed; older installs keep working
+  with it, and `amigent-setup --with-amigactld` still installs it.
+- **68000 to 68060**: `amigentd.000` for a plain 68000, picked by
+  `amigent-setup` on its own.
+- **You at the keyboard**: Amigent, the remote desktop with mouse, keyboard,
+  Amiga shortcuts, files in both directions, the clipboard in both directions
+  and the machine's details, in twelve languages.
+- **On Windows and macOS**: installed like a program, with Start menu,
+  desktop and Installed apps entries on Windows and an app in
+  `~/Applications` on macOS.
+- **Several Amigas**: `amigent-fleet` shows them side by side with a preview
+  and opens each one's remote desktop.
+- **Install in three steps**: one small file on the Amiga, or the `.lha`
+  archive with icons, the rest done by `amigent-setup` over the network.
 - **Repair after system updates**: `amigent-repair` and a module per program.
 
 Tools for the AI agent beyond Shell and files: windows and gadgets as text with
-click by label, menus by name, a full-colour region screenshot, waiting for a
-change without pictures, a list of screens with switching, relative mouse
-movement for games, ARexx to any program, and Ctrl-C for running commands. The
-remote desktop gets a screen switcher and a mouse mode for games.
+click by label or number (unlabelled gadgets come as small numbered pictures),
+menus by name, a full-colour region screenshot, waiting for a change without
+pictures, a list of screens with switching, mouse moves and held buttons,
+relative mouse movement for games, ARexx to any program, and Ctrl-C for
+running commands. The remote desktop gets a screen switcher and a mouse mode
+for games.
 
-Security: `amigentd` asks for a key that `amigent-setup` creates; `amigactld`
-is limited to the PC's address through its `ALLOW` list. `amigent-repair`
-restores both after an OS update.
+Security: `amigentd` asks every connection for a key, one per Amiga, created by
+`amigent-setup`. With AmiSSL on the Amiga and `openssl` on the PC the
+connection is encrypted with TLS, and the PC accepts only the certificate it
+made for that Amiga. `amigent-repair` restores key and certificate after an OS
+update.
 
 `amigentd` in this release:
 
@@ -36,11 +49,15 @@ restores both after an OS update.
 - A new connection takes over at once, even in the middle of a frame.
 - Chipset screens are read through their palette, HAM6 and HAM8 included, so
   games and demos on native screens show up too.
-- Protocol 2: screen list and switching, full-colour regions, relative mouse,
-  windows, gadgets and menus as data.
-- Runs on a 68020 or better with OS 3.0 or newer; RTG is optional.
+- Screen list and switching, full-colour regions, relative mouse, windows,
+  gadgets (GadTools button labels included) and menus as data.
+- Up to four command channels next to the screen client; a long command holds
+  up neither the screen nor the other channels.
+- TLS on the next port from `S:amigent-tls.pem`, picked up while running.
+- Starts from Workbench, with its settings as tool types.
+- Runs on OS 3.0 or newer; RTG is optional.
 - `amigentd PORT <n>` runs a second copy on another port;
-  `amiga/build-amigentd` takes `SOURCE` and `TO`.
+  `amiga/build-amigentd` takes `CPU`, `SOURCE` and `TO`.
 
 ## 0.5.0 (2026-11-02)
 
