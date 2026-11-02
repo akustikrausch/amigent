@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import random
+import select
 import socket
+import ssl
 import struct
 import time
 from collections import deque
@@ -35,6 +37,9 @@ _LUT = {
     "g": bytes((v >> 3 & 7) * 255 // 7 for v in range(256)),
     "b": bytes((v >> 6 & 3) * 255 // 3 for v in range(256)),
 }
+# RGB332 as a palette: the picture stays one byte a pixel, like the chip RAM it came from
+PALETTE = bytes(c for v in range(256) for c in (_LUT["r"][v], _LUT["g"][v], _LUT["b"][v]))
+_BYTE = [bytes((v,)) for v in range(256)]
 
 
 class AmigentdError(Exception):
@@ -45,17 +50,34 @@ class AmigentdRefused(AmigentdError):
     """amigentd answered, but said no: the link is fine, so nothing is retried."""
 
 
-def decode_tile(data: bytes, w: int, h: int) -> Image.Image:
+def _is_raw(data: bytes, size: int) -> bool:
+    return len(data) == size and size != 0
+
+
+def tile_fits(data: bytes, w: int, h: int) -> bool:
+    """Does the tile unpack to exactly w*h pixels? Checked without unpacking."""
     size = w * h
-    if len(data) != size or size == 0:
-        out = bytearray()
-        for i in range(0, len(data) - 1, 2):
-            out += bytes([data[i + 1]]) * (data[i] + 1)
-        data = bytes(out)
+    return _is_raw(data, size) or sum(data[0::2]) + len(data) // 2 == size
+
+
+def unpack_tile(data: bytes, w: int, h: int) -> bytes:
+    """A tile's RGB332 pixels, row by row; runs are blown up in one join, no byte loop."""
+    size = w * h
+    if not _is_raw(data, size):
+        data = b"".join([_BYTE[c] * (n + 1) for n, c in zip(data[0::2], data[1::2])])
     if len(data) != size:
         raise AmigentdError(f"tile decoded to {len(data)} bytes, expected {size}")
-    bands = [Image.frombytes("L", (w, h), data.translate(_LUT[c])) for c in "rgb"]
-    return Image.merge("RGB", bands)
+    return data
+
+
+def _tile_image(data: bytes, w: int, h: int) -> Image.Image:
+    return Image.frombytes("P", (w, h), unpack_tile(data, w, h))
+
+
+def decode_tile(data: bytes, w: int, h: int) -> Image.Image:
+    image = _tile_image(data, w, h)
+    image.putpalette(PALETTE)
+    return image.convert("RGB")
 
 
 def unpack_rgb(data: bytes, pixels: int) -> bytes:
@@ -82,7 +104,9 @@ class Amigentd:
         self._sock: socket.socket | None = None
         self.width = 0
         self.height = 0
-        self._frame: Image.Image | None = None
+        self._frame: Image.Image | None = None  # mode P, see PALETTE
+        self._missing: set = set()  # tiles the picture still lacks, by origin
+        self._unpainted: dict = {}  # tiles received but not yet painted: paid for on look only
         self._buttons = 0
         self._last_used = 0.0
         self.protocol = 0
@@ -104,7 +128,7 @@ class Amigentd:
             if self.protocol >= 2:
                 self._send(CMD_CLIENT, 0, self.client_id >> 16, self.client_id & 0xFFFF)
                 if self._exact(1) != b"\0":
-                    self._frame = None  # frames went to someone else meanwhile
+                    self.drop_picture()  # frames went to someone else meanwhile
             size = self._info()
         except OSError as e:
             self.close()
@@ -133,9 +157,84 @@ class Amigentd:
 
     def _apply_size(self, width: int, height: int) -> None:
         if (width, height) != (self.width, self.height):
-            self._frame = None
+            self.drop_picture()
             self.width, self.height = width, height
             self._notify("size", (width, height))
+
+    # the picture: tiles land in _unpainted and are painted only when someone looks
+
+    def drop_picture(self) -> None:
+        self._frame = None
+        self._missing = set()
+        self._unpainted = {}
+
+    def _start_picture(self) -> None:
+        self._frame = Image.new("P", (self.width, self.height))
+        self._frame.putpalette(PALETTE)
+        self._missing = self._all_tiles()
+        self._unpainted = {}
+
+    def _all_tiles(self) -> set:
+        return {(x, y) for y in range(0, self.height, 64) for x in range(0, self.width, 64)}
+
+    def missing_tiles(self) -> set:
+        """Tile origins the picture lacks; all of them before the first frame."""
+        return self._all_tiles() if self._frame is None else self._missing
+
+    def _take_tiles(self, tiles: list) -> None:
+        if not tiles:
+            return
+        if self._frame is None:
+            self._start_picture()
+        for tile in tiles:
+            self._unpainted[tile[:2]] = tile
+            self._missing.discard(tile[:2])
+        now = time.monotonic()
+        self.changes.extend((now, t[0], t[1], t[2], t[3]) for t in tiles)
+        self._notify("tiles", tiles)
+
+    def _paint(self) -> Image.Image | None:
+        if self._frame is not None:
+            for x, y, w, h, data in self._unpainted.values():
+                self._frame.paste(_tile_image(data, w, h), (x, y))
+        self._unpainted = {}
+        return self._frame
+
+    def _frame_reply(self, take):
+        """Parser for one FRAME answer: yields bytes wanted, gets them sent in.
+
+        take(tile) gets each tile the moment it is complete. Returns the tile
+        count, the bytes and the seconds from header to last byte.
+        """
+        count = struct.unpack(">I", (yield 4))[0]
+        start, size = time.perf_counter(), 4
+        for _ in range(count):
+            x, y, w, h, n = struct.unpack(">HHHHI", (yield 12))
+            data = yield n
+            if not tile_fits(data, w, h):
+                raise AmigentdError(f"tile at {x},{y} does not unpack to {w}x{h}")
+            size += 12 + n
+            take((x, y, w, h, data))
+        return count, size, time.perf_counter() - start
+
+    def _screens_reply(self):
+        found = []
+        for _ in range(struct.unpack(">H", (yield 2))[0]):
+            handle, w, h, depth, flags, size = struct.unpack(">IHHHHH", (yield 14))
+            found.append({"handle": handle, "width": w, "height": h, "depth": depth,
+                          "front": bool(flags & 1), "workbench": bool(flags & 2),
+                          "rtg": bool(flags & 4), "ham": bool(flags & 8),
+                          "title": (yield size).decode("iso-8859-1")})
+        return found
+
+    def _drive(self, parser):
+        """Feed a reply parser straight from the socket."""
+        try:
+            need = next(parser)
+            while True:
+                need = parser.send(self._exact(need))
+        except StopIteration as done:
+            return done.value
 
     def _notify(self, event: str, payload) -> None:
         for listener in self.listeners:
@@ -179,7 +278,7 @@ class Amigentd:
             if self.protocol < 2 and time.monotonic() - self._last_used < 100:
                 # Old amigentd: not the idle timeout, so another client took over
                 # and may have received tiles our picture is missing.
-                self._frame = None
+                self.drop_picture()
             self.connect()
             result = fn()
         self._last_used = time.monotonic()
@@ -240,25 +339,18 @@ class Amigentd:
 
         def call():
             region = (x, y, w or self.width, h or self.height)
-            force = self._frame is None
+            force = self._frame is None or bool(self._missing)
             if force:
-                self._frame = Image.new("RGB", (self.width, self.height))
+                self._start_picture()
                 region = (0, 0, self.width, self.height)  # a new picture needs everything
+            tiles: list = []
             try:
                 self._send(CMD_FRAME, int(force), *region)
-                tiles = []
-                for _ in range(struct.unpack(">I", self._exact(4))[0]):
-                    tx, ty, tw, th, size = struct.unpack(">HHHHI", self._exact(12))
-                    data = self._exact(size)
-                    self._frame.paste(decode_tile(data, tw, th), (tx, ty))
-                    tiles.append((tx, ty, tw, th, data))
+                self._drive(self._frame_reply(tiles.append))
             except (OSError, AmigentdError):
-                self._frame = None  # the service has moved on, ours is incomplete
+                self.drop_picture()  # the service has moved on, ours is incomplete
                 raise
-            if tiles:
-                now = time.monotonic()
-                self.changes.extend((now, t[0], t[1], t[2], t[3]) for t in tiles)
-                self._notify("tiles", tiles)
+            self._take_tiles(tiles)
             return len(tiles)
 
         return self._retry(call)
@@ -267,15 +359,16 @@ class Amigentd:
                 h: int | None = None) -> Image.Image:
         """Return a region, transferring only tiles changed since the last call."""
         self._retry(lambda: self._apply_size(*self._info()))  # the front screen may have changed
-        if self._frame is None:
+        if self._frame is None or self._missing:
             self.poll()
         else:
             self.poll(x, y, w, h)  # tiles elsewhere wait in amigentd for later
-        return self._frame.crop((x, y, x + (w or self.width - x), y + (h or self.height - y)))
+        crop = self._paint().crop((x, y, x + (w or self.width - x), y + (h or self.height - y)))
+        return crop.convert("RGB")
 
     def snapshot(self) -> Image.Image | None:
-        """The picture as of the last poll, without asking the Amiga."""
-        return self._frame
+        """The picture as of the last poll, without asking the Amiga; mode P, black where tiles are due."""
+        return self._paint()
 
     def move(self, x: int, y: int) -> None:
         self._ok(CMD_MOVE, 0, x, y)
@@ -341,14 +434,7 @@ class Amigentd:
         """All Intuition screens, front to back."""
         def call():
             self._send(CMD_SCREENS)
-            found = []
-            for _ in range(struct.unpack(">H", self._exact(2))[0]):
-                handle, w, h, depth, flags, size = struct.unpack(">IHHHHH", self._exact(14))
-                found.append({"handle": handle, "width": w, "height": h, "depth": depth,
-                              "front": bool(flags & 1), "workbench": bool(flags & 2),
-                              "rtg": bool(flags & 4), "ham": bool(flags & 8),
-                              "title": self._exact(size).decode("iso-8859-1")})
-            return found
+            return self._drive(self._screens_reply())
 
         self._need(2)
         return self._retry(call)
@@ -464,3 +550,139 @@ class Amigentd:
             self.rawkey(RAWKEYS[key], False, qualifier)
         else:
             self.char(key, qualifier)
+
+
+class Pipeline:
+    """Commands out back to back, answers read in order as they trickle in.
+
+    amigentd serves one command after the other and answers in that order, so a
+    queue of reply parsers, one per command sent, is all the bookkeeping there
+    is. No round trip per command: on a plipbox that's the difference between
+    a mouse and a slideshow. The socket stays non-blocking while the pipeline
+    lives; close() hands it back as it was.
+    """
+
+    def __init__(self, screen: Amigentd, on_tiles=None):
+        self.screen = screen
+        self.sock = screen._sock
+        self.on_tiles = on_tiles
+        self.out = bytearray()
+        self.inbuf = bytearray()
+        self.waiting: deque = deque()  # [parser, bytes wanted, kind]
+        self.frames = self.inputs = self.moves = 0
+        self.heard = time.monotonic()
+        self._tiles: list = []
+        self.sock.settimeout(0.0)
+
+    def close(self) -> None:
+        if self.sock is self.screen._sock:
+            self.sock.settimeout(self.screen.timeout)
+
+    def busy(self) -> bool:
+        return bool(self.waiting or self.out)
+
+    def _ask(self, kind: str, parser, cmd: int, arg: int = 0, a: int = 0, b: int = 0, c: int = 0,
+             d: int = 0) -> None:
+        self.out += struct.pack(">BBHHHH", cmd, arg, a, b, c, d)
+        self.waiting.append([parser, next(parser), kind])
+        if kind == "frame":
+            self.frames += 1
+        elif kind != "other":
+            self.inputs += 1
+            self.moves += kind == "move"
+
+    def command(self, cmd: int, arg: int = 0, x: int = 0, y: int = 0, on_reply=None) -> None:
+        """Input and other one-byte answers; on_reply(ok, seconds) once it's back."""
+        sent = time.perf_counter()
+
+        def parse():
+            ok = (yield 1) == b"\0"
+            if on_reply:
+                on_reply(ok, time.perf_counter() - sent)
+
+        self._ask("move" if cmd in (CMD_MOVE, CMD_MOVE_REL) else "input", parse(), cmd, arg, x, y)
+
+    def info(self) -> None:
+        def parse():
+            self.screen._apply_size(*struct.unpack(">HH", (yield 8)[:4]))
+
+        self._ask("other", parse(), CMD_INFO)
+
+    def screens(self, done) -> None:
+        def parse():
+            done((yield from self.screen._screens_reply()))
+
+        self._ask("other", parse(), CMD_SCREENS)
+
+    def frame(self, x: int, y: int, w: int, h: int, force: bool = False, on_done=None) -> None:
+        """Ask for a region; tiles reach the picture as each one lands."""
+        def parse():
+            result = yield from self.screen._frame_reply(self._landed)
+            if on_done:
+                on_done(*result)
+
+        self._ask("frame", parse(), CMD_FRAME, int(force), x, y, w, h)
+
+    def _landed(self, tile) -> None:
+        self._tiles.append(tile)  # the list is swapped per round, so no bound .append
+
+    def pump(self, timeout: float, bell=None) -> None:
+        """One round: write what fits, read what came, hand out what's complete."""
+        sock = self.sock
+        pending = getattr(sock, "pending", None)  # TLS keeps decrypted bytes select can't see
+        if self.out:
+            self._write()
+        if pending and pending():
+            readable = [sock]
+        else:
+            watch = [sock] + ([bell] if bell is not None else [])
+            readable, writable, _ = select.select(watch, [sock] if self.out else [], [], timeout)
+            if writable:
+                self._write()
+        if sock in readable:
+            try:
+                data = sock.recv(65536)
+            except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                data = None
+            if data == b"":
+                raise AmigentdError("connection closed by amigentd")
+            if data:
+                self.heard = time.monotonic()
+                self.inbuf += data
+                self._parse()
+        if self.waiting and time.monotonic() - self.heard > self.screen.timeout:
+            raise AmigentdError("amigentd stopped answering")
+        if self._tiles:
+            tiles, self._tiles = self._tiles, []
+            if self.on_tiles:
+                self.on_tiles(tiles)  # first: it may want to know which tiles are news
+            self.screen._take_tiles(tiles)
+
+    def _write(self) -> None:
+        try:
+            sent = self.sock.send(self.out)
+        except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+            return
+        del self.out[:sent]
+
+    def _parse(self) -> None:
+        buf = self.inbuf
+        at = 0
+        while self.waiting:
+            entry = self.waiting[0]
+            need = entry[1]
+            if len(buf) - at < need:
+                break
+            chunk = bytes(buf[at:at + need])
+            at += need
+            try:
+                entry[1] = entry[0].send(chunk)
+            except StopIteration:
+                self.waiting.popleft()
+                kind = entry[2]
+                if kind == "frame":
+                    self.frames -= 1
+                elif kind != "other":
+                    self.inputs -= 1
+                    self.moves -= kind == "move"
+        del buf[:at]
