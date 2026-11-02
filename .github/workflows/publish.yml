@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read  # checkout needs this while the repo is private
       id-token: write
     steps:
       - uses: actions/checkout@v4
