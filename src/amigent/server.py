@@ -149,13 +149,16 @@ def amiga_arexx(program: str, port: str = "") -> str:
     """Run ARexx on the Amiga and return rc and output.
 
     With port, program is one or more commands for that application's ARexx
-    port (see amiga_rexx_ports) and its RESULT is printed. Without port,
-    program is a complete ARexx script.
+    port (see amiga_rexx_ports), one per line, sent exactly as written; the
+    RESULT of the last one is printed. Without port, program is a complete
+    ARexx script.
     """
     if port:
-        lines = program.strip().splitlines()
-        body = "\n".join(lines[:-1] + [f"{lines[-1]}", "if symbol('RESULT') = 'VAR' then say result"])
-        script = f"/* amigent */\noptions results\naddress '{port}'\n{body}\nexit rc\n"
+        # Each line goes to the program as it is: quoted, so ARexx doesn't evaluate it.
+        lines = [line.strip() for line in program.strip().splitlines() if line.strip()]
+        body = "\n".join("'" + line.replace("'", "''") + "'" for line in lines)
+        script = (f"/* amigent */\noptions results\naddress '{port}'\n{body}\n"
+                  "if symbol('RESULT') = 'VAR' then say result\nexit rc\n")
     else:
         script = program if program.lstrip().startswith("/*") else f"/* amigent */\n{program}\n"
     _with_ctl(lambda: ctl.write_file("RAM:amigent.rexx", script.encode("iso-8859-1")))
