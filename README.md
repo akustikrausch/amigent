@@ -130,7 +130,7 @@ The AI agent gets these tools:
 | `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
 | `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label |
 | `amiga_menus`, `amiga_menu_select` | menus as text, pick an item by name |
-| `amiga_click`, `amiga_drag` | mouse, including menus and icons |
+| `amiga_click`, `amiga_drag`, `amiga_mouse_move`, `amiga_button` | mouse, including menus and icons |
 | `amiga_type`, `amiga_key` | keyboard, through the Amiga's keymap |
 | `amiga_mouse_relative` | mouse movement for games that ignore the pointer position |
 | `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
@@ -258,8 +258,9 @@ home network and do not forward the ports to the internet. Within the network,
 - `amigentd` asks every connection for a key first. `amigent-setup` creates it
   and stores it in `S:amigent.key` on the Amiga and in `~/.config/amigent/key` on
   the PC. A wrong key costs a one-second pause and closes the connection.
-- `amigactld` has no password, but accepts only the addresses listed as `ALLOW`
-  in `S:amigactld.conf`. `amigent-setup` adds this PC there and keeps your other
+- `amigactld`, the separate program that handles commands and files, has no
+  password of its own. Instead it accepts only the addresses listed as `ALLOW`
+  in `S:amigactld.conf`; `amigent-setup` adds this PC there and keeps your other
   settings. If the Amiga sees the PC under a different address (for example
   behind NAT), it leaves the list open and says so.
 - `amigentd` accepts files and commands only in `SETUP` mode, which
@@ -314,6 +315,31 @@ suit you better:
 Amigent overlaps with these. It concentrates on accelerated Amigas, slow
 networks, a remote desktop for Windows and browsers, and keeping the machine in
 shape. Ideas are welcome to travel in both directions.
+
+### Which one fits?
+
+amimcp and Amigent both let an AI agent work on a real AmigaOS 3 machine. A
+rough guide:
+
+amimcp is likely the better choice if
+
+- your Amiga has a 68000 or runs OS 2.x,
+- you want encrypted connections (TLS), or one password on every connection,
+- you use a Mac and want to watch several Amigas side by side (amifleet),
+- you want nothing on the PC but Python's standard library.
+
+Amigent is likely the better choice if
+
+- you want to work on the Amiga yourself as well, like with a remote desktop
+  program: your mouse and keyboard, Amiga keys, file transfer into a folder of
+  your choice, on Windows as a normal program or in a browser on any system, with
+  no extra server on the Amiga, and the AI agent's actions visible in the same
+  window,
+- your network is slow, for example a plipbox on the parallel port: only the
+  parts of the screen that changed are sent,
+- you want help keeping the machine in shape: version scans, repair after OS
+  updates, a restart that writes the disks first, mains power through a smart
+  plug.
 
 ## Thanks
 

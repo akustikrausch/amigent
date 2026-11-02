@@ -330,7 +330,9 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) ->
     quick. Colours are reduced to 256. All coordinates for the pointer tools
     are screen pixels; use the scale in the reply for reduced images.
     """
+    global last_look
     image = _with_screen(lambda: screen.capture(x, y, width or None, height or None))
+    last_look = time.monotonic()  # after the fetch: what it brought is what was seen
     scale = max(image.size) / MAX_EDGE
     size = image.size
     if scale > 1:
@@ -352,7 +354,9 @@ def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
     amiga_screenshot is cheaper and covers the whole screen in 256 colours;
     use this one for the part you need to read precisely.
     """
+    global last_look
     image = _with_screen(lambda: screen.capture_rgb(x, y, width, height))
+    last_look = time.monotonic()  # after the fetch: what it brought is what was seen
     out = io.BytesIO()
     image.save(out, "PNG", optimize=True)
     return [f"region {width}x{height} at ({x},{y}), full colour", McpImage(data=out.getvalue(), format="png")]
@@ -361,21 +365,26 @@ def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
 @mcp.tool()
 def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
                       timeout: float = 30) -> str:
-    """Wait until something changes in a region (or anywhere), without sending pictures.
+    """Wait until a region (or the screen) differs from what you last looked at.
 
-    Use it after a click or command instead of taking screenshots in a loop.
+    Counts from your last screenshot, so a change your click already caused is
+    reported at once. Use it after a click or command instead of taking
+    screenshots in a loop; no pictures are sent.
     """
+    global last_look
     region = (x, y, width or None, height or None)
-    _with_screen(lambda: screen.poll(*region))  # settle first
+    since = last_look or time.monotonic()
     start = time.monotonic()
-    while time.monotonic() - start < timeout:
+    while True:
         _with_screen(lambda: screen.poll(*region))
         # Count tiles whoever fetched them: an open viewer may have taken them first.
-        changed = screen.changed_since(start, *region)
+        changed = screen.changed_since(since, *region)
         if changed:
-            return f"changed after {time.monotonic() - start:.1f} s ({changed} tiles)"
+            last_look = time.monotonic()
+            return f"changed ({changed} tiles) after {time.monotonic() - start:.1f} s of waiting"
+        if time.monotonic() - start >= timeout:
+            return f"no change within {timeout:.0f} s"
         time.sleep(0.25)
-    return f"no change within {timeout:.0f} s"
 
 
 @mcp.tool()
@@ -546,6 +555,25 @@ def amiga_click(x: int, y: int, button: str = "left", double: bool = False) -> s
 
 
 @mcp.tool()
+def amiga_mouse_move(x: int, y: int) -> str:
+    """Move the pointer to screen pixels without clicking, e.g. to show a tooltip."""
+    _with_screen(lambda: screen.move(x, y))
+    return f"pointer at ({x},{y})"
+
+
+@mcp.tool()
+def amiga_button(button: str = "left", down: bool = True) -> str:
+    """Press (down=True) or release (down=False) one mouse button on its own.
+
+    For long presses and drags with stops on the way; release it again afterwards.
+    """
+    if button not in ("left", "right", "middle"):
+        raise AmigaError("button must be left, right or middle")
+    _with_screen(lambda: screen.button(button, down))
+    return f"{button} button {'down' if down else 'up'}"
+
+
+@mcp.tool()
 def amiga_drag(x1: int, y1: int, x2: int, y2: int, button: str = "left") -> str:
     """Press at one point and release at another: drag icons or pick menu items."""
     _with_screen(lambda: screen.drag(x1, y1, x2, y2, button))
@@ -567,6 +595,7 @@ def amiga_key(combo: str) -> str:
 
 
 viewer: Viewer | None = None
+last_look = 0.0  # when the agent last looked at the screen; wait_change counts from here
 
 
 @mcp.tool()
