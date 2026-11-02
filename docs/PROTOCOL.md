@@ -48,6 +48,10 @@ dropped, and so is a key that takes longer than 5 seconds to arrive.
 A screen client that sends nothing for 120 seconds is dropped. A single send or
 receive that stalls for 30 seconds drops it too.
 
+New connections are accepted and greeted while a frame is still going out, so a
+busy screen client doesn't hold them up. On a slow link they still share the line
+with it: the hello waits behind the frame data already queued.
+
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
