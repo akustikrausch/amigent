@@ -29,6 +29,11 @@ The first full release. Everything from the 0.x line, now considered stable:
   notarized; Cmd works as the Amiga key, Cmd+V pastes, Option types @ and €.
 - **Install in three steps**: one small file on the Amiga, or the `.lha`
   archive with icons, the rest done by `amigent-setup` over the network.
+  `amigent-setup --serve` offers amigentd to the Amiga's browser when there is
+  no other way to get it there.
+- **Restart without worry**: `amiga_restart` writes the disks first and, with a
+  smart plug set up, cycles the power by itself if the network does not come
+  back.
 - **Repair after system updates**: `amigent-repair` and a module per program.
 
 Tools for the AI agent beyond Shell and files: windows and gadgets as text with

@@ -31,7 +31,7 @@ which runs at low priority and keeps the line free.
 **Is the connection encrypted?**
 If `amigent-setup` found `openssl` on the PC and AmiSSL is installed on the
 Amiga, yes: it then says so at the end. Run it again after installing either one.
-On Windows without WSL, `openssl` comes with Git for Windows. `AMIGENT_TLS=off`
+On Windows, Amigent finds the `openssl` that comes with Git for Windows. `AMIGENT_TLS=off`
 switches encryption off for a test.
 
 **How do I add a second Amiga?**
@@ -127,7 +127,7 @@ WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.
 
 **"amigentd refused the key" or "amigentd wants a key".**
-The key on the PC (`~/.config/amigent/key-<address>`, or `AMIGENT_KEY`) must
+The key on the PC (in `~/.config/amigent/`, or `AMIGENT_KEY`) must
 match `S:amigent.key` on the Amiga. Copy one over the other, or run `amigent-setup`
 again with `amigentd SETUP` running. Deleting `S:amigent.key` switches the key
 off.

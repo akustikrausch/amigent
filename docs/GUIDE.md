@@ -17,47 +17,91 @@ on the Amiga.
 
 ## Installation by hand
 
+### On the Amiga
+
 Copy [`amiga/bin/amigentd`](../amiga/bin/amigentd) to the Amiga, or unpack
 `amigent-1.0.0.lha` from the releases. If the Amiga has a browser or wget but
-no other way in, `amigent-setup --serve` offers both builds on the network for
-30 minutes and prints the address to open. Under WSL it uses Windows Python
-for this, because the network does not reach servers inside WSL. Then start
-it: double-click the icon, or `amigentd SETUP` in a Shell (`amigentd.000 SETUP`
-on a 68000). Then on the PC, in the cloned repository:
+no other way in, `amigent-setup --serve` (see below) offers both builds on the
+network for 30 minutes and prints the address to open. Then start it:
+double-click the icon, or `amigentd SETUP` in a Shell (`amigentd.000 SETUP` on a
+68000).
+
+### Windows
+
+Python 3.10 or newer from python.org or `winget install Python.Python.3.13`, and
+Git with `winget install Git.Git`. In a terminal (PowerShell):
+
+```powershell
+git clone https://github.com/akustikrausch/amigent
+```
+
+```powershell
+cd amigent; py -m venv .venv; .venv\Scripts\pip install -e .
+```
+
+```powershell
+.venv\Scripts\amigent-setup
+```
+
+```powershell
+.venv\Scripts\amigent-viewer --install
+```
+
+The MCP server is `.venv\Scripts\amigent-server.exe` with its full path. Inside
+WSL the Linux steps below apply, and `--install` still puts Amigent into the
+Windows Start menu; `--serve` then runs its server in Windows Python, because the
+network does not reach servers inside WSL.
+
+### macOS
+
+Python 3.10 or newer with `brew install python` or from python.org; git comes
+with `xcode-select --install`. In Terminal:
 
 ```bash
-python3 -m venv .venv
+git clone https://github.com/akustikrausch/amigent && cd amigent
 ```
 
 ```bash
-.venv/bin/pip install -e .
-```
-
-On Windows the second command is `.venv\Scripts\pip install -e .`. The commands
-below are in `.venv/bin` (`.venv\Scripts` on Windows); give the agent their full
-path.
-
-```bash
-amigent-setup 192.168.1.50
-```
-
-Without an address, `amigent-setup` searches your own /24 network. It copies
-`amigentd` and the scripts to the Amiga, adds `amigentd` to `S:User-Startup`,
-creates the key and, with `openssl` available, the certificate. It remembers the
-Amiga under a name, "Amiga" unless you give `--name A1200`.
-
-Register the MCP server with your agent:
-
-```bash
-claude mcp add amigent -- amigent-server
+python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 ```bash
-codex mcp add amigent -- amigent-server
+.venv/bin/amigent-setup
 ```
 
-Other agents need the command `amigent-server`. With several Amigas, give each
-entry `AMIGENT_HOST` with the Amiga's name.
+```bash
+.venv/bin/amigent-viewer --install
+```
+
+The MCP server is `.venv/bin/amigent-server` with its full path. Allow Amigent
+access to the local network when macOS asks on its first start.
+
+### Linux
+
+As on macOS, with Python and git from the package manager. There is no
+`--install`; start the remote desktop with `.venv/bin/amigent-viewer`.
+
+### What setup does
+
+Without an address, `amigent-setup` searches your own /24 network; with one,
+for example `amigent-setup 192.168.1.50`, it goes straight there. It copies
+`amigentd` (the 68000 build on a 68000) and the scripts to the Amiga, adds
+`amigentd` to `S:User-Startup`, creates the key and, with `openssl` available,
+the certificate. It remembers the Amiga under a name, "Amiga" unless you give
+`--name A1200`.
+
+Register the MCP server with your agent, with the full path from above:
+
+```bash
+claude mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
+```
+
+```bash
+codex mcp add amigent -- /path/to/amigent/.venv/bin/amigent-server
+```
+
+Other agents need that command. With several Amigas, give each entry
+`AMIGENT_HOST` with the Amiga's name.
 
 ### When the address changes
 
@@ -94,6 +138,7 @@ set an address you tell it. A fixed address in the router saves the search.
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions |
 | `amiga_viewer` | open the remote desktop |
 | `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up |
+| `amiga_find` | find the Amiga again after its address changed, or set its address |
 
 Gadgets without a readable label, such as GadTools buttons or MUI gadgets, come
 with a small picture of each one and a number, so the agent can still click the
@@ -214,9 +259,8 @@ icon.
 ## Security
 
 - `amigentd` asks every connection for a key. `amigent-setup` makes one per
-  Amiga and stores it in `S:amigent.key` and in `~/.config/amigent/key-<address>`
-  on the PC. A wrong key costs a
-  one-second pause and closes the connection.
+  Amiga and stores it in `S:amigent.key` on the Amiga and in `~/.config/amigent/`
+  on the PC. A wrong key costs a one-second pause and closes the connection.
 - With `openssl` on the PC and AmiSSL on the Amiga, `amigentd` also accepts TLS
   on port 6802, and the PC accepts only the certificate `amigent-setup` made for
   that Amiga. Without it the connection is unencrypted, and someone who can read
@@ -229,9 +273,10 @@ Keep the Amiga in your home network and do not forward its ports.
 
 ## Building amigentd
 
-vbcc and the NDK are needed; AmiKit includes both. The AmigaDOS script
-[`amiga/build-amigentd`](../amiga/build-amigentd) builds it on the Amiga,
-`build-amigentd CPU 68000` the 68000 build. `scripts/make_release.py` packs the
+vbcc and the NDK are needed; AmiKit's DevPack includes both. The AmigaDOS
+script [`amiga/build-amigentd`](../amiga/build-amigentd) builds it on the Amiga
+in the folder with `amigentd.c`; `CPU 68000 TO amigentd.000` makes the 68000
+build, `DEVPACK Work:DevPack` points it to another DevPack folder. `scripts/make_release.py` packs the
 archive with LhA on the Amiga. Tests for the PC side: `python3 -m pytest -q`.
 
 ## Translations
