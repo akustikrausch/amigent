@@ -1,0 +1,78 @@
+"""Pack the Amiga side of a release as an .lha archive, using LhA on an Amiga.
+
+Usage: make_release.py HOST
+
+Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
+Writes dist/amigent-<version>.lha with an Amigent drawer: amigentd (68020),
+amigentd.000 (68000) if built, the icon, ReadMe and the licence.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from amigent import __version__  # noqa: E402
+from amigent.channel import Commands  # noqa: E402
+
+README = f"""Amigent {__version__}
+
+Remote control for a real Amiga from a PC: by an AI agent over MCP, or by
+hand in a remote desktop window. https://github.com/akustikrausch/amigent
+
+amigentd is the small service that runs on the Amiga. To install everything:
+
+1. Copy this drawer to the Amiga, for example to RAM:.
+2. Double-click amigentd (or run "amigentd SETUP" in a Shell).
+   amigentd.000 is the same for a plain 68000.
+3. On the PC, run amigent-setup. It finds the Amiga, copies amigentd to C:,
+   adds it to S:User-Startup and gives it a key.
+
+Requirements: AmigaOS 3.0 or newer, 68020 or better (68000 with amigentd.000),
+a TCP/IP stack with bsdsocket.library.
+
+Tool types of the icon: SETUP (accept the first install from the PC),
+KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET.
+
+Licence: MIT, see LICENSE.
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    host = sys.argv[1]
+    ctl = Commands(host, timeout=120)
+    stage = "RAM:amigent-release"
+    folder = f"{stage}/Amigent"
+    ctl.exec(f"Delete >NIL: {stage} ALL QUIET")
+    ctl.makedir(stage)
+    ctl.makedir(folder)
+    files = {"amigentd": ROOT / "amiga/bin/amigentd", "amigentd.info": ROOT / "amiga/bin/amigentd.info",
+             "LICENSE": ROOT / "LICENSE"}
+    if (ROOT / "amiga/bin/amigentd.000").exists():
+        files["amigentd.000"] = ROOT / "amiga/bin/amigentd.000"
+    for name, source in files.items():
+        ctl.write_file(f"{folder}/{name}", source.read_bytes())
+    ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
+    ctl.write_file(f"{stage}/Amigent.info", (ROOT / "amiga/bin/Amigent.info").read_bytes())
+    for name in ("amigentd", "amigentd.000"):
+        if name in files:
+            ctl.exec(f"Protect {folder}/{name} +rwed")
+    archive = f"amigent-{__version__}.lha"
+    result = ctl.exec(f"LhA -r -x -q a {stage}/{archive} Amigent Amigent.info", cd=stage, timeout=120)
+    if result.rc > 5:
+        raise SystemExit(f"LhA said {result.rc}:\n{result.output}")
+    data = ctl.read_file(f"{stage}/{archive}")
+    ctl.exec(f"Delete >NIL: {stage} ALL QUIET")
+    out = ROOT / "dist" / archive
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(data)
+    print(f"{out} ({len(data)} bytes)")
+
+
+if __name__ == "__main__":
+    main()

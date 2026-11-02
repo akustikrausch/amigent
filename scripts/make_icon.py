@@ -3,6 +3,7 @@ for OS 3.5 and later, from the Amigent icon.
 
 Usage: make_icon.py repair OUT.info      project icon that runs a script through IconX
        make_icon.py amigentd OUT.info    tool icon for amigentd with its tool types
+       make_icon.py drawer OUT.info      drawer icon for the Amigent folder
 Layout from the icon.library DiskObject structure and the GlowIcon IFF chunks.
 """
 
@@ -16,7 +17,7 @@ from PIL import Image
 
 WIDTH, HEIGHT, DEPTH = 40, 32, 2
 GLOW = 48
-WBTOOL, WBPROJECT = 3, 4
+WBDRAWER, WBTOOL, WBPROJECT = 2, 3, 4
 NO_ICON_POSITION = 0x80000000
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web" / "icon.png"
 WORKBENCH = [(170, 170, 170), (0, 0, 0), (255, 255, 255), (102, 136, 187)]  # the four standard pens
@@ -85,12 +86,21 @@ def glow_icon() -> bytes:
     return b"FORM" + struct.pack(">I", len(body)) + body
 
 
+def drawer_data() -> bytes:
+    """NewWindow for the drawer's window, then its scroll position."""
+    window = struct.pack(">hhhhBBIIIIIIIhhHHH", 80, 60, 420, 220, 255, 255, 0, 0, 0, 0, 0, 0, 0,
+                         90, 40, 0xFFFF, 0xFFFF, 1)
+    return window + struct.pack(">ii", 0, 0)
+
+
 def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types: list[str],
                 stack: int) -> bytes:
     gadget = struct.pack(">IhhHHHHHIIIIIHI", 0, 0, 0, WIDTH, HEIGHT, 5, 3, 1, 1, 0, 0, 0, 0, 0, 1)
     disk = struct.pack(">HH", 0xE310, 1) + gadget
     disk += struct.pack(">BxIIIIIII", kind, int(default_tool is not None), int(bool(tool_types)),
-                        NO_ICON_POSITION, NO_ICON_POSITION, 0, 0, stack)
+                        NO_ICON_POSITION, NO_ICON_POSITION, int(kind == WBDRAWER), 0, stack)
+    if kind == WBDRAWER:
+        disk += drawer_data()
     header = struct.pack(">hhHHHIBBI", 0, 0, WIDTH, HEIGHT, DEPTH, 1, 3, 0, 0)
     out = disk + header + image
     if default_tool is not None:
@@ -100,14 +110,19 @@ def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types:
         for entry in tool_types:
             raw = entry.encode("iso-8859-1") + b"\0"
             out += struct.pack(">I", len(raw)) + raw
+    if kind == WBDRAWER:
+        out += struct.pack(">IH", 0, 0)  # OS 2 drawer flags and view mode: the defaults
     return out
 
 
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer"):
         raise SystemExit(__doc__)
     if sys.argv[1] == "repair":
         data = disk_object(WBPROJECT, planes(repair_pixel), b"C:IconX\0", [], 4096)
+    elif sys.argv[1] == "drawer":
+        rows = amigent_pixels()
+        data = disk_object(WBDRAWER, planes(lambda x, y: rows[y][x]), None, [], 0) + glow_icon()
     else:
         rows = amigent_pixels()
         data = disk_object(WBTOOL, planes(lambda x, y: rows[y][x]), None,
