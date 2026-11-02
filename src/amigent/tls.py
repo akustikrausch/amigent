@@ -16,6 +16,7 @@ import socket
 import ssl
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from . import machines, roster
@@ -104,3 +105,26 @@ def remember(host: str, certificate: bytes) -> Path:
     path = FOLDER / f"tls-{safe(host)}.pem"
     path.write_bytes(certificate)
     return path
+
+
+def provision(link, host: str, home: str) -> None:
+    """Hand amigentd (an open setup link) a certificate; keep the pin only if its TLS port
+    answers with it within 30 s. No openssl, no crypto: plain it stays, and we say so."""
+    made = make_certificate(host)
+    if not made:
+        print("No openssl on this PC, so the connection stays unencrypted.")
+        return
+    for_amiga, certificate = made
+    link.put("S:amigent-tls.pem", for_amiga)
+    link.put(f"{home}/amigent-tls.pem", for_amiga)
+    pin = remember(host, certificate)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            connect(host, link.port, 10).close()
+            print("Connections to amigentd are encrypted from now on.")
+            return
+        except OSError:
+            time.sleep(3)
+    pin.unlink()
+    print("amigentd did not open its TLS port; the connection stays unencrypted.")
