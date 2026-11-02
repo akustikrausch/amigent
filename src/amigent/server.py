@@ -672,7 +672,7 @@ def amiga_restart() -> str:
         with _screen_lock():
             screen.close()
         time.sleep(10)
-        if not wait_for_port(HOST, CTL_PORT, 300):
+        if not wait_for_port(HOST, SCREEN_PORT, 300):  # amigentd greets even before a key
             raise AmigaError("no answer after restart; amiga_power('cycle') may be needed")
     return "Amiga restarted"
 
@@ -692,7 +692,7 @@ def amiga_power(action: str) -> str:
             ctl.close()
             with _screen_lock():
                 screen.close()
-            attempts = power_cycle(HOST, CTL_PORT)
+            attempts = power_cycle(HOST, SCREEN_PORT)
         return f"Amiga is back after {attempts} power cycle(s)"
     set_power(action == "on")
     return f"power {action}"
