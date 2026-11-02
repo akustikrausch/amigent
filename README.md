@@ -11,14 +11,19 @@
 
 <p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
 
-Sit at your PC, tell Claude Code what you want, and it happens on your real Amiga.
-It opens a Shell, moves files around, looks at the screen, clicks the requester
-away, types into the tracker, puts the new game where it belongs and adds it to
-the start menu. No emulator. The real thing, over your LAN.
+Two ways to drive your real Amiga from the PC. No emulator, the real thing,
+over your LAN.
 
-And when you want the wheel back, say so. A window pops up on your desktop with
-the Amiga's screen live in it, your mouse and keyboard drive the machine, and
-files go over by drag and drop. Remote desktop, Amiga style.
+**1. Claude takes over, completely.** Tell Claude Code what you want and it
+happens on the Amiga. All of it: Shell, files, installing and updating software,
+settings, the start menu, and the screen with mouse and keyboard when a program
+wants clicking. It opens a Shell, moves files around, clicks the requester away,
+types into the tracker, puts the new game where it belongs and tidies up after.
+
+**2. You take over: remote desktop.** Amigent is a window on your PC with the
+Amiga's screen live in it. Your mouse and keyboard drive the machine, the Amiga
+keys sit in a side panel, and files go over to the folder you pick. Ask Claude
+for it, or start it from the Start menu like any other program.
 
     "check what's outdated on the Amiga"
     "the game in my Downloads folder: install it, sort it in, clean up"
