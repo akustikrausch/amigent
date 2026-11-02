@@ -27,8 +27,9 @@ any moment.
 ## Installation
 
 **1.** Copy [`amigentd`](amiga/bin/amigentd) to your Amiga, for example to
-`RAM:`. A browser, USB stick or SD card all work. Or take the archive with icon
-from the [releases](https://github.com/akustikrausch/amigent/releases).
+`RAM:`. A browser, USB stick or SD card all work, or the PC offers it on the
+network (see the [FAQ](docs/FAQ.md)). Or take the archive with icon from the
+[releases](https://github.com/akustikrausch/amigent/releases).
 
 **2.** Start it in a Shell, or double-click its icon:
 

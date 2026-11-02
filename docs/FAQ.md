@@ -4,6 +4,12 @@
 Check that `amigentd SETUP` is running, then give it the address by hand:
 `amigent-setup 192.168.1.50`. The search only covers your own /24.
 
+**How do I get amigentd onto the Amiga without a USB stick?**
+Run `amigent-setup --serve` on the PC. It prints an address; open it in the
+Amiga's browser and save `amigentd` to `RAM:`, or fetch it with wget as shown.
+Files saved from a browser may lack the execute bit: `Protect RAM:amigentd +e`.
+The first time, Windows may ask whether Python may accept connections.
+
 **What runs on the Amiga?**
 Only `amigentd`, started from `S:User-Startup`. It handles the screen, commands
 and files on one port. Older installs also had amigactld; it keeps working.

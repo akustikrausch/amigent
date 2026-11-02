@@ -18,7 +18,10 @@ on the Amiga.
 ## Installation by hand
 
 Copy [`amiga/bin/amigentd`](../amiga/bin/amigentd) to the Amiga, or unpack
-`amigent-1.0.0.lha` from the releases, and start it: double-click the icon, or
+`amigent-1.0.0.lha` from the releases. If the Amiga has a browser or wget but
+no other way in, `amigent-setup --serve` offers both builds on the network for
+30 minutes and prints the address to open. Under WSL it uses Windows Python
+for this, because the network does not reach servers inside WSL. Then start it: double-click the icon, or
 `amigentd SETUP` in a Shell (`amigentd.000 SETUP` on a 68000). Then on the PC:
 
 ```bash
@@ -101,6 +104,8 @@ interrupted copy.
   to disk first.
 - **System information.** The *i* button shows Kickstart and Workbench versions,
   CPU, FPU, memory, the network stack and the free space of each volume.
+
+![Choosing the target folder on the Amiga](screenshots/send.png)
 
 ![System information in the About window](screenshots/about.png)
 
