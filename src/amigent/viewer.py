@@ -4,7 +4,7 @@ Usage: amigent-viewer [HOST] [--port N] [--no-window] [--exit-when-closed]
        amigent-viewer HOST --install     Start menu and desktop entry on Windows
        amigent-viewer --uninstall
 
-HOST defaults to AMIGENT_HOST. Inside Claude Code the amiga_viewer tool opens
+HOST defaults to AMIGENT_HOST. Through MCP, the amiga_viewer tool opens
 the same window from the running Amigent server, and a second start of the
 viewer opens the window of the one that is already running.
 """
@@ -163,7 +163,7 @@ class Viewer:
 
     One worker thread owns the screen connection, so input never races a frame.
     lock() is held around each screen request; the MCP server passes its own so
-    Claude and the viewer can share one connection and one picture.
+    the AI agent and the viewer can share one connection and one picture.
     """
 
     def __init__(self, host: str, screen: Amigentd | None = None, lock=None,

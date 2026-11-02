@@ -18,7 +18,7 @@ Versions follow [semver](https://semver.org). The number lives in
 
 The first full release. Everything from the 0.x line, now considered stable:
 
-- **Claude at the keyboard**: MCP server with Shell, files, screen, mouse and
+- **Control by AI**: MCP server with Shell, files, screen, mouse and
   keys on a real Amiga over the LAN, through `amigactld` and our own `amigentd`.
 - **You at the keyboard**: Amigent, the live viewer with mouse, keyboard, Amiga
   shortcuts, file upload and the machine's details, in twelve languages.
@@ -49,7 +49,7 @@ The first full release. Everything from the 0.x line, now considered stable:
   into the Start menu, on the desktop and into Installed apps, with an
   uninstaller. Starts without a console, quits when its window closes.
 - A second start opens the window of the viewer that already runs, including
-  the one Claude opened.
+  the one the AI agent opened.
 - New look: Workbench grey around a dimmed stage, a toolbar for the main
   actions, the side panel as a slice of Amiga keyboard with LED modifiers.
 - Own icon.
@@ -58,7 +58,7 @@ The first full release. Everything from the 0.x line, now considered stable:
 ## 0.2.0 (2026-11-02)
 
 - The viewer: live screen, mouse and keyboard, Amiga shortcuts, file upload
-  with a folder picker. Opened by Claude through `amiga_viewer`, or with
+  with a folder picker. Opened by the AI agent through `amiga_viewer`, or with
   `amigent-viewer`.
 
 ## 0.1.0 (2026-11-02)

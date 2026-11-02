@@ -1,7 +1,7 @@
 [project]
 name = "amigent"
 dynamic = ["version"]
-description = "Claude at the keyboard of your real Amiga"
+description = "Complete remote control for a real Amiga, by AI or by hand"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

@@ -6,17 +6,19 @@
   \____|__  /|__|_|  /|__| \___  /  \___  >|___|  / |__|
           \/       \/     /_____/       \/      \/
 
-    remote control for a real Amiga, by Claude Code or by hand
+     complete remote control for a real Amiga, by AI or by hand
 ```
 
 <p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
 
-Amigent connects a PC to a real Amiga over the local network. It has two parts:
+Amigent lets you remote-control a real Amiga completely from your PC, either
+through an AI agent or by hand. It works over the local network and has two parts:
 
-1. **Control by Claude Code.** An MCP server gives Claude Code full access to the
-   Amiga: Shell commands, files, installing and updating software, settings and
-   menus, and the screen with mouse and keyboard for programs that need it.
-2. **Remote desktop for manual control.** A window on the PC shows the Amiga's
+1. **Control by AI.** An MCP server gives an AI agent such as Claude Code or
+   Codex full access to the Amiga: Shell commands, files, installing and updating
+   software, settings and menus, and the screen with mouse and keyboard for
+   programs that need it. Any agent that supports MCP can use it.
+2. **Remote desktop for control by hand.** A window on the PC shows the Amiga's
    screen live. You use it with your own mouse and keyboard, send Amiga key
    combinations from a side panel and copy files to a folder of your choice.
 
@@ -30,8 +32,10 @@ Amiga: AmigaOS 3.x, a 68040 or faster (for example a PiStorm), an RTG graphics
 card, a TCP/IP stack such as Roadshow, and a network connection. A plipbox on the
 parallel port is enough.
 
-PC: Python 3.10 or newer and [Claude Code](https://claude.com/claude-code). The
-remote desktop uses Edge or Chrome.
+PC: Python 3.10 or newer, and an AI agent with MCP support, for example
+[Claude Code](https://claude.com/claude-code) or
+[Codex](https://github.com/openai/codex). The remote desktop uses Edge or Chrome
+and works without an AI agent.
 
 ## Installation
 
@@ -44,16 +48,16 @@ Any way works: browser, USB stick, SD card, null modem cable.
 
     RAM:amigentd SETUP
 
-**3. Let Claude Code do the rest**
+**3. Let your AI agent do the rest**
 
-Paste this into Claude Code:
+Paste this into your AI agent:
 
     Install Amigent from https://github.com/akustikrausch/amigent for me.
     Clone it, run pip install -e . in it, then run amigent-setup. It finds my
-    Amiga by itself and prints the address. Register the MCP server with
-    claude mcp add amigent -e AMIGENT_HOST=<address> -- amigent-server
-    If I'm on Windows, also run amigent-viewer <address> --install.
-    Tell me to restart Claude Code when you're done.
+    Amiga by itself and prints the address. Register the MCP server "amigent"
+    with the command amigent-server and the environment variable
+    AMIGENT_HOST=<address>. If I'm on Windows, also run
+    amigent-viewer <address> --install. Tell me if you need to be restarted.
 
 `amigent-setup` looks for the Amiga on the local network, downloads the current
 [amigactld](https://github.com/tbdye/amigactl) from its project page, copies both
@@ -70,13 +74,22 @@ pip install -e .
 amigent-setup 192.168.1.50
 ```
 
+Then register the MCP server with your agent, for example:
+
 ```bash
 claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
 ```
 
-## Control by Claude Code
+```bash
+codex mcp add amigent --env AMIGENT_HOST=192.168.1.50 -- amigent-server
+```
 
-Claude Code gets these tools:
+Other agents need the command `amigent-server` and the environment variable
+`AMIGENT_HOST`.
+
+## Control by AI
+
+The AI agent gets these tools:
 
 | tool | purpose |
 |---|---|
@@ -102,7 +115,7 @@ For large files, `python -m amigent.transfer` can resume an interrupted copy.
 
 ## Remote desktop
 
-Ask Claude Code to open it, or start **Amigent** from the Start menu.
+Ask the AI agent to open it, or start **Amigent** from the Start menu.
 
 ![Amigent with a Workbench screen and the keyboard panel](docs/screenshots/viewer.png)
 
@@ -135,7 +148,7 @@ Ask Claude Code to open it, or start **Amigent** from the Start menu.
 
 ![System information in the About window](docs/screenshots/about.png)
 
-While the window is open, Claude Code can keep working, and its actions show up
+While the window is open, the AI agent can keep working, and its actions show up
 in the window.
 
 ### Windows program
@@ -159,7 +172,7 @@ On other systems, `amigent-viewer 192.168.1.50` opens the window directly.
 Two small services run on the Amiga, one server on the PC.
 
 ```
-  Claude Code --- MCP --- amigent-server ---+--- :6800 --- amigactld   commands, files
+  AI agent ---- MCP ---- amigent-server ---+--- :6800 --- amigactld   commands, files
                                 |           +--- :6801 --- amigentd    screen, mouse, keys
   browser window --- :6810 -----+  (remote desktop, local only)
 ```

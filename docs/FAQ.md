@@ -4,7 +4,7 @@
 Check that `amigentd SETUP` is running, then give it the address by hand:
 `amigent-setup 192.168.1.50`. The search only covers your own /24.
 
-**Claude says amigactld isn't answering.**
+**The AI agent says amigactld isn't answering.**
 It does one command at a time. If something long is running, it waits. Long work
 belongs in `amiga_job`, which runs at low priority and keeps the line free.
 
@@ -35,7 +35,7 @@ link free.
 hardware won't be in there.
 
 **The viewer window doesn't show up.**
-Claude prints the address as well. Open it in any browser on the same PC. Under
+The AI agent gets the address as well. Open it in any browser on the same PC. Under
 WSL the window is started on the Windows side, which needs Edge (it's always
 there) and localhost forwarding, which WSL does by default.
 
@@ -52,9 +52,10 @@ or use the sticky Ctrl button.
 That's on purpose. The Amiga's pointer is a sprite and not part of the screen
 picture, and your own pointer reacts without waiting for the network.
 
-**Can I run `amigent-viewer` while Claude is working?**
-Better not. Both would fight over the screen service. While Claude Code is open,
-ask Claude for the viewer instead: it shares one connection with Claude.
+**Can I run `amigent-viewer` while the AI agent is working?**
+It's fine: a second start opens the window of the viewer that already runs. If
+the agent is connected but hasn't opened the viewer yet, better ask the agent to
+open it, so both share one connection to the screen service.
 
 **Keys in a game don't work.**
 Switch the keyboard to *Direct*. Text mode presses and releases every character

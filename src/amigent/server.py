@@ -315,7 +315,7 @@ def amiga_viewer() -> str:
     """Open a live window of the Amiga screen on the user's desktop for manual control.
 
     Use when the user wants to see the Amiga or drive it themselves: mouse,
-    keyboard, Amiga key shortcuts, file upload. Claude's own screenshots and
+    keyboard, Amiga key shortcuts, file upload. Your own screenshots and
     clicks keep working meanwhile and show up in the window.
     """
     global viewer

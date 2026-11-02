@@ -35,7 +35,7 @@ Execute T:amigent-modules
 Delete >NIL: T:amigent-modules QUIET
 Search >NIL: S:Startup-Sequence "S:User-Startup" QUIET
 If WARN
-  RequestChoice >NIL: "amigent" "Startup-Sequence ruft S:User-Startup*Nnicht mehr auf. Bitte Claude Bescheid geben." "OK"
+  RequestChoice >NIL: "amigent" "Startup-Sequence ruft S:User-Startup*Nnicht mehr auf. Bitte der KI Bescheid geben." "OK"
 Else
   RequestChoice >NIL: "amigent" "amigent ist repariert.*NBitte den Amiga neu starten." "OK"
 EndIf
