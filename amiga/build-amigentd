@@ -1,3 +1,6 @@
+.KEY SOURCE/K,TO/K
+.DEF SOURCE amigentd.c
+.DEF TO amigentd
 ; Builds amigentd on the Amiga with the vbcc from AmiKit's DevPack
 FailAt 21
 Stack 65536
@@ -10,4 +13,4 @@ Assign AGNET: "Stuff:DevPack/SDK/RoadShow SDK 1.5/netinclude"
 Assign AGP96: "Stuff:DevPack/SDK/P96/P96 SDK"
 Path VBCC:bin ADD
 CD Stuff:amigent
-VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=68040 -IAGNET: -o amigentd amigentd.c -lamiga
+VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=68040 -IAGNET: -o <TO> <SOURCE> -lamiga

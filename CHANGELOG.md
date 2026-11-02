@@ -3,6 +3,17 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.0.1 (2026-11-02)
+
+- `amigentd` written from scratch, from the protocol alone. Same wire format, so
+  nothing changes for clients.
+- Chipset screens are read through their palette, so games and demos on a
+  native screen show up in the picture too.
+- `amigentd PORT <n>` runs a second copy on another port, next to the first.
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) spells out the fine print: tile grid,
+  colour bits, runs, takeover, timeouts, what SETUP does when something fails.
+- `amiga/build-amigentd` takes `SOURCE` and `TO`.
+
 ## 1.0.0 (2026-11-02)
 
 The first full release. Everything from the 0.x line, now considered stable:

@@ -47,7 +47,7 @@ Three steps, and you only do the first two by hand.
 
 **1. Get one file to your Amiga**
 
-[`amiga/bin/amigentd`](amiga/bin/amigentd). Eight kilobytes. Browser, USB stick,
+[`amiga/bin/amigentd`](amiga/bin/amigentd). Ten kilobytes. Browser, USB stick,
 SD card, null modem, whatever you've got. Put it in `RAM:`.
 
 **2. Start it from a Shell**
