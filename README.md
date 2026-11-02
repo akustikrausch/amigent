@@ -97,6 +97,8 @@ own window. Or skip Claude and start **Amigent** from the Start menu.
 - **the rest.** Fit to window or 1:1, full screen (there the Windows keys become
   the Amiga keys), screenshot to PNG, and a restart button that writes the disks
   first.
+- **about.** The *i* in the toolbar shows the version, the Amiga you're on, and
+  where to read what's new.
 
 Claude keeps working while the window is open, and you see every click it makes.
 
@@ -206,7 +208,7 @@ And to all Amigans out there who still believe.
 ## versions
 
 What changed when is in the [changelog](CHANGELOG.md). Releases are tagged
-`v0.3.0` and so on, `amigent-viewer --version` tells you what you have.
+`v0.4.0` and so on, `amigent-viewer --version` tells you what you have.
 
 ## license
 

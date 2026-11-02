@@ -24,6 +24,22 @@
     screenshot: "Bildschirmfoto speichern",
     restart: "Amiga neu starten…",
     panel: "Tastatur-Leiste ein/aus",
+    about: "Über Amigent",
+    about_text: "Dein echter Amiga, live auf diesem PC, mit Maus und Tastatur. Claude kann ihn auch bedienen, und du siehst jeden Klick.",
+    about_amiga: "Amiga",
+    about_screen: "Bildschirm",
+    about_by: "Von",
+    about_license: "Lizenz",
+    about_thanks: "Dank an",
+    thanks_text: "tbdye für amigactld (GPLv3), Volker Barthelmann für vbcc",
+    about_tips: "Gut zu wissen",
+    tip_paste: "Ctrl+V tippt die Zwischenablage des PCs auf dem Amiga.",
+    tip_keys: "Im Vollbild sind die Windows-Tasten die Amiga-Tasten.",
+    tip_lock: "Doppelklick auf eine Umschalttaste rastet sie ein, ihre LED wird lang.",
+    tip_drop: "Dateien auf den Bildschirm ziehen, um sie zu senden.",
+    about_project: "Projektseite",
+    about_changes: "Was ist neu",
+    close: "Schließen",
     drop_here: "Loslassen, um es zum Amiga zu senden",
     screens: "Bildschirme",
     wb_front: "Workbench vorn",
@@ -83,6 +99,7 @@
     screenshot: "Save screenshot",
     restart: "Restart Amiga…",
     panel: "Show or hide the keyboard panel",
+    about: "About Amigent",
     lamiga: "Left Amiga",
     ramiga: "Right Amiga",
     mod_tip: "Click: next key only. Double-click: lock.",
@@ -184,7 +201,11 @@
       case "hello":
         host = m.host;
         document.title = `Amigent · ${host}`;
-        if (m.version) $("st-version").textContent = `amigent ${m.version}`;
+        if (m.version) {
+          $("st-version").textContent = `amigent ${m.version}`;
+          $("about-version").textContent = `Version ${m.version}`;
+        }
+        $("about-host").textContent = host;
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
         showState();
@@ -198,6 +219,7 @@
         break;
       case "stats":
         $("st-size").textContent = `${m.w}×${m.h}`;
+        $("about-screen").textContent = `${m.w} × ${m.h}`;
         $("st-rate").textContent = `${m.kbps.toFixed(1)} KB/s`;
         $("st-rtt").textContent = `${m.rtt.toFixed(0)} ms`;
         break;
@@ -569,6 +591,9 @@
   }
 
   $("panel-toggle").addEventListener("click", () => setPanel(document.body.classList.contains("no-panel")));
+
+  $("about").addEventListener("click", () => $("about-dialog").showModal());
+  $("about-dialog").addEventListener("close", () => canvas.focus());
 
   // ---------------------------------------------------------------- restart
 

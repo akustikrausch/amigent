@@ -328,6 +328,20 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .buttons button { min-width: 96px; }
 
+.about .about-head { display: flex; align-items: center; gap: 16px; }
+.about h3 { font-size: 20px; }
+.about h4 { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.about dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+.about dt { color: var(--muted); }
+.about dd { margin: 0; }
+.about .tips { margin: 0; padding-left: 18px; color: var(--text); }
+.about .tips li { margin: 2px 0; }
+.about .buttons { align-items: center; }
+.about .links { margin-right: auto; display: flex; gap: 16px; }
+.about .link { color: #174ea6; text-decoration: none; font-weight: 500; }
+.about .link:hover { text-decoration: underline; }
+.about .link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+
 /* toasts */
 
 #toasts {

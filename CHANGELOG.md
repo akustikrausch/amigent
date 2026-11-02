@@ -3,6 +3,12 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 0.4.0 (2026-11-02)
+
+- About Amigent in the toolbar: version, connected Amiga, credits, a few tips,
+  links to the project page and this changelog.
+- Shell and mouse buttons in the panel no longer wrap.
+
 ## 0.3.0 (2026-11-02)
 
 - Amigent as a Windows program: `amigent-viewer <address> --install` puts it
