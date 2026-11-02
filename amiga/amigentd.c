@@ -25,6 +25,7 @@
 #include <devices/inputevent.h>
 #include <devices/timer.h>
 #include <graphics/gfx.h>
+#include <graphics/gfxbase.h>
 #include <graphics/view.h>
 #include <graphics/modeid.h>
 #include <graphics/clip.h>
@@ -555,12 +556,58 @@ static void ham_row(const UBYTE *pens, LONG width, ULONG depth, const UBYTE *pal
     }
 }
 
+/* ---- OS 2.04 ------------------------------------------------------------ */
+
+/* Kickstart 2.04 (V37) has no GetBitMapAttr, GetRGB32 or AllocBitMap. It has
+ * no graphics cards either, so every bitmap is the classic planar kind and the
+ * old ways do: Depth from the struct, colours from GetRGB4, pens by hand. */
+static BOOL os39;  /* graphics.library 39 or newer */
+
+static ULONG bm_depth(struct BitMap *bm)
+{
+    return os39 ? GetBitMapAttr(bm, BMA_DEPTH) : bm->Depth;
+}
+
+/* n colours from first as 32 bit triples, GetRGB32 style. 4 bits a gun on
+ * V37: 0xA becomes 0xAAAAAAAA, the same as V39 reports for an OCS palette. */
+static void get_rgb32(struct ColorMap *cm, ULONG first, ULONG n, ULONG *out)
+{
+    ULONG i;
+
+    if (os39) {
+        GetRGB32(cm, first, n, out);
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        ULONG v = GetRGB4(cm, first + i);
+        *out++ = ((v >> 8) & 15) * 0x11111111UL;
+        *out++ = ((v >> 4) & 15) * 0x11111111UL;
+        *out++ = (v & 15) * 0x11111111UL;
+    }
+}
+
+/* Pens of one row straight from the planes, for V37 where ReadPixelLine8
+ * would want an AllocBitMap. Byte at a time; slow, but only Kickstart 2 pays. */
+static void pens_by_hand(struct BitMap *bm, LONG x0, LONG y, LONG width, ULONG depth, UBYTE *pens)
+{
+    LONG x, p;
+
+    memset(pens, 0, width);
+    for (p = 0; p < (LONG)depth; p++) {
+        const UBYTE *row = bm->Planes[p] + y * bm->BytesPerRow;
+        UBYTE bit = 1 << p;
+        for (x = 0; x < width; x++)
+            if (row[(x0 + x) >> 3] & (0x80 >> ((x0 + x) & 7)))
+                pens[x] |= bit;
+    }
+}
+
 /* Chipset screens: pens through the palette, HAM6 and HAM8 decoded along each row. */
 static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
 {
-    struct BitMap *bm = scr->RastPort.BitMap, *line;
+    struct BitMap *bm = scr->RastPort.BitMap, *line = NULL;
     struct RastPort tmp;
-    ULONG depth = GetBitMapAttr(bm, BMA_DEPTH), colours, i;
+    ULONG depth = bm_depth(bm), colours, i;
     ULONG *table;
     UBYTE pal[3 * 256], *pens;
     BOOL ham = (GetVPModeID(&scr->ViewPort) & HAM_KEY) && (depth == 6 || depth == 8);
@@ -573,14 +620,16 @@ static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UB
         colours = scr->ViewPort.ColorMap->Count;
     table = AllocVec(colours * 3 * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
     pens = AllocVec((width + 15) & ~15, MEMF_ANY);
-    line = AllocBitMap((width + 15) & ~15, 1, depth, 0, NULL);
-    if (!table || !pens || !line) {
+    if (os39)
+        line = AllocBitMap((width + 15) & ~15, 1, depth, 0, NULL);
+    if (!table || !pens || (os39 && !line)) {
         FreeVec(table);
         FreeVec(pens);
-        FreeBitMap(line);
+        if (line)
+            FreeBitMap(line);
         return FALSE;
     }
-    GetRGB32(scr->ViewPort.ColorMap, 0, colours, table);
+    get_rgb32(scr->ViewPort.ColorMap, 0, colours, table);
     memset(pal, 0, sizeof(pal));
     for (i = 0; i < 3 * colours; i++)
         pal[i] = table[i] >> 24;
@@ -592,7 +641,10 @@ static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UB
     tmp.BitMap = line;
     for (y = 0; y < h; y++) {
         UBYTE *dst = out + y * w * 3;
-        ReadPixelLine8(&scr->RastPort, from, y0 + y, width, pens, &tmp);
+        if (os39)
+            ReadPixelLine8(&scr->RastPort, from, y0 + y, width, pens, &tmp);
+        else
+            pens_by_hand(bm, from, y0 + y, width, depth, pens);
         if (!ham) {
             for (i = 0; i < (ULONG)w; i++, dst += 3) {
                 const UBYTE *c = pal + 3 * pens[i];
@@ -602,7 +654,8 @@ static BOOL read_planar(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UB
             ham_row(pens, width, depth, pal, dst, x0 - from);
         }
     }
-    FreeBitMap(line);
+    if (line)
+        FreeBitMap(line);
     FreeVec(pens);
     FreeVec(table);
     return TRUE;
@@ -922,17 +975,17 @@ static void free_planar(void)
 static BOOL planar_ok(struct Screen *scr)
 {
     struct BitMap *bm = scr->RastPort.BitMap;
-    ULONG depth = GetBitMapAttr(bm, BMA_DEPTH);
+    ULONG depth = bm_depth(bm);
 
     return !is_rtg(scr) && depth >= 1 && depth <= 8 &&
-           (GetBitMapAttr(bm, BMA_FLAGS) & BMF_STANDARD);
+           (!os39 || (GetBitMapAttr(bm, BMA_FLAGS) & BMF_STANDARD));
 }
 
 /* New size, depth or screen: start from scratch, the client gets it all. */
 static BOOL fit_planar(struct Screen *scr)
 {
     struct BitMap *bm = scr->RastPort.BitMap;
-    LONG w = scr->Width, h = scr->Height, depth = GetBitMapAttr(bm, BMA_DEPTH);
+    LONG w = scr->Width, h = scr->Height, depth = bm_depth(bm);
 
     if (pref && w == pw && h == ph && depth == pdepth && bm == pbm)
         return TRUE;
@@ -1260,7 +1313,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         colours = 32;
     if (colours > scr->ViewPort.ColorMap->Count)
         colours = scr->ViewPort.ColorMap->Count;
-    GetRGB32(scr->ViewPort.ColorMap, 0, colours, prgb);
+    get_rgb32(scr->ViewPort.ColorMap, 0, colours, prgb);
     for (i = 0; i < 3 * colours; i++)
         if ((UBYTE)(prgb[i] >> 24) != ppal[i])
             break;
@@ -1744,7 +1797,7 @@ static BOOL screens(void)
         be32(b, (ULONG)s);
         be16(b + 4, s->Width);
         be16(b + 6, s->Height);
-        be16(b + 8, GetBitMapAttr(s->RastPort.BitMap, BMA_DEPTH));
+        be16(b + 8, bm_depth(s->RastPort.BitMap));
         be16(b + 10, flags);
         be16(b + 12, n);
         t_add(&t, b, 14);
@@ -2867,21 +2920,45 @@ static void t_version(struct text *t, const char *key, UWORD v, UWORD r)
     t_chr(t, '\n');
 }
 
+/* MEMF_TOTAL came with V39; before, the memory list knows. */
+static ULONG mem_total(ULONG kind)
+{
+    struct MemHeader *mh;
+    ULONG n = 0;
+
+    if (SysBase->LibNode.lib_Version >= 39)
+        return AvailMem(kind | MEMF_TOTAL);
+    Forbid();
+    for (mh = (struct MemHeader *)SysBase->MemList.lh_Head; mh->mh_Node.ln_Succ;
+         mh = (struct MemHeader *)mh->mh_Node.ln_Succ)
+        if (mh->mh_Attributes & kind)
+            n += (ULONG)mh->mh_Upper - (ULONG)mh->mh_Lower;
+    Permit();
+    return n;
+}
+
 static BOOL c_sysinfo(struct link *l)
 {
     struct Library *SocketBase = l->base;
     struct text t = {0};
 
     t_pair(&t, "chip_free", AvailMem(MEMF_CHIP));
-    t_pair(&t, "chip_total", AvailMem(MEMF_CHIP | MEMF_TOTAL));
+    t_pair(&t, "chip_total", mem_total(MEMF_CHIP));
     t_pair(&t, "chip_largest", AvailMem(MEMF_CHIP | MEMF_LARGEST));
     t_pair(&t, "fast_free", AvailMem(MEMF_FAST));
-    t_pair(&t, "fast_total", AvailMem(MEMF_FAST | MEMF_TOTAL));
+    t_pair(&t, "fast_total", mem_total(MEMF_FAST));
     t_pair(&t, "fast_largest", AvailMem(MEMF_FAST | MEMF_LARGEST));
     t_pair(&t, "total_free", AvailMem(MEMF_ANY));
     t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
     t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
     t_version(&t, "bsdsocket", SocketBase->lib_Version, SocketBase->lib_Revision);
+    t_version(&t, "graphics", GfxBase->LibNode.lib_Version, GfxBase->LibNode.lib_Revision);
+    {
+        UWORD f = SysBase->AttnFlags;
+        t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
+                          f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
+        t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
+    }
     return c_text(l, &t);
 }
 
@@ -4196,13 +4273,14 @@ int main(int argc, char **argv)
     for (i = 0; i < PENDING; i++)
         pend[i].fd = -1;
     InitSemaphore(&picture);
-    IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
-    GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
+    IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
+    GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     KeymapBase = OpenLibrary("keymap.library", 37);
     if (!IntuitionBase || !GfxBase || !KeymapBase) {
-        complain("needs OS 3.0 or newer", 0);
+        complain("needs OS 2.04 or newer", 0);
         goto out;
     }
+    os39 = GfxBase->LibNode.lib_Version >= 39;
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;

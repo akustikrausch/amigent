@@ -26,7 +26,9 @@ first, as at boot.
 
 What it needs: a 68020 or better for `bin/amigentd`, any 68000 for
 `bin/amigentd.000` (built with `build-amigentd CPU 68000 TO amigentd.000`; no
-68020 instructions, no word or long access at odd addresses), OS 3.0 or newer, and a TCP stack with
+68020 instructions, no word or long access at odd addresses), and for a Vampire
+`bin/amigentd.080`, built by vbcc for the 68080 (`CPU 68080`); that one is not
+tried on a real Vampire yet, `bin/amigentd` runs there as well, OS 3.0 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read
 through `graphics.library`, `cybergraphics.library` is only used when it is there. AmiSSL 5 is
 only needed for [TLS](#tls).
@@ -429,7 +431,9 @@ separated by tabs.
 - SYSINFO has `key=value` lines: `chip_free`, `chip_total`, `chip_largest`,
   `fast_free`, `fast_total`, `fast_largest`, `total_free` in bytes, and
   `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
-  as `47.115`) and `bsdsocket` as `version.revision`.
+  as `47.115`), `bsdsocket` and `graphics` as `version.revision`, `cpu` (68000,
+  68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows) and
+  `attn_flags`, exec's AttnFlags as a number, for bits newer than that list.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 
