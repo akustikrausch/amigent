@@ -10,6 +10,8 @@ from PIL import Image
 
 CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = range(1, 8)
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
+CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
+RGB_LIMIT = 512  # FRAME_RGB answers regions up to this many pixels on each side
 
 RAWKEYS = {
     "space": 0x40, "backspace": 0x41, "tab": 0x42, "enter": 0x43, "return": 0x44,
@@ -57,6 +59,7 @@ class Amigentd:
         self._frame: Image.Image | None = None
         self._buttons = 0
         self._last_used = 0.0
+        self.protocol = 0
         self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
 
     def connect(self) -> None:
@@ -68,6 +71,7 @@ class Amigentd:
             hello = self._exact(8)
             if hello[:4] != b"AMGT":
                 raise AmigentdError(f"unexpected greeting {hello!r}")
+            self.protocol = struct.unpack(">H", hello[4:6])[0]
             size = self._info()
         except OSError as e:
             self.close()
@@ -236,6 +240,111 @@ class Amigentd:
         self.move(x2, y2)
         time.sleep(0.05)
         self.button(button, False)
+
+    # protocol 2: screens, true colour, relative mouse, the GUI as data
+
+    def _need(self, version: int) -> None:
+        if not self._sock:
+            self.connect()
+        if self.protocol < version:
+            raise AmigentdError(f"amigentd on the Amiga speaks protocol {self.protocol}, this needs "
+                                f"{version}; install the current amigentd")
+
+    def _text(self, cmd: int) -> list[list[str]]:
+        def call():
+            self._send(cmd)
+            size = struct.unpack(">I", self._exact(4))[0]
+            return self._exact(size).decode("iso-8859-1")
+
+        self._need(2)
+        return [line.split("\t") for line in self._retry(call).splitlines() if line]
+
+    def screens(self) -> list[dict]:
+        """All Intuition screens, front to back."""
+        def call():
+            self._send(CMD_SCREENS)
+            found = []
+            for _ in range(struct.unpack(">H", self._exact(2))[0]):
+                handle, w, h, depth, flags, size = struct.unpack(">IHHHHH", self._exact(14))
+                found.append({"handle": handle, "width": w, "height": h, "depth": depth,
+                              "front": bool(flags & 1), "workbench": bool(flags & 2),
+                              "rtg": bool(flags & 4), "ham": bool(flags & 8),
+                              "title": self._exact(size).decode("iso-8859-1")})
+            return found
+
+        self._need(2)
+        return self._retry(call)
+
+    def screen_to_front(self, handle: int) -> bool:
+        self._need(2)
+
+        def call():
+            self._send(CMD_SCREEN_FRONT, 0, handle >> 16 & 0xFFFF, handle & 0xFFFF)
+            return self._exact(1) == b"\0"
+
+        return self._retry(call)
+
+    def capture_rgb(self, x: int, y: int, w: int, h: int) -> Image.Image:
+        """A region in full colour, assembled from pieces the Amiga is willing to send."""
+        self._need(2)
+        picture = Image.new("RGB", (w, h))
+        for top in range(0, h, RGB_LIMIT):
+            for left in range(0, w, RGB_LIMIT):
+                pw, ph = min(RGB_LIMIT, w - left), min(RGB_LIMIT, h - top)
+
+                def call():
+                    self._send(CMD_FRAME_RGB, 0, x + left, y + top, pw, ph)
+                    gw, gh = struct.unpack(">HH", self._exact(4))
+                    return gw, gh, self._exact(gw * gh * 3)
+
+                gw, gh, data = self._retry(call)
+                if gw and gh:
+                    picture.paste(Image.frombytes("RGB", (gw, gh), data), (left, top))
+        return picture
+
+    def move_relative(self, dx: int, dy: int) -> None:
+        """Mouse movement as deltas, for programs that ignore where the pointer is put."""
+        self._need(2)
+        self._ok(CMD_MOVE_REL, 0, dx & 0xFFFF, dy & 0xFFFF)
+
+    def ui_tree(self) -> list[dict]:
+        """Front screen, its windows and their gadgets, with screen coordinates."""
+        items = []
+        for f in self._text(CMD_UITREE):
+            if f[0] == "S" and len(f) >= 5:
+                items.append({"kind": "screen", "handle": int(f[1], 0), "width": int(f[2]),
+                              "height": int(f[3]), "title": f[4]})
+            elif f[0] == "W" and len(f) >= 8:
+                items.append({"kind": "window", "id": f[1], "x": int(f[2]), "y": int(f[3]),
+                              "w": int(f[4]), "h": int(f[5]), "active": "a" in f[6],
+                              "title": f[7]})
+            elif f[0] == "G" and len(f) >= 10:
+                items.append({"kind": "gadget", "window": f[1], "id": f[2], "x": int(f[3]),
+                              "y": int(f[4]), "w": int(f[5]), "h": int(f[6]), "type": f[7],
+                              "disabled": "d" in f[8], "selected": "s" in f[8], "label": f[9]})
+        return items
+
+    def menus(self) -> list[dict]:
+        """Menu strip of the active window with the boxes where titles and items appear."""
+        items = []
+        for f in self._text(CMD_MENUS):
+            kind = {"M": "menu", "I": "item", "U": "sub"}.get(f[0])
+            if not kind:
+                continue
+            index = {"M": 2, "I": 3, "U": 4}[f[0]]
+            if len(f) < index + (4 if kind == "menu" else 6):
+                continue
+            path = [int(v) for v in f[1:index]]
+            x, y, w, h = (int(v) for v in f[index:index + 4])
+            flags = f[index + 4]
+            entry = {"kind": kind, "path": path, "x": x, "y": y, "w": w, "h": h,
+                     "enabled": "e" in flags, "checked": "c" in flags}
+            if kind == "menu":
+                entry["text"] = f[index + 5]
+            else:
+                entry["key"], entry["text"] = f[index + 5], f[index + 6]
+            items.append(entry)
+        return items
 
     def type_text(self, text: str) -> None:
         for ch in text:

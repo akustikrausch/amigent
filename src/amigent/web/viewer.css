@@ -73,6 +73,20 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .state.bad { color: #7d1712; }
 
 .actions { display: flex; gap: 8px; margin-left: auto; }
+.screens {
+  font: inherit;
+  max-width: 260px;
+  min-height: 30px;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+}
+.screens:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wide-row { grid-column: 1 / -1; }
+#rel-mouse { padding-left: 18px; }
+#rel-mouse::before { top: 50%; margin-top: -1.5px; }
 .tools { display: flex; align-items: center; gap: 2px; }
 .sep { width: 1px; height: 20px; margin: 0 6px; background: var(--line); }
 

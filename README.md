@@ -97,9 +97,17 @@ The AI agent gets these tools:
 | `amiga_list`, `amiga_read_text`, `amiga_write_text` | read directories and files |
 | `amiga_put`, `amiga_get` | copy files and directory trees in both directions |
 | `amiga_mkdir`, `amiga_move`, `amiga_delete` | manage files |
-| `amiga_screenshot` | look at the screen or a part of it |
+| `amiga_screenshot` | look at the screen or a part of it, 256 colours |
+| `amiga_screenshot_color` | a region in full colour, for small text and exact colours |
+| `amiga_wait_change` | wait until something on the screen changes, without sending pictures |
+| `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
+| `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label |
+| `amiga_menus`, `amiga_menu_select` | menus as text, pick an item by name |
 | `amiga_click`, `amiga_drag` | mouse, including menus and icons |
 | `amiga_type`, `amiga_key` | keyboard, through the Amiga's keymap |
+| `amiga_mouse_relative` | mouse movement for games that ignore the pointer position |
+| `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
+| `amiga_break` | Ctrl-C (or D, E, F) for a running command |
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions |
 | `amiga_viewer` | open the remote desktop |
 | `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up |
@@ -121,7 +129,11 @@ Ask the AI agent to open it, or start **Amigent** from the Start menu.
 
 - **Screen.** Only the 64x64 pixel tiles that changed are transferred, the area
   around the mouse pointer first. Colours are reduced to 256.
-- **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel. In
+- **Screens.** A list in the toolbar shows all open screens and brings the one
+  you pick to the front.
+- **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel.
+  *Mouse for games* captures the mouse and sends its movement instead of a
+  position, which games need; Esc releases it. In
   text mode, characters are typed through the Amiga's keymap, so umlauts and
   AltGr characters arrive correctly. Direct mode sends key positions and keeps
   keys pressed for as long as you hold them, which games need.

@@ -88,5 +88,10 @@
  "about_volumes": "Svazky",
  "mem_line": "Chip {chip}, Fast {fast} volné",
  "free_of": "{free} z {size} volné",
- "status_free": "{size} volné"
+ "status_free": "{size} volné",
+ "screen_select": "Obrazovka",
+ "rel_mouse": "Myš pro hry",
+ "rel_mouse_tip": "Zachytí myš a posílá její pohyb, pro hry. Esc ji uvolní.",
+ "rel_mouse_on": "Myš zachycena. Esc ji uvolní.",
+ "not_supported": "Není možné"
 }

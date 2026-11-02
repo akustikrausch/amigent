@@ -135,7 +135,7 @@ def test_every_language_has_every_text():
     used = set(re.findall(r'data-i18n(?:-title|-label|-aria)?="([a-z_]+)"', (web / "index.html").read_text()))
     script = (web / "viewer.js").read_text()
     used |= set(re.findall(r'\bt\("([a-z_]+)"', script))
-    used |= {"restarting", "restart_failed"}  # sent by the server
+    used |= {"restarting", "restart_failed", "not_supported"}  # sent by the server
     assert used <= english.keys(), used - english.keys()
     codes = set(re.findall(r"\b([a-z]{2}): \"", script.split("const LANGUAGES")[1].split("};")[0]))
     for code in codes:

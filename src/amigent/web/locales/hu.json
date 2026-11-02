@@ -88,5 +88,10 @@
  "about_volumes": "Kötetek",
  "mem_line": "Chip {chip}, Fast {fast} szabad",
  "free_of": "{free} / {size} szabad",
- "status_free": "{size} szabad"
+ "status_free": "{size} szabad",
+ "screen_select": "Képernyő",
+ "rel_mouse": "Egér játékokhoz",
+ "rel_mouse_tip": "Elkapja az egeret és elküldi a mozgását, játékokhoz. Az Esc elengedi.",
+ "rel_mouse_on": "Egér elkapva. Az Esc elengedi.",
+ "not_supported": "Nem lehetséges"
 }

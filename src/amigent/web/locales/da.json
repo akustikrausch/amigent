@@ -88,5 +88,10 @@
  "about_volumes": "Drev",
  "mem_line": "Chip {chip}, Fast {fast} ledig",
  "free_of": "{free} af {size} ledig",
- "status_free": "{size} ledig"
+ "status_free": "{size} ledig",
+ "screen_select": "Skærm",
+ "rel_mouse": "Mus til spil",
+ "rel_mouse_tip": "Fanger musen og sender dens bevægelser, til spil. Esc slipper den.",
+ "rel_mouse_on": "Musen fanget. Esc slipper den.",
+ "not_supported": "Ikke muligt"
 }

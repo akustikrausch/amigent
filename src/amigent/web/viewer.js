@@ -152,6 +152,18 @@
     showState();
   }
 
+  function showScreens(list) {
+    const select = $("screen-select");
+    select.hidden = list.length < 2;
+    select.innerHTML = "";
+    for (const s of list) {
+      const option = new Option(`${s.title} · ${s.w}×${s.h}`, String(s.handle));
+      option.selected = s.front;
+      select.append(option);
+    }
+    select.title = t("screen_select");
+  }
+
   function onEvent(m) {
     switch (m.type) {
       case "hello":
@@ -163,6 +175,7 @@
         }
         $("about-host").textContent = host;
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
+        showScreens(m.screens || []);
         amigaOnline = m.online;
         if (m.w) setSize(m.w, m.h);
         showState();
@@ -172,6 +185,9 @@
         break;
       case "amiga":
         showAmiga(m);
+        break;
+      case "screens":
+        showScreens(m.screens);
         break;
       case "online":
         amigaOnline = m.online;
@@ -279,6 +295,7 @@
   }
 
   canvas.addEventListener("pointermove", (event) => {
+    if (relative) return;
     pendingMove = amigaPoint(event);
     if (!moveFrame) {
       moveFrame = requestAnimationFrame(() => {
@@ -291,15 +308,17 @@
 
   canvas.addEventListener("pointerdown", (event) => {
     canvas.focus();
-    canvas.setPointerCapture(event.pointerId);
     pendingMove = null;
-    send({ t: "move", ...amigaPoint(event) });
+    if (!relative) {
+      canvas.setPointerCapture(event.pointerId);
+      send({ t: "move", ...amigaPoint(event) });
+    }
     send({ t: "buttons", mask: buttons(event) });
     event.preventDefault();
   });
 
   canvas.addEventListener("pointerup", (event) => {
-    send({ t: "move", ...amigaPoint(event) });
+    if (!relative) send({ t: "move", ...amigaPoint(event) });
     send({ t: "buttons", mask: buttons(event) });
   });
 
@@ -326,6 +345,44 @@
     send({ t: "buttons", mask: 4 | buttons() });
     send({ t: "buttons", mask: buttons() });
     canvas.focus();
+  });
+
+  $("screen-select").addEventListener("change", () => {
+    send({ t: "screen", handle: Number($("screen-select").value) });
+    canvas.focus();
+  });
+
+  // Games read mouse movement, not the pointer position: capture the mouse and send deltas.
+  let relative = false;
+  let relX = 0, relY = 0, relFrame = 0;
+
+  $("rel-mouse").addEventListener("click", () => {
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    else canvas.requestPointerLock();
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    relative = document.pointerLockElement === canvas;
+    $("rel-mouse").setAttribute("aria-pressed", String(relative));
+    if (relative) {
+      canvas.focus();
+      toast(t("rel_mouse_on"));
+    } else {
+      send({ t: "buttons", mask: buttons() });
+    }
+  });
+
+  canvas.addEventListener("mousemove", (event) => {
+    if (!relative) return;
+    relX += event.movementX;
+    relY += event.movementY;
+    if (!relFrame) {
+      relFrame = requestAnimationFrame(() => {
+        relFrame = 0;
+        if (relX || relY) send({ t: "rel", dx: Math.round(relX), dy: Math.round(relY) });
+        relX = relY = 0;
+      });
+    }
   });
 
   // ---------------------------------------------------------------- keys

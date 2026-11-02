@@ -190,6 +190,7 @@ class Viewer:
         self.online = None
         self.ever_joined = False
         self.amiga: dict = {}
+        self.screen_list: list = []
         self._system: dict = {}
         self.alone_since = time.monotonic()
         self.pointer = (0, 0)
@@ -229,6 +230,7 @@ class Viewer:
             picture = self.screen.snapshot()
             ws.send(json.dumps({"type": "hello", "host": self.host, "online": self.online,
                                 "version": __version__, "amiga": self.amiga,
+                                "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -277,8 +279,12 @@ class Viewer:
             threading.Thread(target=self._restart, daemon=True).start()
             return
         with self.inputs_lock:
-            if op.get("t") == "move" and self.inputs and self.inputs[-1].get("t") == "move":
+            last = self.inputs[-1] if self.inputs else {}
+            if op.get("t") == "move" and last.get("t") == "move":
                 self.inputs[-1] = op  # only the newest position matters
+            elif op.get("t") == "rel" and last.get("t") == "rel":
+                last["dx"] = int(last["dx"]) + int(op.get("dx", 0))
+                last["dy"] = int(last["dy"]) + int(op.get("dy", 0))
             else:
                 self.inputs.append(op)
         self.last_input = time.monotonic()
@@ -304,6 +310,11 @@ class Viewer:
             s.type_text(str(op["s"])[:20000].replace("\r\n", "\n"))
         elif kind == "combo":
             s.press(str(op["k"]))
+        elif kind == "rel":
+            s.move_relative(max(-32768, min(32767, int(op["dx"]))), max(-32768, min(32767, int(op["dy"]))))
+        elif kind == "screen":
+            s.screen_to_front(int(op["handle"]))
+            s.check_size()
         elif kind == "wheel":
             code = WHEEL_UP if int(op["dy"]) < 0 else WHEEL_DOWN
             for _ in range(min(abs(int(op["dy"])), 5)):
@@ -320,6 +331,8 @@ class Viewer:
                         self._play(op)
                     except (KeyError, ValueError, TypeError):
                         pass  # malformed message from the page
+                    except AmigentdError as e:
+                        self.event("toast", key="not_supported", text=str(e))
 
     # screen
 
@@ -393,6 +406,8 @@ class Viewer:
                 continue
             self.event("stats", kbps=round((self.received - before) / 1024, 1),
                        rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height)
+            if self.online and seconds % 2 == 0:
+                self._read_screens()
             if self.online and (not self.amiga or seconds % 30 == 0):
                 try:
                     self.amiga = self.read_amiga()
@@ -400,6 +415,21 @@ class Viewer:
                 except (AmigaError, OSError):
                     pass  # the next round tries again
             seconds += 1
+
+    def _read_screens(self) -> None:
+        """Tell the pages about the Amiga's screens when the list changes."""
+        try:
+            with self.lock():
+                if not self.screen.protocol:
+                    return
+                found = self.screen.screens() if self.screen.protocol >= 2 else []
+        except (OSError, AmigentdError):
+            return
+        listing = [{"handle": s["handle"], "title": s["title"] or "?", "front": s["front"],
+                    "w": s["width"], "h": s["height"]} for s in found]
+        if listing != self.screen_list:
+            self.screen_list = listing
+            self.event("screens", screens=listing)
 
     def read_amiga(self) -> dict:
         """Facts about the Amiga that cost it well under a second to tell."""

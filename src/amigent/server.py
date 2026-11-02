@@ -100,11 +100,70 @@ def amiga_exec(command: str, cd: str = "", timeout: float = 30) -> str:
     return f"rc={result.rc}\n{result.output}"
 
 
+last_started = ""
+
+
 @mcp.tool()
 def amiga_start(command: str) -> str:
     """Start a program in the background, without capturing output."""
+    global last_started
     _with_ctl(lambda: ctl.exec(f"Run >NIL: {command}"))
+    last_started = command
     return f"started: {command}"
+
+
+@mcp.tool()
+def amiga_break(command: str = "", signal: str = "C") -> str:
+    """Send Ctrl-C (or D, E, F) to a running command, like pressing it in its Shell.
+
+    command is the program's name as Status shows it, e.g. 'List' or 'Wait'.
+    Without it, the command last started by amiga_job or amiga_start is meant.
+    A plain amiga_exec cannot be broken this way: it blocks the daemon until
+    it returns, so long work belongs in amiga_job.
+    """
+    name = command or last_started
+    if not name:
+        raise AmigaError("nothing started yet; give the command's name")
+    if signal.upper() not in ("C", "D", "E", "F"):
+        raise AmigaError("signal must be C, D, E or F")
+    wanted = PurePosixPath(name.split()[0].split(":")[-1]).name.lower()
+    status = _with_ctl(lambda: ctl.exec("Status")).output
+    hits = []
+    for line in status.splitlines():
+        m = re.match(r"\s*Process\s+(\d+):.*?command:\s*(\S+)", line)
+        if m and PurePosixPath(m.group(2).split(":")[-1]).name.lower() == wanted:
+            hits.append(m.group(1))
+    if not hits:
+        return f"no running process named {wanted}"
+    for number in hits:
+        _with_ctl(lambda: ctl.exec(f"Break {number} {signal.upper()}"))
+    return f"sent Ctrl-{signal.upper()} to {wanted} (process {', '.join(hits)})"
+
+
+@mcp.tool()
+def amiga_arexx(program: str, port: str = "") -> str:
+    """Run ARexx on the Amiga and return rc and output.
+
+    With port, program is one or more commands for that application's ARexx
+    port (see amiga_rexx_ports) and its RESULT is printed. Without port,
+    program is a complete ARexx script.
+    """
+    if port:
+        lines = program.strip().splitlines()
+        body = "\n".join(lines[:-1] + [f"{lines[-1]}", "if symbol('RESULT') = 'VAR' then say result"])
+        script = f"/* amigent */\noptions results\naddress '{port}'\n{body}\nexit rc\n"
+    else:
+        script = program if program.lstrip().startswith("/*") else f"/* amigent */\n{program}\n"
+    _with_ctl(lambda: ctl.write_file("RAM:amigent.rexx", script.encode("iso-8859-1")))
+    result = _with_ctl(lambda: ctl.exec("rx RAM:amigent.rexx", timeout=60))
+    return f"rc={result.rc}\n{result.output}"
+
+
+@mcp.tool()
+def amiga_rexx_ports() -> str:
+    """List the public message ports, i.e. the applications ARexx can talk to."""
+    out = amiga_arexx("say show('P',, '0a'x)")
+    return out
 
 
 @mcp.tool()
@@ -122,6 +181,8 @@ def amiga_job(command: str, wait: float = 600) -> str:
     _with_ctl(lambda: ctl.exec("Delete >NIL: RAM:amigent-job.done RAM:amigent-job.out QUIET"))
     _with_ctl(lambda: ctl.write_file("RAM:amigent-job.script", script.encode("iso-8859-1")))
     _with_ctl(lambda: ctl.exec("Run >NIL: Execute RAM:amigent-job.script"))
+    global last_started
+    last_started = command
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         try:
@@ -274,6 +335,177 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) ->
         f"screen_y = {y} + image_y * {max(scale, 1):.3f}"
     )
     return [note, McpImage(data=out.getvalue(), format="png")]
+
+
+@mcp.tool()
+def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
+    """A region in full colour, for small text or exact colours.
+
+    amiga_screenshot is cheaper and covers the whole screen in 256 colours;
+    use this one for the part you need to read precisely.
+    """
+    image = _with_screen(lambda: screen.capture_rgb(x, y, width, height))
+    out = io.BytesIO()
+    image.save(out, "PNG", optimize=True)
+    return [f"region {width}x{height} at ({x},{y}), full colour", McpImage(data=out.getvalue(), format="png")]
+
+
+@mcp.tool()
+def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
+                      timeout: float = 30) -> str:
+    """Wait until something changes in a region (or anywhere), without sending pictures.
+
+    Use it after a click or command instead of taking screenshots in a loop.
+    """
+    start = time.monotonic()
+    _with_screen(lambda: screen.poll(x, y, width or None, height or None))  # settle first
+    while time.monotonic() - start < timeout:
+        changed = _with_screen(lambda: screen.poll(x, y, width or None, height or None))
+        if changed:
+            return f"changed after {time.monotonic() - start:.1f} s ({changed} tiles)"
+        time.sleep(0.25)
+    return f"no change within {timeout:.0f} s"
+
+
+@mcp.tool()
+def amiga_screens() -> str:
+    """List all Intuition screens, front to back, with their handles."""
+    found = _with_screen(screen.screens)
+    return "\n".join(
+        f"{s['handle']:#010x} {s['width']}x{s['height']}x{s['depth']}"
+        f"{' front' if s['front'] else ''}{' workbench' if s['workbench'] else ''}"
+        f"{' ham' if s['ham'] else ''} {s['title']!r}" for s in found)
+
+
+@mcp.tool()
+def amiga_screen_front(screen_id: str) -> str:
+    """Bring a screen to the front, by handle from amiga_screens or by part of its title."""
+    found = _with_screen(screen.screens)
+    try:
+        handle = int(screen_id, 0)
+        target = next(s for s in found if s["handle"] == handle)
+    except (ValueError, StopIteration):
+        matches = [s for s in found if screen_id.lower() in s["title"].lower()]
+        if len(matches) != 1:
+            raise AmigaError(f"{len(matches)} screens match {screen_id!r}; use the handle") from None
+        target = matches[0]
+    if not _with_screen(lambda: screen.screen_to_front(target["handle"])):
+        raise AmigaError("that screen has just closed")
+    _with_screen(screen.check_size)
+    return f"front screen is now {target['title']!r} ({target['width']}x{target['height']})"
+
+
+@mcp.tool()
+def amiga_mouse_relative(dx: int, dy: int) -> str:
+    """Move the mouse by a distance, as a real mouse does.
+
+    For games and other programs that read mouse movement and keep their own
+    pointer; amiga_click places the Intuition pointer, which those ignore.
+    """
+    _with_screen(lambda: screen.move_relative(dx, dy))
+    return f"moved by ({dx},{dy})"
+
+
+@mcp.tool()
+def amiga_ui_tree() -> str:
+    """The front screen's windows and gadgets as text, with labels and boxes.
+
+    Works for standard Intuition and GadTools windows; MUI interiors and games
+    still need screenshots. Click entries with amiga_ui_click.
+    """
+    lines = []
+    for item in _with_screen(screen.ui_tree):
+        box = f"({item.get('x', 0)},{item.get('y', 0)} {item.get('w', item.get('width', 0))}x" \
+              f"{item.get('h', item.get('height', 0))})"
+        if item["kind"] == "screen":
+            lines.append(f"screen {item['title']!r} {item['width']}x{item['height']}")
+        elif item["kind"] == "window":
+            lines.append(f"  window {item['id']} {item['title']!r} {box}{' active' if item['active'] else ''}")
+        else:
+            state = " disabled" if item["disabled"] else ""
+            state += " selected" if item["selected"] else ""
+            lines.append(f"    {item['type']} {item['label']!r} {box}{state}")
+    return "\n".join(lines) or "no windows"
+
+
+def _centre(item: dict) -> tuple[int, int]:
+    return item["x"] + item["w"] // 2, item["y"] + item["h"] // 2
+
+
+@mcp.tool()
+def amiga_ui_click(label: str, window: str = "", button: str = "left", double: bool = False) -> str:
+    """Click a gadget by its label (from amiga_ui_tree), optionally in a window by title."""
+    tree = _with_screen(screen.ui_tree)
+    windows = {w["id"]: w["title"] for w in tree if w["kind"] == "window"}
+    gadgets = [g for g in tree if g["kind"] == "gadget"
+               and (not window or window.lower() in windows.get(g["window"], "").lower())]
+    exact = [g for g in gadgets if g["label"].lower() == label.lower()]
+    matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
+    if len(matches) != 1:
+        names = ", ".join(repr(g["label"]) for g in matches[:8])
+        raise AmigaError(f"{len(matches)} gadgets match {label!r}{': ' + names if names else ''}")
+    gadget = matches[0]
+    if gadget["disabled"]:
+        raise AmigaError(f"{gadget['label']!r} is disabled")
+    x, y = _centre(gadget)
+    _with_screen(lambda: screen.click(x, y, button, double))
+    return f"clicked {gadget['label']!r} at ({x},{y})"
+
+
+@mcp.tool()
+def amiga_menus() -> str:
+    """The active window's menus and items, with shortcuts and state."""
+    lines = []
+    for m in _with_screen(screen.menus):
+        flags = ("" if m["enabled"] else " disabled") + (" checked" if m["checked"] else "")
+        key = f" [Amiga {m['key']}]" if m.get("key") else ""
+        indent = {"menu": "", "item": "  ", "sub": "    "}[m["kind"]]
+        lines.append(f"{indent}{m['text']}{key}{flags}")
+    return "\n".join(lines) or "the active window has no menus"
+
+
+@mcp.tool()
+def amiga_menu_select(path: str) -> str:
+    """Pick a menu item by name, e.g. 'Project/Save as...' or 'Window/Show/All files'.
+
+    Holds the right button, moves over the menu and lets go on the item,
+    the way a person does it.
+    """
+    parts = [p.strip().lower() for p in path.split("/") if p.strip()]
+    entries = _with_screen(screen.menus)
+
+    def find(kind, prefix, name):
+        hits = [e for e in entries if e["kind"] == kind and e["path"][:len(prefix)] == prefix
+                and e["text"].strip().lower() == name]
+        hits = hits or [e for e in entries if e["kind"] == kind and e["path"][:len(prefix)] == prefix
+                        and e["text"].strip().lower().startswith(name)]
+        if not hits:
+            raise AmigaError(f"no menu entry {name!r}; see amiga_menus")
+        return hits[0]
+
+    chain, prefix = [], []
+    for kind, name in zip(("menu", "item", "sub"), parts):
+        entry = find(kind, prefix, name)
+        if not entry["enabled"]:
+            raise AmigaError(f"{entry['text']!r} is disabled")
+        chain.append(entry)
+        prefix = entry["path"]
+    if len(chain) < 2:
+        raise AmigaError("give at least menu/item")
+
+    def pick():
+        x, y = _centre(chain[0])
+        screen.move(x, y)
+        time.sleep(0.05)
+        screen.button("right", True)
+        time.sleep(0.15)
+        for entry in chain[1:]:
+            screen.move(*_centre(entry))
+            time.sleep(0.15)
+        screen.button("right", False)
+
+    _with_screen(pick)
+    return f"picked {' / '.join(e['text'] for e in chain)}"
 
 
 @mcp.tool()

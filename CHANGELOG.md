@@ -17,6 +17,12 @@ The first full release. Everything from the 0.x line, now considered stable:
   `amigent-setup` over the network.
 - **Repair after system updates**: `amigent-repair` and a module per program.
 
+Tools for the AI agent beyond Shell and files: windows and gadgets as text with
+click by label, menus by name, a full-colour region screenshot, waiting for a
+change without pictures, a list of screens with switching, relative mouse
+movement for games, ARexx to any program, and Ctrl-C for running commands. The
+remote desktop gets a screen switcher and a mouse mode for games.
+
 `amigentd` in this release:
 
 - Written from scratch, from the protocol alone
@@ -26,6 +32,8 @@ The first full release. Everything from the 0.x line, now considered stable:
 - A new connection takes over at once, even in the middle of a frame.
 - Chipset screens are read through their palette, HAM6 and HAM8 included, so
   games and demos on native screens show up too.
+- Protocol 2: screen list and switching, full-colour regions, relative mouse,
+  windows, gadgets and menus as data.
 - `amigentd PORT <n>` runs a second copy on another port;
   `amiga/build-amigentd` takes `SOURCE` and `TO`.
 

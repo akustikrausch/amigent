@@ -88,5 +88,10 @@
  "about_volumes": "Volumes",
  "mem_line": "Chip {chip}, Fast {fast} libres",
  "free_of": "{free} libres sur {size}",
- "status_free": "{size} libres"
+ "status_free": "{size} libres",
+ "screen_select": "Écran",
+ "rel_mouse": "Souris pour les jeux",
+ "rel_mouse_tip": "Capture la souris et envoie ses mouvements, pour les jeux. Échap la libère.",
+ "rel_mouse_on": "Souris capturée. Échap la libère.",
+ "not_supported": "Impossible"
 }

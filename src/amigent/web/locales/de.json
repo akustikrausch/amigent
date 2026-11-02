@@ -88,5 +88,10 @@
  "about_volumes": "Laufwerke",
  "mem_line": "Chip {chip}, Fast {fast} frei",
  "free_of": "{free} von {size} frei",
- "status_free": "{size} frei"
+ "status_free": "{size} frei",
+ "screen_select": "Bildschirm",
+ "rel_mouse": "Maus für Spiele",
+ "rel_mouse_tip": "Fängt die Maus ein und sendet ihre Bewegung, für Spiele. Esc gibt sie frei.",
+ "rel_mouse_on": "Maus eingefangen. Esc gibt sie frei.",
+ "not_supported": "Nicht möglich"
 }

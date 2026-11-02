@@ -19,7 +19,10 @@ Rebuild `amiga/bin/amigentd` with `amiga/build-amigentd` on the Amiga after chan
 
 When working on an Amiga:
 
-- Long commands go through `amiga_job`, never through `amiga_exec`.
+- Long commands go through `amiga_job`, never through `amiga_exec`; `amiga_break` stops them.
+- For standard windows prefer `amiga_ui_tree` with `amiga_ui_click` and
+  `amiga_menu_select` over clicking pixels; use `amiga_wait_change` instead of
+  repeated screenshots, and `amiga_screenshot_color` to read small text.
 - Every install gets a repair module, see `amiga/repair.d/example.repair.txt`.
 - Prefer `amiga_restart` over cutting the power.
 - When the user wants to see or drive the Amiga themselves, call `amiga_viewer`.
