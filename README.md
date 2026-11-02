@@ -41,9 +41,8 @@ On a plain 68000, take `amigentd.000` instead.
 
     Install Amigent from https://github.com/akustikrausch/amigent for me.
     Clone it, run pip install -e . in it, then run amigent-setup. It finds my
-    Amiga by itself and prints the address. Register the MCP server "amigent"
-    with the command amigent-server and the environment variable
-    AMIGENT_HOST=<address>. Then run amigent-viewer <address> --install so the
+    Amiga by itself and remembers it. Register the MCP server "amigent" with
+    the command amigent-server. Then run amigent-viewer --install so the
     remote desktop shows up as a program. Tell me if you need to be restarted.
 
 That's it. The Amiga is set up from the PC and Amigent starts with it from now
@@ -69,6 +68,8 @@ by hand.
 ## Good to know
 
 - **Slow networks are fine.** Only the parts of the screen that change are sent.
+- **New address after a restart?** Amigent finds the Amiga again by itself. It
+  takes only the one that proves to be yours.
 - **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
 - **After a big OS update**, `amigent-repair` puts back what the update removed.
 - **Safe at home.** A key keeps other computers on the network out, and the

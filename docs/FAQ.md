@@ -35,9 +35,14 @@ On Windows without WSL, `openssl` comes with Git for Windows. `AMIGENT_TLS=off`
 switches encryption off for a test.
 
 **How do I add a second Amiga?**
-Run `amigent-setup` with its address, then `amigent-fleet --add NAME ADDRESS`.
-Each Amiga gets its own key. The AI agent works with one Amiga per MCP server
-entry, so register a second entry with the other `AMIGENT_HOST`.
+Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
+shows up in `amigent-fleet`. The AI agent works with one Amiga per MCP server
+entry, so register a second entry with `AMIGENT_HOST=A500`.
+
+**The Amiga got a new address.**
+Nothing to do: Amigent searches the home network and takes the Amiga with your
+certificate or key. In another network, type the address into the field the
+remote desktop shows, or tell it to the AI agent.
 
 **Directory Opus says it has waited long enough for a program.**
 Something in `SYS:WBStartup` never exits. Services go into `S:User-Startup`.
@@ -75,10 +80,12 @@ there) and localhost forwarding, which WSL does by default.
 **How do I press the Amiga keys in the viewer?**
 The side panel has them as sticky buttons, plus the usual combinations ready to
 click. In full screen the browser hands over the Windows keys: left Windows is
-left Amiga, right Windows or the menu key is right Amiga.
+left Amiga, right Windows or the menu key is right Amiga. On a Mac both Cmd keys
+are right Amiga, so Cmd+O and the like work as Amiga shortcuts.
 
 **How do I copy text between the PC and the Amiga?**
-Ctrl+V in the remote desktop types the PC's clipboard into the active window.
+Ctrl+V (Cmd+V on a Mac) in the remote desktop types the PC's clipboard into the
+active window.
 The *Clipboard* buttons in the side panel copy the clipboard itself in either
 direction; on the Amiga it is pasted with Right Amiga+V. Copying text out of a
 Shell window needs ConClip running, which Workbench starts by default.
@@ -107,7 +114,12 @@ uninstaller in `%LOCALAPPDATA%\amigent`, the entry for *Installed apps* in
 from the shell you ran `--install` in. Changed something? Run `--install` again.
 
 **Where does Amigent live on macOS?**
-`~/Applications/Amigent.app`. `amigent-viewer --uninstall` removes it.
+`~/Applications/Amigent.app`, with its settings in `~/.config/amigent/app.json`.
+`amigent-viewer --uninstall` removes both.
+
+**Amigent on the Mac says the Amiga does not answer, but Terminal reaches it.**
+macOS asks each program once for the local network. Allow Amigent in System
+Settings → Privacy & Security → Local Network.
 
 **Amigent does nothing when I click it.**
 Run `amigent-viewer <address>` in a terminal once and read what it says. Under

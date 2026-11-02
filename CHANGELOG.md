@@ -22,6 +22,11 @@ The first full release. Everything from the 0.x line, now considered stable:
   `~/Applications` on macOS.
 - **Several Amigas**: `amigent-fleet` shows them side by side with a preview
   and opens each one's remote desktop.
+- **Amigas by name**: each one is remembered under a name and found again on
+  the home network when its address changes, by its certificate or key.
+  `AMIGENT_HOST` is optional; `amiga_find` lets the agent search.
+- **A signed Mac app**: `Amigent.app` carries a Developer ID signature and is
+  notarized; Cmd works as the Amiga key, Cmd+V pastes, Option types @ and €.
 - **Install in three steps**: one small file on the Amiga, or the `.lha`
   archive with icons, the rest done by `amigent-setup` over the network.
 - **Repair after system updates**: `amigent-repair` and a module per program.

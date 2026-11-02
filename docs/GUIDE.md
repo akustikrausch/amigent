@@ -34,20 +34,34 @@ amigent-setup 192.168.1.50
 
 Without an address, `amigent-setup` searches your own /24 network. It copies
 `amigentd` and the scripts to the Amiga, adds `amigentd` to `S:User-Startup`,
-creates the key and, with `openssl` available, the certificate.
+creates the key and, with `openssl` available, the certificate. It remembers the
+Amiga under a name, "Amiga" unless you give `--name A1200`.
 
 Register the MCP server with your agent:
 
 ```bash
-claude mcp add amigent -e AMIGENT_HOST=192.168.1.50 -- amigent-server
+claude mcp add amigent -- amigent-server
 ```
 
 ```bash
-codex mcp add amigent --env AMIGENT_HOST=192.168.1.50 -- amigent-server
+codex mcp add amigent -- amigent-server
 ```
 
-Other agents need the command `amigent-server` and the environment variable
-`AMIGENT_HOST`.
+Other agents need the command `amigent-server`. With several Amigas, give each
+entry `AMIGENT_HOST` with the Amiga's name.
+
+### When the address changes
+
+Amigent keeps every Amiga under its name in `~/.config/amigent/amigas.json`,
+with the address it last had. If the Amiga stops answering there, for example
+because the router gave it a new address, Amigent searches the local /24 network
+for amigentd and takes only the Amiga whose certificate (or, without TLS, whose
+key) matches, so a second Amiga on the network is never mistaken for yours. The
+new address is remembered for the AI agent, the remote desktop and the fleet.
+
+When the Amiga sits in another network, the remote desktop offers a field for its
+address while it does not answer, and the agent has `amiga_find` to search or to
+set an address you tell it. A fixed address in the router saves the search.
 
 ## Tools for the AI agent
 
@@ -109,11 +123,17 @@ interrupted copy.
 
 ![System information in the About window](screenshots/about.png)
 
-`amigent-viewer 192.168.1.50 --install` adds Amigent to the Start menu, the
-desktop and *Installed apps* on Windows (from WSL or a Windows Python), or puts
-`Amigent.app` into `~/Applications` on macOS. Starting it a second time brings up
-the open window. After an update, run `--install` again. `amigent-viewer
+`amigent-viewer --install` adds Amigent to the Start menu, the desktop and
+*Installed apps* on Windows (from WSL or a Windows Python), or puts `Amigent.app`
+into `~/Applications` on macOS. Starting it a second time brings the open window
+to the front. After an update, run `--install` again. `amigent-viewer
 --uninstall` removes everything.
+
+On macOS the app is signed with a Developer ID and notarized, the same app for
+every Mac; what differs per Mac is in `~/.config/amigent/app.json`. The first
+start asks for access to the local network, which it needs to reach the Amiga.
+`scripts/build-mac-app.sh` builds, signs and notarizes it again; without the
+signed app, `--install` builds an unsigned one with the Xcode tools.
 
 ## Several Amigas
 
@@ -169,7 +189,7 @@ settings and menu entries; see
 
 | variable | default | meaning |
 |---|---|---|
-| `AMIGENT_HOST` | | address of the Amiga |
+| `AMIGENT_HOST` | the remembered Amiga | name or address of the Amiga |
 | `AMIGENT_AMIGA_DIR` | `SYS:amigent` | folder for the scripts on the Amiga |
 | `AMIGENT_FLUSH_VOLUMES` | `SYS:` | volumes written to disk before a restart |
 | `AMIGENT_POWER_CMD` | | command taking `on` or `off`, for a smart plug |
