@@ -160,15 +160,22 @@ def test_mac_app_bundle(monkeypatch, tmp_path):
 
     monkeypatch.setattr(desktop.sys, "platform", "darwin")
     monkeypatch.setattr(desktop, "MAC_APP", tmp_path / "Amigent.app")
+    monkeypatch.setattr(desktop, "MAC_CONFIG", tmp_path / "app.json")
+    monkeypatch.setattr(desktop, "MAC_RELEASE", tmp_path / "none.zip")
+    monkeypatch.setattr(desktop.shutil, "which", lambda name: None)  # no Xcode tools here
     monkeypatch.setenv("AMIGENT_FLUSH_VOLUMES", "Work: SYS:")
-    made = desktop.install("192.168.1.50")
+    made = desktop.install("A1200")
     app = tmp_path / "Amigent.app" / "Contents"
     assert made == [str(tmp_path / "Amigent.app")]
     script = (app / "MacOS" / "Amigent").read_text()
-    assert "amigent.viewer 192.168.1.50 --exit-when-closed" in script
+    assert "amigent.viewer A1200 --exit-when-closed" in script
     assert "export AMIGENT_FLUSH_VOLUMES='Work: SYS:'" in script
-    assert (app / "Resources" / "amigent.icns").exists() and "<string>Amigent</string>" in (app / "Info.plist").read_text()
-    assert desktop.uninstall() == [str(tmp_path / "Amigent.app")]
+    plist = (app / "Info.plist").read_text()
+    assert (app / "Resources" / "amigent.icns").exists() and "<string>Amigent</string>" in plist
+    assert "NSLocalNetworkUsageDescription" in plist
+    config = json.loads((tmp_path / "app.json").read_text())
+    assert config["args"] == ["A1200"] and config["env"]["AMIGENT_FLUSH_VOLUMES"] == "Work: SYS:"
+    assert desktop.uninstall() == [str(tmp_path / "Amigent.app"), str(tmp_path / "app.json")]
 
 
 def test_clipboard_text_round_trip():

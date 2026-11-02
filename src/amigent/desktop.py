@@ -8,6 +8,7 @@ viewer without a console window; it ends again when its window is closed.
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import platform
 import shlex
@@ -86,43 +87,130 @@ def _runner() -> str:
 
 
 MAC_APP = Path.home() / "Applications" / f"{NAME}.app"
+MAC_SOURCE = Path(__file__).with_name("macos")
+MAC_RELEASE = MAC_SOURCE / "Amigent.zip"  # signed and notarized, made by scripts/build-mac-app.sh
+MAC_CONFIG = Path.home() / ".config" / "amigent" / "app.json"
+BUNDLE_ID = "de.akustikrausch.amigent"
 
 
-def _install_mac(host: str) -> list[str]:
-    """~/Applications/Amigent.app: a shell script that starts the viewer."""
-    settings = {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
-    package_root = str(Path(__file__).resolve().parents[1])
-    contents = MAC_APP / "Contents"
-    (contents / "MacOS").mkdir(parents=True, exist_ok=True)
-    (contents / "Resources").mkdir(exist_ok=True)
-    shutil.copyfile(ICON.with_suffix(".icns"), contents / "Resources" / "amigent.icns")
-    exports = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in settings.items())
-    launcher = contents / "MacOS" / NAME
-    launcher.write_text(
-        "#!/bin/sh\n"
-        f"export PYTHONPATH={shlex.quote(package_root)}\n{exports}"
-        f"exec {shlex.quote(sys.executable)} -m amigent.viewer {shlex.quote(host)} --exit-when-closed\n")
-    launcher.chmod(0o755)
-    (contents / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+def _plist() -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>{NAME}</string>
   <key>CFBundleDisplayName</key><string>{NAME}</string>
-  <key>CFBundleIdentifier</key><string>de.akustikrausch.amigent</string>
+  <key>CFBundleIdentifier</key><string>{BUNDLE_ID}</string>
   <key>CFBundleVersion</key><string>{__version__}</string>
   <key>CFBundleShortVersionString</key><string>{__version__}</string>
   <key>CFBundleExecutable</key><string>{NAME}</string>
   <key>CFBundleIconFile</key><string>amigent</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSHumanReadableCopyright</key><string>{PUBLISHER}, MIT License</string>
   <key>NSLocalNetworkUsageDescription</key><string>Amigent connects to your Amiga on the home network.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Amigent brings its open window to the front when you start it again.</string>
 </dict></plist>
-""")
-    # An ad-hoc signature gives the app an identity macOS can ask about and remember,
-    # e.g. for access to the local network.
-    subprocess.run(["codesign", "--force", "--sign", "-", str(MAC_APP)], check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+"""
+
+
+ENTITLEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.automation.apple-events</key><true/>
+</dict></plist>
+"""
+
+
+def _settings() -> dict:
+    return {k: os.environ[k] for k in SETTINGS if os.environ.get(k)}
+
+
+def _compile_launcher(out: Path, universal: bool) -> bool:
+    """Build the native launcher with swiftc; False when the Xcode tools are missing."""
+    swiftc = shutil.which("swiftc")
+    if not swiftc and shutil.which("xcrun"):
+        found = subprocess.run(["xcrun", "--find", "swiftc"], capture_output=True, text=True)
+        swiftc = found.stdout.strip() if found.returncode == 0 else None
+    if not swiftc:
+        return False
+    source = str(MAC_SOURCE / "Amigent.swift")
+    arches = ("arm64", "x86_64") if universal else (platform.machine() or "arm64",)
+    parts = []
+    for arch in arches:
+        part = out.with_name(f"{out.name}-{arch}")
+        built = subprocess.run([swiftc, "-O", "-target", f"{arch}-apple-macos12", "-o", str(part), source],
+                               capture_output=True, text=True)
+        if built.returncode != 0:
+            print(built.stderr.strip(), file=sys.stderr)
+            return False
+        parts.append(part)
+    if len(parts) == 1:
+        parts[0].replace(out)
+    else:
+        subprocess.run(["lipo", "-create", "-output", str(out), *map(str, parts)], check=True)
+        for part in parts:
+            part.unlink()
+    return True
+
+
+def _script_launcher(out: Path, host: str) -> None:
+    """Without Xcode tools: a shell script that starts the viewer the same way."""
+    exports = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in _settings().items())
+    package_root = str(Path(__file__).resolve().parents[1])
+    out.write_text(
+        "#!/bin/sh\n"
+        f"export PYTHONPATH={shlex.quote(package_root)}\n{exports}"
+        f"exec {shlex.quote(sys.executable)} -m amigent.viewer {shlex.quote(host)} --exit-when-closed\n")
+    out.chmod(0o755)
+
+
+def build_mac_app(folder: Path, sign: str = "-", universal: bool = False, host: str = "") -> Path:
+    """Assemble Amigent.app in folder and sign it (sign "-" is an ad-hoc signature)."""
+    app = folder / f"{NAME}.app"
+    if app.exists():
+        shutil.rmtree(app)
+    contents = app / "Contents"
+    (contents / "MacOS").mkdir(parents=True)
+    (contents / "Resources").mkdir()
+    shutil.copyfile(ICON.with_suffix(".icns"), contents / "Resources" / "amigent.icns")
+    (contents / "Info.plist").write_text(_plist())
+    executable = contents / "MacOS" / NAME
+    native = _compile_launcher(executable, universal)
+    if not native:
+        _script_launcher(executable, host)
+    if shutil.which("codesign"):
+        command = ["codesign", "--force", "--sign", sign]
+        if sign != "-":
+            entitlements = folder / "amigent.entitlements"
+            entitlements.write_text(ENTITLEMENTS)
+            command += ["--options", "runtime", "--timestamp", "--entitlements", str(entitlements)]
+        subprocess.run([*command, str(app)], check=sign != "-",
+                       stdout=subprocess.DEVNULL, stderr=None if sign != "-" else subprocess.DEVNULL)
+    return app
+
+
+def _write_mac_config(host: str) -> None:
+    env = {"PYTHONPATH": str(Path(__file__).resolve().parents[1]), **_settings()}
+    MAC_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    MAC_CONFIG.write_text(json.dumps({"python": sys.executable, "args": [host], "env": env}, indent=1))
+
+
+def _install_mac(host: str) -> list[str]:
+    """~/Applications/Amigent.app: the signed release app if there is one, else built here."""
+    _write_mac_config(host)
+    MAC_APP.parent.mkdir(parents=True, exist_ok=True)
+    if MAC_RELEASE.exists() and shutil.which("ditto"):
+        if MAC_APP.exists():
+            shutil.rmtree(MAC_APP)
+        subprocess.run(["ditto", "-x", "-k", str(MAC_RELEASE), str(MAC_APP.parent)], check=True)
+    else:
+        build_mac_app(MAC_APP.parent, host=host)
     subprocess.run(["touch", str(MAC_APP)], check=False)  # Finder picks up the icon
+    if shutil.which("mdimport"):
+        subprocess.run(["mdimport", str(MAC_APP)], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # for Spotlight
     return [str(MAC_APP)]
 
 
@@ -178,10 +266,16 @@ New-ItemProperty -Path $key -Name EstimatedSize -Value {size_kb} -PropertyType D
 def uninstall() -> list[str]:
     """Remove shortcuts, launcher folder and the Installed apps entry; returns what was removed."""
     if sys.platform == "darwin":
-        if MAC_APP.exists():
-            shutil.rmtree(MAC_APP)
-            return [str(MAC_APP)]
-        return []
+        removed = []
+        for path in (MAC_APP, MAC_CONFIG):
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+            else:
+                continue
+            removed.append(str(path))
+        return removed
     names = ", ".join(f"'{n}.lnk'" for n in (NAME, *OLD_NAMES))
     script = f"""
 foreach ($dir in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop'))) {{
@@ -195,3 +289,23 @@ if (Test-Path $folder) {{ Remove-Item $folder -Recurse; $folder }}
 if (Test-Path '{REGISTRY}') {{ Remove-Item '{REGISTRY}' -Recurse; 'Installed apps: {NAME}' }}
 """
     return _powershell(script).splitlines()
+
+
+def main() -> None:
+    """python -m amigent.desktop --build-mac-app FOLDER [--sign IDENTITY] [--universal]"""
+    import argparse
+    parser = argparse.ArgumentParser(prog="python -m amigent.desktop")
+    parser.add_argument("--build-mac-app", metavar="FOLDER", required=True)
+    parser.add_argument("--sign", default="-", help="codesign identity (default: ad-hoc)")
+    parser.add_argument("--universal", action="store_true", help="arm64 and x86_64")
+    args = parser.parse_args()
+    folder = Path(args.build_mac_app)
+    folder.mkdir(parents=True, exist_ok=True)
+    app = build_mac_app(folder, args.sign, args.universal)
+    if (app / "Contents" / "MacOS" / NAME).read_bytes()[:2] == b"#!":
+        raise SystemExit("swiftc missing: install the Xcode command line tools for a release build")
+    print(app)
+
+
+if __name__ == "__main__":
+    main()
