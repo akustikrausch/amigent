@@ -216,10 +216,14 @@ Two small services run on the Amiga, one server on the PC.
 ```
 
 `amigentd` is part of this project, a small daemon written in C. It keeps the
-last picture and sends only the tiles that changed, run-length encoded with 256
-colours. A full screen takes a few seconds over a slow link, a repeated look a
-fraction of a second. The remote desktop polls the screen in stripes while it is
-open and slows down when nothing changes, so the Amiga keeps most of its CPU time.
+last picture and sends only the 64×64 tiles that changed, run-length encoded with
+256 colours; a region can also be fetched in full colour. Between requests a
+helper process at the lowest priority reads the screen ahead, using only CPU time
+nobody else wants, so asking about an unchanged screen costs one network round
+trip. A full screen takes a few seconds over a slow link. The remote desktop
+asks again and again while it is open and waits longer when nothing changes.
+It also reports the screens, windows, gadgets and menus that Intuition knows, for
+the AI agent to work with names instead of pixels.
 
 `amigactld` by tbdye handles commands and files.
 
