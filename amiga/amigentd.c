@@ -878,8 +878,11 @@ static ULONG prgb[3 * 256];
  * takes an odd address as a personal insult. */
 #define PENC_LONGS ((8 * 8 * TILE + 8 * TILE / 128 + 16) / 4)
 static ULONG penc_mem[2][PENC_LONGS], ptile_mem[8 * 8 * TILE / 4];
+static ULONG pwork_mem[8 * 8 * TILE / 4], pold_mem[8 * 8 * TILE / 4];
 #define penc(i) ((UBYTE *)penc_mem[i])
 #define ptile ((UBYTE *)ptile_mem)
+#define pwork ((UBYTE *)pwork_mem)
+#define pold ((UBYTE *)pold_mem)
 
 static void free_planar(void)
 {
@@ -1082,13 +1085,115 @@ static LONG order_tiles(LONG tx0, LONG ty0, LONG tx1, LONG ty1, LONG mx, LONG my
     return n;
 }
 
+/* Each row XORed with the one above, per plane: text and window borders turn
+ * into zeros, which PackBits eats for breakfast. */
+static void row_xor(const UBYTE *src, UBYTE *dst, LONG bw, LONG th)
+{
+    LONG p, y, i;
+
+    for (p = 0; p < pdepth; p++) {
+        const UBYTE *up = src;
+
+        memcpy(dst, src, bw);
+        src += bw, dst += bw;
+        for (y = 1; y < th; y++, up += bw, src += bw, dst += bw) {
+            if (bw == 8) {  /* a full tile row: two longs */
+                ((ULONG *)dst)[0] = ((const ULONG *)src)[0] ^ ((const ULONG *)up)[0];
+                ((ULONG *)dst)[1] = ((const ULONG *)src)[1] ^ ((const ULONG *)up)[1];
+            } else {
+                for (i = 0; i < bw; i++)
+                    dst[i] = src[i] ^ up[i];
+            }
+        }
+    }
+}
+
+/* The old picture, dy rows further down, where this tile sits: what a scrolled
+ * window was before. Rows off the screen count as zeros. */
+static void shifted_bytes(LONG ttx, LONG tty, LONG bw, LONG th, LONG dy, UBYTE *dst)
+{
+    LONG p, y;
+
+    for (p = 0; p < pdepth; p++)
+        for (y = 0; y < th; y++, dst += bw) {
+            LONG sy = tty * TILE + y + dy;
+            if (sy < 0 || sy >= ph)
+                memset(dst, 0, bw);
+            else
+                memcpy(dst, pref + (p * ph + sy) * pbpr + ttx * (TILE / 8), bw);
+        }
+}
+
+/* Did the client have every tile the shifted rows come from, before this frame? */
+static BOOL shift_ok(LONG ttx, LONG tty, LONG th, LONG dy)
+{
+    LONG top = tty * TILE + dy, bottom = top + th - 1, r;
+
+    if (top < 0) top = 0;
+    if (bottom >= ph) bottom = ph - 1;
+    for (r = top / TILE; r <= bottom / TILE && top <= bottom; r++)
+        if (!(pvalid[r * pcols + ttx] & 1))
+            return FALSE;
+    return TRUE;
+}
+
+/* Scrolling, the bread and butter of a Shell: a changed row of plane 0 from one
+ * of the first tiles the client has, looked up in the old picture of the same
+ * column, up to SHIFT_MAX rows either way, nearest first. A match counts once
+ * the next rows agree as well; one lonely row is a coincidence, not a scroll. */
+#define SHIFT_MAX 256
+#define SHIFT_ROWS 8
+
+static BOOL rows_match(const UBYTE *cur, LONG cy, LONG ttx, LONG bw, LONG s, LONG rows)
+{
+    const UBYTE *old = pref + ttx * (TILE / 8);
+    LONG k;
+
+    for (k = 0; k < rows; k++, cur += pbpr)
+        if (cy + k + s < 0 || cy + k + s >= ph || memcmp(cur, old + (cy + k + s) * pbpr, bw))
+            return FALSE;
+    return TRUE;
+}
+
+static LONG find_dy(LONG n)
+{
+    LONG i, r, s, tries = 0;
+
+    for (i = 0; i < n && tries < 4; i++) {
+        LONG t = ((UWORD *)porder)[i], ttx = t % pcols, tty = t / pcols;
+        LONG py = tty * TILE, th = py + TILE < ph ? TILE : ph - py;
+        LONG bw = ((ttx * TILE + TILE < pw ? TILE : pw - ttx * TILE) + 7) >> 3;
+        const UBYTE *cur = pcur + py * pbpr + ttx * (TILE / 8);
+        const UBYTE *old = pref + ttx * (TILE / 8);
+
+        if (!(pvalid[t] & 1))
+            continue;
+        tries++;
+        for (r = 0; r + SHIFT_ROWS <= th; r++, cur += pbpr) {
+            LONG k;
+            for (k = 0; k < bw && !cur[k]; k++)
+                ;
+            if (k == bw || !memcmp(cur, old + (py + r) * pbpr, bw))
+                continue;  /* empty or unchanged rows tell nothing */
+            for (s = 1; s <= SHIFT_MAX; s++) {
+                if (rows_match(cur, py + r, ttx, bw, s, SHIFT_ROWS))
+                    return s;
+                if (rows_match(cur, py + r, ttx, bw, -s, SHIFT_ROWS))
+                    return -s;
+            }
+            break;  /* this tile didn't scroll, try the next */
+        }
+    }
+    return 0;
+}
+
 /* FRAME with arg 2: planar tiles for chipset screens, else the classic ones.
  * See "planar" in docs/PROTOCOL.md. */
-static BOOL frame_planar(BOOL force, LONG x, LONG y, LONG w, LONG h)
+static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
     ULONG lock, mode;
-    LONG x1, y1, tx, ty, tx1, ty1, n, i, count = 0, colours, mx, my;
+    LONG x1, y1, tx, ty, tx1, ty1, n, i, count = 0, colours, mx, my, dy;
     UBYTE head[8], flags = 0, *v;
     BOOL ok, known;
 
@@ -1168,33 +1273,45 @@ static BOOL frame_planar(BOOL force, LONG x, LONG y, LONG w, LONG h)
     be32(head, n);
     if (!put(head, 4))
         return FALSE;
+    dy = ext && !force ? find_dy(n) : 0;
     for (i = 0; i < n; i++) {
-        LONG t = ((UWORD *)porder)[i], size, raw, best, method, p, yy;
+        LONG t = ((UWORD *)porder)[i], size, raw, best, method, p, k, b = 0;
         LONG ttx = t % pcols, tty = t / pcols, px = ttx * TILE, py = tty * TILE;
         LONG tw = px + TILE < pw ? TILE : pw - px, th = py + TILE < ph ? TILE : ph - py;
         LONG bw = (tw + 7) >> 3;
+        BOOL had = !force && (pvalid[t] & 1);
 
-        v = pvalid + t;
+        /* Every way we know, the shortest wins; penc(b) holds it. */
         raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
         best = packbits(ptile, raw, penc(0));
         method = 1;
-        if (!force && (*v & 1)) {  /* the client has the old tile: try the XOR */
-            ULONG *a = (ULONG *)ptile, *o = (ULONG *)penc(1);
-            tile_bytes(pref, ttx, tty, bw, th, penc(1));
-            for (p = (raw + 3) >> 2; p > 0; p--)  /* ptile turns into the delta */
-                *a++ ^= *o++;
-            size = packbits(ptile, raw, penc(1));
-            if (size < best)
-                best = size, method = 2;
+        if (ext) {  /* rows against rows: text, borders, patterns */
+            row_xor(ptile, pwork, bw, th);
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 1 | 4, b = 1 - b;
         }
-        if (best >= raw && method == 1) {  /* noise beats PackBits: raw then */
-            tile_bytes(pcur, ttx, tty, bw, th, penc(0));
+        if (had) {  /* the client has the old tile: send the difference */
+            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+            tile_bytes(pref, ttx, tty, bw, th, pold);
+            for (k = (raw + 3) >> 2; k > 0; k--)
+                *a++ = *c++ ^ *o++;
+            if ((size = packbits(pwork, raw, penc(1 - b))) < best)
+                best = size, method = 2, b = 1 - b;
+        }
+        if (had && dy && shift_ok(ttx, tty, th, dy)) {  /* scrolled: the old rows, moved */
+            ULONG *a = (ULONG *)pwork, *c = (ULONG *)ptile, *o = (ULONG *)pold;
+            shifted_bytes(ttx, tty, bw, th, dy, pold);
+            for (k = (raw + 3) >> 2; k > 0; k--)
+                *a++ = *c++ ^ *o++;
+            if ((size = packbits(pwork, raw, penc(1 - b) + 2) + 2) < best) {
+                be16(penc(1 - b), (UWORD)dy);
+                best = size, method = 2 | 8, b = 1 - b;
+            }
+        }
+        if (best >= raw) {  /* noise beats every trick: raw then */
+            memcpy(penc(b), ptile, raw);
             best = raw, method = 0;
         }
-        /* Counted as sent before it is: pref takes the new planes now. */
-        for (p = 0, yy = py * pbpr + ttx * (TILE / 8); p < pdepth; p++, yy += ph * pbpr)
-            copy_rows(pref + yy, pbpr, pcur + yy, pbpr, bw, th);
-        *v = 1;
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
         be16(tile_buf + 4, tw);
@@ -1203,13 +1320,26 @@ static BOOL frame_planar(BOOL force, LONG x, LONG y, LONG w, LONG h)
         be32(tile_buf + 9, best);
         /* Out the door as soon as there is a packet's worth, and a look for
          * input between tiles: the pointer must not wait for the picture. */
-        if (!put(tile_buf, 13) || !put(penc(method == 2), best) ||
+        if (!put(tile_buf, 13) || !put(penc(b), best) ||
             (out_len >= SEND_STEP && !flush()) ||
             !sneak_input()) {
+            /* Half a frame out: no telling what the client holds. Start over. */
             for (p = 0; p < pcols * prows; p++)
                 pvalid[p] &= ~SEND;
+            pconn = powner = 0;
             return FALSE;
         }
+    }
+    /* All out: pref becomes the client's picture. Only now, so the shifted rows
+     * above came from the old picture, as the client has it. */
+    for (i = 0; i < n; i++) {
+        LONG t = ((UWORD *)porder)[i], ttx = t % pcols, tty = t / pcols, p, at;
+        LONG th = tty * TILE + TILE < ph ? TILE : ph - tty * TILE;
+        LONG bw = ((ttx * TILE + TILE < pw ? TILE : pw - ttx * TILE) + 7) >> 3;
+
+        for (p = 0, at = tty * TILE * pbpr + ttx * (TILE / 8); p < pdepth; p++, at += ph * pbpr)
+            copy_rows(pref + at, pbpr, pcur + at, pbpr, bw, th);
+        pvalid[t] = 1;
     }
     pconn = conn_serial;
     powner = client_id;
@@ -2976,7 +3106,7 @@ static BOOL command(const UBYTE *c)
         return info();
     case CMD_FRAME:
         if (c[1] & 2)
-            return frame_planar(c[1] & 1, x, y, w, h);
+            return frame_planar(c[1] & 1, (c[1] & 4) != 0, x, y, w, h);
         return frame(c[1] & 1, x, y, w, h);
     case CMD_PING:
         return reply(0);

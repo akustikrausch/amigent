@@ -86,7 +86,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | nr | command | arg | fields | reply |
 |---|---|---|---|---|
 | 1 | INFO | | | info |
-| 2 | FRAME | 1 = everything, 2 = planar welcome | region | frame, or [planar](#planar) with 2 |
+| 2 | FRAME | 1 = everything, 2 = planar welcome, 4 = more methods | region | frame, or [planar](#planar) with 2 |
 | 3 | MOVE | | x, y | ok |
 | 4 | BUTTON | mask: 1 left, 2 right, 4 middle | | ok |
 | 5 | RAWKEY | 1 = press | x = rawkey, y = qualifier | ok |
@@ -188,6 +188,29 @@ Methods:
 
 HAM pixels are worked out along the whole row from the left edge, starting from
 colour 0, so a client keeps all planes and decodes rows across tile borders.
+
+With arg bit `4` as well (`6`, or `7` for everything) the method byte is a set of
+bits, and the service picks whatever comes out shortest for each tile:
+
+- bits 0-1: `0` raw, `1` PackBits, `2` PackBits of an XOR with the old picture.
+- `4`: row XOR. After unpacking, each row was XORed with the row above it in the
+  same plane; undo it from the top: `row[y] ^= row[y-1]`, per plane.
+- `8`: shifted (only with `2`). The data start with an `s16 dy`, then the PackBits.
+  The XOR partner is not the tile's own old rows but the old picture `dy` rows
+  further down, same columns: row `y` of the tile pairs with old row `y+dy`.
+  Rows outside the screen count as zeros. That is a scrolled window.
+
+The order to undo: unpack, undo the row XOR, then XOR with the partner. "Old
+picture" always means the picture as it was before this frame, also for tiles
+earlier in the same frame, so a client copies its planes when a frame starts and
+takes the partners from that copy. Methods `0`, `1` and `2` mean exactly what
+they meant without bit `4`.
+
+The service looks for a scroll with one changed row of a tile the client
+already has and checks that eight rows in a row agree; it looks up to 256 rows
+either way. Measured on Workbench 3.1, 640×256 with 4 colours: a full frame with
+two Shell windows went from 10.7 to 5.0 KB, a Shell that scrolled by one line
+from 5.7 to 1.9 KB. Fresh text gains little, it is information after all.
 
 What the planar path does differently, besides the format:
 
