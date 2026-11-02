@@ -32,9 +32,6 @@ jobs:
           AMIGENT_OPENSSL: /usr/bin/openssl
         run: |
           /usr/bin/openssl version
-          python -c "from amigent import tls; import sys; made = tls.make_certificate('mac'); open('c.pem','wb').write(made[1]); open('both.pem','wb').write(made[0])"
-          /usr/bin/openssl x509 -in c.pem -noout -text | grep -E "Version|Public Key Algorithm|ASN1 OID|NIST|Public-Key|Signature Algorithm" | head -8
-          grep -- "-----BEGIN" both.pem
           python -m pytest -q -rs tests/test_channel.py -k "certificate or tls"
 
   package:

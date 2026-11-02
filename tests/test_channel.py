@@ -236,4 +236,5 @@ def test_certificate_is_what_amissl_reads(tmp_path, monkeypatch):
     (tmp_path / "cert.pem").write_bytes(certificate)
     shown = subprocess.run([tls.find_openssl(), "x509", "-in", str(tmp_path / "cert.pem"), "-noout",
                             "-text"], capture_output=True, text=True).stdout
-    assert "prime256v1" in shown or "P-256" in shown
+    # LibreSSL (macOS) names no curve and makes an X.509 v1 cert; AmiSSL and the pin don't mind
+    assert "id-ecPublicKey" in shown and "256 bit" in shown
