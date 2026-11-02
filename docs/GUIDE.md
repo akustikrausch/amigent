@@ -8,8 +8,8 @@ Amiga: AmigaOS 3.0 or newer, a TCP/IP stack with `bsdsocket.library` such as
 Roadshow, and a network connection. A plipbox on the parallel port is enough.
 `amigentd` comes in two builds, one for the 68020 and up and `amigentd.000` for a
 plain 68000. An RTG graphics card is optional: chipset screens, HAM included, are
-read too. The screen is a lot quicker with a fast CPU, so for the remote desktop
-a PiStorm or a 68040/060 card is recommended; on a 68000 it works, slowly.
+read too. A plain 68000 at 7 MHz sends a whole 640×256 Workbench screen in
+about 0.6 s; a faster CPU mainly helps with large graphics-card screens.
 
 PC: Python 3.10 or newer on Windows, macOS or Linux. The remote desktop uses Edge
 or Chrome. For encrypted connections `openssl` on the PC and AmiSSL 5.1 or newer
@@ -163,7 +163,9 @@ interrupted copy.
 ## Remote desktop
 
 - **Screen.** Only the 64x64 pixel tiles that changed are transferred, the area
-  around the mouse pointer first. Colours are reduced to 256.
+  around the mouse pointer first. Chipset screens come in their own colours,
+  graphics-card screens with 256. Your mouse and keys always go before the
+  picture, so the Amiga reacts at once even while the screen is catching up.
 - **Screens.** A list in the toolbar shows all open screens and brings the one
   you pick to the front.
 - **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel.
@@ -230,9 +232,14 @@ preview renewed every 20 seconds. A click opens its remote desktop. `--list` and
 
 `amigentd` is a small daemon in C. The screen client and up to four command
 channels share one port. For the screen it keeps the last picture and sends only
-the 64×64 tiles that changed, run-length encoded with 256 colours. Between
-requests a helper process at the lowest priority reads the screen ahead, so
-asking about an unchanged screen costs one network round trip. It also reports
+the 64×64 tiles that changed. Chipset screens go out as the bitplanes the Amiga
+keeps anyway, so a 68000 has almost nothing to convert; graphics-card screens go
+out as tiles with their own small palette. Each tile is packed, often as the
+difference to the picture the PC already has, or to the same picture scrolled.
+Mouse and keys sent during a picture are carried out between its tiles. A
+helper process at the lowest priority notices changes by comparing the planes
+in chip RAM, so asking about an unchanged screen costs one network round trip
+and the Amiga only a few percent of its CPU. It also reports
 the screens, windows, gadgets and menus that Intuition knows. On a command
 channel it runs Shell commands, reads and writes files and reports memory and
 volumes; a long command doesn't hold up the screen.

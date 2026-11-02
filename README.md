@@ -23,6 +23,9 @@ Amigent connects your PC or Mac to your real Amiga over the home network. Then y
 Both at the same time: you see every click the agent makes and can take over at
 any moment.
 
+Amigent is built for the Amiga you actually have: a plain A500 on a plipbox
+works, an accelerated one flies.
+
 ![Amigent with a Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
 
 ## Installation
@@ -65,7 +68,6 @@ Without an AI agent: see the [manual installation](https://github.com/akustikrau
 
 - An Amiga with AmigaOS 3.x, any CPU from the 68000 on, a network connection
   (a plipbox on the parallel port is enough) and a TCP/IP stack such as Roadshow.
-  The faster the CPU, the smoother the screen.
 - A PC or Mac with Windows, macOS or Linux and Python 3.10 or newer.
 
 ## What you can ask for
@@ -75,9 +77,34 @@ Without an AI agent: see the [manual installation](https://github.com/akustikrau
     "Copy the demo to the Amiga and start it."
     "Open the remote desktop."
 
+## Made for slow machines and slow wires
+
+Most of the work in Amigent went into making a slow Amiga on a slow network
+feel quick, for the AI agent and for you at the mouse:
+
+- **The screen travels as the Amiga keeps it.** Chipset screens go out as
+  bitplanes, graphics-card screens as small palette tiles, and only the tiles
+  that changed, often as the difference to what you already have.
+- **Your input comes first.** Mouse moves, clicks and keys are carried out
+  even while a picture is still on its way, and the area around the pointer is
+  sent before the rest.
+- **The Amiga keeps its time.** While nothing happens, Amigent asks rarely
+  and costs the Amiga only a few percent of its CPU.
+- **Files go in one go.** Whole folders travel in a single stream, and files
+  that are already there stay where they are.
+
+Measured with a 640×256 Workbench screen:
+
+| Amiga | whole screen | unchanged screen | CPU while watching |
+|---|---|---|---|
+| 68000, 7 MHz | 0.6 s | 80 ms | under 10 % |
+| A1200, 68020 at 14 MHz | 0.1 s | 15 ms | 2–3 % |
+
+On a 1920×1080 graphics-card screen over a plipbox (about 50 KB/s) the whole
+picture takes about 3 seconds, a pointer move a few milliseconds.
+
 ## Good to know
 
-- **Slow networks are fine.** Only the parts of the screen that change are sent.
 - **New address after a restart?** Amigent finds the Amiga again by itself. It
   takes only the one that proves to be yours.
 - **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
@@ -87,17 +114,11 @@ Without an AI agent: see the [manual installation](https://github.com/akustikrau
 
 More in the [guide](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md) and the [FAQ](https://github.com/akustikrausch/amigent/blob/main/docs/FAQ.md).
 
-## Other projects
+## Related projects
 
-- [amimcp](https://github.com/thomas-luebker/amimcp) by Thomas Luebker also lets
-  an AI agent control a real Amiga, from OS 2.04 on, with amifleet as a native
-  Mac app for several machines. Use it if your Amiga runs OS 2.x or you want
-  nothing but Python's standard library on the PC.
-- [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4) is for AmigaOS 4.1.
-- For emulators such as WinUAE and Amiberry there are MCP servers of their own.
-
-Amigent is the one to pick if you want to use the Amiga yourself as well, have a
-slow network, or want help keeping the machine in shape.
+[amimcp](https://github.com/thomas-luebker/amimcp) also connects AI agents to
+real Amigas, [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4) does it
+for AmigaOS 4.1, and WinUAE and Amiberry have MCP servers of their own.
 
 ## Thanks
 

@@ -56,7 +56,7 @@
  "restart_go": "Starta om",
  "restarting": "Amigan startar om…",
  "restart_failed": "Omstarten misslyckades",
- "about_text": "Din riktiga Amiga, live på den här datorn, med mus och tangentbord.",
+ "about_text": "Din riktiga Amiga, live på den här datorn, med mus och tangentbord, även över ett långsamt nät.",
  "version": "Version {version}",
  "about_amiga": "Amiga",
  "about_screen": "Skärm",

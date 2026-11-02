@@ -56,7 +56,7 @@
  "restart_go": "Redémarrer",
  "restarting": "Redémarrage de l'Amiga…",
  "restart_failed": "Échec du redémarrage",
- "about_text": "Votre vrai Amiga, en direct sur ce PC, avec souris et clavier.",
+ "about_text": "Ton vrai Amiga, en direct sur cet ordinateur, avec souris et clavier, même sur un réseau lent.",
  "version": "Version {version}",
  "about_amiga": "Amiga",
  "about_screen": "Écran",

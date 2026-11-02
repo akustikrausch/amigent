@@ -21,8 +21,9 @@ use the Workbench's command path, so `rx` and the like are found as in a
 Shell.
 
 **Does it run on a 68000?**
-Use `amigentd.000`. Commands and files are fine; the screen is slow, so the
-remote desktop is more useful on a faster CPU.
+Use `amigentd.000`; `amigent-setup` picks it by itself. On a 7 MHz 68000 a whole
+640×256 Workbench screen takes about 0.6 s, an unchanged one 80 ms, and
+watching costs the Amiga under 10 % of its CPU.
 
 **The AI agent waits for a command.**
 A command holds its channel until it ends. Long work belongs in `amiga_job`,
@@ -70,9 +71,10 @@ not answered two minutes after a restart.
 Section, name, program, and optionally the stack size. It goes in sorted by name.
 Don't use the AmiStart ARexx `SAVE` command for this: it rewrites the whole file.
 
-**Screenshots look a bit rough.**
-They're 256 colours on purpose. It's plenty for reading a screen and it keeps the
-link free.
+**Screenshots of a graphics-card screen look a bit rough.**
+They're 256 colours on purpose. It's plenty for reading a screen and keeps the
+link free. Chipset screens come in their exact colours, and
+`amiga_screenshot_color` fetches any region in full colour.
 
 **A game doesn't show up in the screenshot.**
 `amigentd` reads the frontmost Intuition screen. Software that takes over the
