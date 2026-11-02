@@ -16,8 +16,9 @@ Amigent connects your PC or Mac to your real Amiga over the home network. Then y
 - **let an AI agent do the work**, for example Claude Code or Codex: install
   software, update programs, change settings, copy files, click through
   programs. Just tell it what you want.
-- **use the Amiga yourself from your computer**, in a window with the live screen, your
-  own mouse and keyboard, file transfer and a shared clipboard.
+- **use the Amiga yourself from your computer**, as a remote desktop like
+  TeamViewer or VNC: a window with the live screen, your own mouse and
+  keyboard, file transfer and a shared clipboard.
 
 Both at the same time: you see every click the agent makes and can take over at
 any moment.
