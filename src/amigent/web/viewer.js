@@ -1,4 +1,4 @@
-// amigent viewer: draws the Amiga's tiles, sends mouse and keys back.
+// Amigent viewer: draws the Amiga's tiles, sends mouse and keys back.
 (() => {
   "use strict";
 
@@ -158,7 +158,7 @@
         host = m.host;
         document.title = `Amigent · ${host}`;
         if (m.version) {
-          $("st-version").textContent = `amigent ${m.version}`;
+          $("st-version").textContent = `Amigent ${m.version}`;
           $("about-version").textContent = t("version", { version: m.version });
         }
         $("about-host").textContent = host;

@@ -1,7 +1,7 @@
 {
  "connecting": "Forbinder til Amigaen…",
  "offline": "Amigaen svarer ikke. Prøver igen…",
- "disconnected": "Forbindelsen til amigent blev afbrudt. Prøver igen…",
+ "disconnected": "Forbindelsen til Amigent blev afbrudt. Prøver igen…",
  "state_offline": "ikke forbundet",
  "send_file": "Send fil",
  "send_tip": "Kopier filer fra denne pc til Amigaen",

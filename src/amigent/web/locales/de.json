@@ -1,7 +1,7 @@
 {
  "connecting": "Verbinde mit dem Amiga…",
  "offline": "Der Amiga antwortet nicht. Neuer Versuch läuft…",
- "disconnected": "Verbindung zu amigent getrennt. Neuer Versuch läuft…",
+ "disconnected": "Verbindung zu Amigent getrennt. Neuer Versuch läuft…",
  "state_offline": "nicht verbunden",
  "send_file": "Datei senden",
  "send_tip": "Dateien von diesem PC auf den Amiga kopieren",

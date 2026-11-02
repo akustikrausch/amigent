@@ -1,4 +1,4 @@
-; amigent-repair: restores amigent after a system update. Safe to run twice.
+; amigent-repair: restores Amigent after a system update. Safe to run twice.
 FailAt 21
 Set SRC Stuff:amigent
 If NOT EXISTS Stuff:amigent/amigactld

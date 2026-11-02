@@ -56,7 +56,7 @@ SD card, null modem, whatever you've got. Put it in `RAM:`.
 
 **3. Paste this into Claude Code**
 
-    Install amigent from https://github.com/akustikrausch/amigent for me.
+    Install Amigent from https://github.com/akustikrausch/amigent for me.
     Clone it, run pip install -e . in it, then run amigent-setup. It finds my
     Amiga by itself and prints the address. Register the MCP server with
     claude mcp add amigent -e AMIGENT_HOST=<address> -- amigent-server

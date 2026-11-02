@@ -1,7 +1,7 @@
 {
  "connecting": "Yhdistetään Amigaan…",
  "offline": "Amiga ei vastaa. Yritetään uudelleen…",
- "disconnected": "Yhteys amigentiin katkesi. Yritetään uudelleen…",
+ "disconnected": "Yhteys Amigentiin katkesi. Yritetään uudelleen…",
  "state_offline": "ei yhteyttä",
  "send_file": "Lähetä tiedosto",
  "send_tip": "Kopioi tiedostoja tältä PC:ltä Amigaan",

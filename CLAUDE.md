@@ -1,4 +1,4 @@
-# amigent
+# Amigent
 
 MCP bridge to a real Amiga. Start with [README.md](README.md).
 
@@ -26,3 +26,7 @@ When working on an Amiga:
 Releases: raise `__version__` in `src/amigent/__init__.py`, add the changelog entry,
 tag `vX.Y.Z`, then run `--install` again so Installed apps shows the new number.
 - AmiStart's `sm.prefs` is changed with `amiga/menu-add.rexx` only.
+
+Spelling: the product is **Amigent** with a capital A in text and UI. Lowercase only
+where it is a technical name: the Python package, commands such as `amigent-viewer`,
+the MCP server id, folders, URLs, and the Amiga daemon `amigentd`.

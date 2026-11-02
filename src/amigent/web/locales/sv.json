@@ -1,7 +1,7 @@
 {
  "connecting": "Ansluter till Amigan…",
  "offline": "Amigan svarar inte. Försöker igen…",
- "disconnected": "Anslutningen till amigent bröts. Försöker igen…",
+ "disconnected": "Anslutningen till Amigent bröts. Försöker igen…",
  "state_offline": "inte ansluten",
  "send_file": "Skicka fil",
  "send_tip": "Kopiera filer från den här datorn till Amigan",

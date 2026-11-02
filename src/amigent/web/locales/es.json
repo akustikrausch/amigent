@@ -1,7 +1,7 @@
 {
  "connecting": "Conectando con el Amiga…",
  "offline": "El Amiga no responde. Reintentando…",
- "disconnected": "Se perdió la conexión con amigent. Reintentando…",
+ "disconnected": "Se perdió la conexión con Amigent. Reintentando…",
  "state_offline": "sin conexión",
  "send_file": "Enviar archivo",
  "send_tip": "Copiar archivos de este PC al Amiga",

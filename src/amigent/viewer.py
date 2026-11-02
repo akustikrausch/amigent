@@ -5,7 +5,7 @@ Usage: amigent-viewer [HOST] [--port N] [--no-window] [--exit-when-closed]
        amigent-viewer --uninstall
 
 HOST defaults to AMIGENT_HOST. Inside Claude Code the amiga_viewer tool opens
-the same window from the running amigent server, and a second start of the
+the same window from the running Amigent server, and a second start of the
 viewer opens the window of the one that is already running.
 """
 
@@ -646,7 +646,7 @@ def main() -> None:
     parser.add_argument("--install", action="store_true",
                         help="install Amigent as a Windows program (Start menu, desktop, Installed apps)")
     parser.add_argument("--uninstall", action="store_true", help="remove those shortcuts again")
-    parser.add_argument("--version", action="version", version=f"amigent {__version__}")
+    parser.add_argument("--version", action="version", version=f"Amigent {__version__}")
     args = parser.parse_args()
     if args.uninstall:
         from .desktop import uninstall
@@ -663,7 +663,7 @@ def main() -> None:
     if url := running_viewer(args.host):
         if not args.no_window:
             open_window(url)
-        print(f"amigent viewer already running: {url}", flush=True)
+        print(f"Amigent viewer already running: {url}", flush=True)
         return
     viewer = Viewer(
         args.host,
@@ -673,7 +673,7 @@ def main() -> None:
         remember=True,
     )
     url = viewer.start(args.port)
-    print(f"amigent viewer: {url}\nCtrl+C to stop.", flush=True)
+    print(f"Amigent viewer: {url}\nCtrl+C to stop.", flush=True)
     if not args.no_window:
         open_window(url)
     try:

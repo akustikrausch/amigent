@@ -68,5 +68,5 @@ from the shell you ran `--install` in. Changed something? Run `--install` again.
 
 **Amigent does nothing when I click it.**
 Run `amigent-viewer <address>` in a terminal once and read what it says. Under
-WSL the shortcut starts your default distribution's Python, so amigent must be
+WSL the shortcut starts your default distribution's Python, so Amigent must be
 installed there.

@@ -1,7 +1,7 @@
 {
  "connecting": "Łączenie z Amigą…",
  "offline": "Amiga nie odpowiada. Próbuję ponownie…",
- "disconnected": "Utracono połączenie z amigent. Próbuję ponownie…",
+ "disconnected": "Utracono połączenie z Amigent. Próbuję ponownie…",
  "state_offline": "brak połączenia",
  "send_file": "Wyślij plik",
  "send_tip": "Kopiuj pliki z tego PC na Amigę",

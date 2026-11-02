@@ -107,7 +107,7 @@ EndIf
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("host", nargs="?")
-    parser.add_argument("--home", default="SYS:amigent", help="folder for the amigent scripts")
+    parser.add_argument("--home", default="SYS:amigent", help="folder for the Amigent scripts")
     args = parser.parse_args()
 
     host = args.host or find_amiga()

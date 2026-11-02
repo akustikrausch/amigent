@@ -1,7 +1,7 @@
 {
  "connecting": "Připojování k Amize…",
  "offline": "Amiga neodpovídá. Zkouším znovu…",
- "disconnected": "Spojení s amigent bylo přerušeno. Zkouším znovu…",
+ "disconnected": "Spojení s Amigent bylo přerušeno. Zkouším znovu…",
  "state_offline": "nepřipojeno",
  "send_file": "Odeslat soubor",
  "send_tip": "Kopírovat soubory z tohoto PC do Amigy",

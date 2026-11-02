@@ -1,7 +1,7 @@
 {
  "connecting": "Kapcsolódás az Amigához…",
  "offline": "Az Amiga nem válaszol. Újrapróbálás…",
- "disconnected": "Megszakadt a kapcsolat az amigenttel. Újrapróbálás…",
+ "disconnected": "Megszakadt a kapcsolat az Amigenttel. Újrapróbálás…",
  "state_offline": "nincs kapcsolat",
  "send_file": "Fájl küldése",
  "send_tip": "Fájlok másolása erről a PC-ről az Amigára",
