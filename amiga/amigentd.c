@@ -1,6 +1,6 @@
 /*
  * amigentd: the front screen as 64x64 tiles, mouse and keyboard, and command
- * channels for command lines and files, over TCP.
+ * channels for command lines and files, over TCP; with AmiSSL also over TLS.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
  *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET]
@@ -138,6 +138,7 @@ static LONG children;  /* channel and runner processes alive, changed under Forb
 static ULONG runs;  /* numbers temporary names, under Forbid */
 
 static LONG watch(fd_set *r, LONG top);
+static volatile BOOL tls_ready;
 static BOOL newcomers(fd_set *r);
 
 static UBYTE out[OUT_SIZE];
@@ -1549,7 +1550,7 @@ static void accept_pending(void)
     setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
     load_key();
-    hello[7] = secret_len ? 1 : 0;
+    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0);
     l.base = SocketBase;
     l.fd = fd;
     if (!l_send(&l, hello, 8, HELLO_SECONDS)) {
@@ -2575,6 +2576,383 @@ static void serve(void)
     }
 }
 
+/* ---- TLS --------------------------------------------------------------- */
+
+/* With AmiSSL and a certificate in TLS_FILE, a process of its own listens on
+ * PORT+1. Each TLS connection gets a pump process that talks TLS to the client
+ * and plain protocol to our own port on 127.0.0.1, so key, channels and
+ * takeover work exactly as without TLS. The few AmiSSL calls are declared here
+ * from the AmiSSL 5.27 SDK (inline/amissl_protos.h, inline/amisslmaster_protos.h,
+ * amissl/tags.h, libraries/amisslmaster.h), so building needs no SDK. */
+
+typedef struct ssl_st SSL;
+typedef struct ssl_ctx_st SSL_CTX;
+typedef struct ssl_method_st SSL_METHOD;
+
+struct Library *AmiSSLMasterBase, *AmiSSLBase;
+
+LONG __OpenAmiSSLTags(__reg("a6") struct Library *, __reg("d0") LONG APIVersion, Tag tag, ...) =
+    "\tmove.l\ta0,-(a7)\n\tlea\t4(a7),a0\n\tjsr\t-60(a6)\n\tmovea.l\t(a7)+,a0";
+#define OpenAmiSSLTags(v, ...) __OpenAmiSSLTags(AmiSSLMasterBase, (v), __VA_ARGS__)
+void __CloseAmiSSL(__reg("a6") struct Library *) = "\tjsr\t-42(a6)";
+#define CloseAmiSSL() __CloseAmiSSL(AmiSSLMasterBase)
+long __InitAmiSSL(__reg("a6") struct Library *, Tag tag, ...) =
+    "\tmove.l\ta0,-(a7)\n\tlea\t4(a7),a0\n\tjsr\t-36(a6)\n\tmovea.l\t(a7)+,a0";
+#define InitAmiSSL(...) __InitAmiSSL(AmiSSLBase, __VA_ARGS__)
+long __CleanupAmiSSL(__reg("a6") struct Library *, Tag tag, ...) =
+    "\tmove.l\ta0,-(a7)\n\tlea\t4(a7),a0\n\tjsr\t-42(a6)\n\tmovea.l\t(a7)+,a0";
+#define CleanupAmiSSL(...) __CleanupAmiSSL(AmiSSLBase, __VA_ARGS__)
+const SSL_METHOD *__TLS_server_method(__reg("a6") struct Library *) = "\tjsr\t-26946(a6)";
+#define TLS_server_method() __TLS_server_method(AmiSSLBase)
+SSL_CTX *__SSL_CTX_new(__reg("a6") struct Library *, __reg("a0") const SSL_METHOD *meth) = "\tjsr\t-8208(a6)";
+#define SSL_CTX_new(m) __SSL_CTX_new(AmiSSLBase, (m))
+void __SSL_CTX_free(__reg("a6") struct Library *, __reg("a0") SSL_CTX *a) = "\tjsr\t-8214(a6)";
+#define SSL_CTX_free(a) __SSL_CTX_free(AmiSSLBase, (a))
+int __SSL_CTX_use_certificate_chain_file(__reg("a6") struct Library *, __reg("a0") SSL_CTX *ctx,
+                                         __reg("a1") const char *file) = "\tjsr\t-8508(a6)";
+#define SSL_CTX_use_certificate_chain_file(c, f) __SSL_CTX_use_certificate_chain_file(AmiSSLBase, (c), (f))
+int __SSL_CTX_use_PrivateKey_file(__reg("a6") struct Library *, __reg("a0") SSL_CTX *ctx,
+                                  __reg("a1") const char *file, __reg("d0") int type) = "\tjsr\t-8496(a6)";
+#define SSL_CTX_use_PrivateKey_file(c, f, t) __SSL_CTX_use_PrivateKey_file(AmiSSLBase, (c), (f), (t))
+int __SSL_CTX_check_private_key(__reg("a6") struct Library *, __reg("a0") const SSL_CTX *ctx) = "\tjsr\t-8766(a6)";
+#define SSL_CTX_check_private_key(c) __SSL_CTX_check_private_key(AmiSSLBase, (c))
+SSL *__SSL_new(__reg("a6") struct Library *, __reg("a0") SSL_CTX *ctx) = "\tjsr\t-8784(a6)";
+#define SSL_new(c) __SSL_new(AmiSSLBase, (c))
+void __SSL_free(__reg("a6") struct Library *, __reg("a0") SSL *ssl) = "\tjsr\t-8820(a6)";
+#define SSL_free(s) __SSL_free(AmiSSLBase, (s))
+int __SSL_set_fd(__reg("a6") struct Library *, __reg("a0") SSL *s, __reg("d0") int fd) = "\tjsr\t-8358(a6)";
+#define SSL_set_fd(s, fd) __SSL_set_fd(AmiSSLBase, (s), (fd))
+int __SSL_accept(__reg("a6") struct Library *, __reg("a0") SSL *ssl) = "\tjsr\t-8826(a6)";
+#define SSL_accept(s) __SSL_accept(AmiSSLBase, (s))
+int __SSL_read(__reg("a6") struct Library *, __reg("a0") SSL *ssl, __reg("a1") void *buf,
+               __reg("d0") int num) = "\tjsr\t-8838(a6)";
+#define SSL_read(s, b, n) __SSL_read(AmiSSLBase, (s), (b), (n))
+int __SSL_write(__reg("a6") struct Library *, __reg("a0") SSL *ssl, __reg("a1") const void *buf,
+                __reg("d0") int num) = "\tjsr\t-8850(a6)";
+#define SSL_write(s, b, n) __SSL_write(AmiSSLBase, (s), (b), (n))
+int __SSL_shutdown(__reg("a6") struct Library *, __reg("a0") SSL *s) = "\tjsr\t-8994(a6)";
+#define SSL_shutdown(s) __SSL_shutdown(AmiSSLBase, (s))
+int __SSL_pending(__reg("a6") struct Library *, __reg("a0") const SSL *s) = "\tjsr\t-8352(a6)";
+#define SSL_pending(s) __SSL_pending(AmiSSLBase, (s))
+
+#define AMISSL_V303 21  /* AmiSSL 5.1, the first on OpenSSL 3 */
+#define AMISSLMASTER_MIN_VERSION 5
+#define AmiSSL_SocketBase (TAG_USER + 0x01)
+#define AmiSSL_ErrNoPtr (TAG_USER + 0x0b)
+#define AmiSSL_UsesOpenSSLStructs (TAG_USER + 0x0c)
+#define AmiSSL_GetAmiSSLBase (TAG_USER + 0x0d)
+#define SSL_FILETYPE_PEM 1
+
+#define TLS_FILE "S:amigent-tls.pem"
+#define TLS_CHECK_SECONDS 10
+#define TLS_PUMPS 8
+#define TLS_BUFFER 4096
+#ifndef INADDR_LOOPBACK
+#define INADDR_LOOPBACK 0x7F000001
+#endif
+
+static struct Task *volatile tls_task;
+/* tls_ready, declared above: AmiSSL is open, hello flag 2 */
+static UWORD plain_port;
+static LONG tls_pumps;  /* under Forbid */
+static struct Task *pump_task[TLS_PUMPS];  /* under Forbid, for stop_tls() */
+static BYTE tls_gone = -1;  /* the listener's: a pump ended */
+
+struct pump {
+    LONG id;
+    SSL *ssl;
+};
+
+/* Everything in buf to the socket, blocking. */
+static BOOL send_all(struct Library *SocketBase, LONG fd, const UBYTE *buf, LONG n)
+{
+    LONG k;
+
+    while (n > 0) {
+        if ((k = send(fd, (UBYTE *)buf, n, 0)) <= 0)
+            return FALSE;
+        buf += k;
+        n -= k;
+    }
+    return TRUE;
+}
+
+static BOOL ssl_write_all(SSL *ssl, const UBYTE *buf, LONG n)
+{
+    LONG k;
+
+    while (n > 0) {
+        if ((k = SSL_write(ssl, buf, n)) <= 0)
+            return FALSE;
+        buf += k;
+        n -= k;
+    }
+    return TRUE;
+}
+
+/* Client <-TLS-> pump <-plain-> our own port. Ends when either side does. */
+static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
+{
+    struct sockaddr_in addr;
+    LONG inner, n, one = 1;
+
+    if (SSL_accept(ssl) != 1)
+        return;
+    if ((inner = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        return;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(plain_port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(inner, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        setsockopt(inner, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        for (;;) {
+            fd_set r;
+            ULONG sigs = SIGBREAKF_CTRL_C;
+
+            FD_ZERO(&r);
+            if (SSL_pending(ssl) <= 0) {  /* else data waits inside AmiSSL */
+                FD_SET(fd, &r);
+                FD_SET(inner, &r);
+                if (WaitSelect((fd > inner ? fd : inner) + 1, &r, NULL, NULL, NULL, &sigs) < 0 ||
+                    (sigs & SIGBREAKF_CTRL_C))
+                    break;
+            } else
+                FD_SET(fd, &r);
+            if (FD_ISSET(fd, &r)) {
+                if ((n = SSL_read(ssl, buf, TLS_BUFFER)) <= 0 || !send_all(SocketBase, inner, buf, n))
+                    break;
+            }
+            if (FD_ISSET(inner, &r)) {
+                if ((n = recv(inner, buf, TLS_BUFFER, 0)) <= 0 || !ssl_write_all(ssl, buf, n))
+                    break;
+            }
+        }
+    }
+    CloseSocket(inner);
+    SSL_shutdown(ssl);
+}
+
+static void __saveds pump_main(void)
+{
+    struct pump *p;
+    struct Library *SocketBase;
+    LONG fd, err = 0, zero = 0, n;
+    struct timeval limit = {IO_SECONDS, 0};
+    UBYTE *buf = AllocVec(TLS_BUFFER, MEMF_ANY);
+
+    Wait(SIGBREAKF_CTRL_F);
+    p = FindTask(NULL)->tc_UserData;
+    Forbid();
+    for (n = 0; n < TLS_PUMPS && pump_task[n]; n++)
+        ;
+    if (n < TLS_PUMPS)
+        pump_task[n] = FindTask(NULL);
+    Permit();
+    if ((SocketBase = OpenLibrary("bsdsocket.library", 4))) {
+        if (buf && InitAmiSSL(AmiSSL_SocketBase, SocketBase, AmiSSL_ErrNoPtr, &err, TAG_DONE) == 0) {
+            if ((fd = ObtainSocket(p->id, AF_INET, SOCK_STREAM, 0)) < 0)
+                fd = ObtainSocket(p->id, AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (fd >= 0) {
+                /* Blocking, but a record that stops halfway ends the link. */
+                IoctlSocket(fd, FIONBIO, (char *)&zero);
+                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit));
+                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit));
+                SSL_set_fd(p->ssl, fd);
+                pump(SocketBase, fd, p->ssl, buf);
+                CloseSocket(fd);
+            }
+            SSL_free(p->ssl);
+            CleanupAmiSSL(TAG_DONE);
+        }
+        CloseLibrary(SocketBase);
+    }
+    FreeVec(buf);
+    FreeVec(p);
+    Forbid();
+    for (n = 0; n < TLS_PUMPS; n++)
+        if (pump_task[n] == FindTask(NULL))
+            pump_task[n] = NULL;
+    tls_pumps--;
+    if (tls_task)
+        Signal(tls_task, 1UL << tls_gone);
+    children--;
+    Signal(server, 1UL << chan_gone);
+}
+
+/* Certificate and key from TLS_FILE, or NULL. */
+static SSL_CTX *load_tls(void)
+{
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+
+    if (ctx && SSL_CTX_use_certificate_chain_file(ctx, TLS_FILE) == 1 &&
+        SSL_CTX_use_PrivateKey_file(ctx, TLS_FILE, SSL_FILETYPE_PEM) == 1 &&
+        SSL_CTX_check_private_key(ctx) == 1)
+        return ctx;
+    if (ctx)
+        SSL_CTX_free(ctx);
+    return NULL;
+}
+
+/* Size and date of TLS_FILE, all 0 when it isn't there. */
+static void tls_stamp(LONG *stamp)
+{
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    BPTR lock = Lock(TLS_FILE, SHARED_LOCK);
+
+    stamp[0] = stamp[1] = stamp[2] = stamp[3] = 0;
+    if (lock && fib && Examine(lock, fib)) {
+        stamp[0] = fib->fib_Size + 1;
+        stamp[1] = fib->fib_Date.ds_Days;
+        stamp[2] = fib->fib_Date.ds_Minute;
+        stamp[3] = fib->fib_Date.ds_Tick;
+    }
+    if (lock)
+        UnLock(lock);
+    FreeDosObject(DOS_FIB, fib);
+}
+
+static LONG tls_listen(struct Library *SocketBase)
+{
+    struct sockaddr_in addr;
+    LONG fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+
+    if (fd < 0)
+        return -1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(plain_port + 1);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0 && listen(fd, 4) == 0)
+        return fd;
+    CloseSocket(fd);
+    return -1;
+}
+
+static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
+{
+    struct sockaddr_in addr;
+    LONG len = sizeof(addr), fd, one = 1, full;
+    struct pump *p = NULL;
+    struct Process *proc;
+
+    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, &len)) < 0)
+        return;
+    Forbid();
+    full = tls_pumps >= TLS_PUMPS;
+    Permit();
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    if (!full && (p = AllocVec(sizeof(*p), MEMF_CLEAR)) && (p->ssl = SSL_new(ctx)) &&
+        (p->id = ReleaseSocket(fd, UNIQUE_ID)) != -1) {
+        Forbid();
+        tls_pumps++;
+        children++;
+        Permit();
+        proc = CreateNewProcTags(NP_Entry, (ULONG)pump_main, NP_Name, (ULONG)"amigentd tls",
+                                 NP_Priority, 0, NP_StackSize, 65536, TAG_END);
+        if (proc) {
+            proc->pr_Task.tc_UserData = p;
+            Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
+            return;
+        }
+        Forbid();
+        tls_pumps--;
+        children--;
+        Permit();
+        fd = ObtainSocket(p->id, AF_INET, SOCK_STREAM, 0);
+    }
+    if (p && p->ssl)
+        SSL_free(p->ssl);
+    FreeVec(p);
+    if (fd >= 0)
+        CloseSocket(fd);
+}
+
+/* Opens AmiSSL; listens while TLS_FILE is there, and reloads it when it changes. */
+static void __saveds tls_main(void)
+{
+    struct Library *SocketBase;
+    SSL_CTX *ctx = NULL;
+    LONG listen_fd = -1, err = 0, seen[4] = {0, 0, 0, 0}, now[4], n;
+    ULONG sigs;
+
+    Wait(SIGBREAKF_CTRL_F);
+    if ((tls_gone = AllocSignal(-1)) >= 0 && (SocketBase = OpenLibrary("bsdsocket.library", 4))) {
+        if ((AmiSSLMasterBase = OpenLibrary("amisslmaster.library", AMISSLMASTER_MIN_VERSION))) {
+            if (OpenAmiSSLTags(AMISSL_V303, AmiSSL_UsesOpenSSLStructs, FALSE,
+                               AmiSSL_GetAmiSSLBase, (ULONG)&AmiSSLBase,
+                               AmiSSL_SocketBase, (ULONG)SocketBase,
+                               AmiSSL_ErrNoPtr, (ULONG)&err, TAG_DONE) == 0) {
+                tls_ready = TRUE;
+                for (;;) {
+                    struct timeval tv = {TLS_CHECK_SECONDS, 0};
+                    fd_set r;
+
+                    tls_stamp(now);
+                    if (memcmp(now, seen, sizeof(now))) {
+                        memcpy(seen, now, sizeof(now));
+                        if (ctx)
+                            SSL_CTX_free(ctx);  /* pumps hold their own reference */
+                        ctx = now[0] ? load_tls() : NULL;
+                    }
+                    if (ctx && listen_fd < 0)
+                        listen_fd = tls_listen(SocketBase);
+                    if (!ctx && listen_fd >= 0) {
+                        CloseSocket(listen_fd);
+                        listen_fd = -1;
+                    }
+                    FD_ZERO(&r);
+                    if (listen_fd >= 0)
+                        FD_SET(listen_fd, &r);
+                    sigs = SIGBREAKF_CTRL_C;
+                    n = WaitSelect(listen_fd + 1, listen_fd >= 0 ? &r : NULL, NULL, NULL, &tv, &sigs);
+                    if (sigs & SIGBREAKF_CTRL_C)
+                        break;
+                    if (n > 0 && listen_fd >= 0 && FD_ISSET(listen_fd, &r))
+                        tls_accept(SocketBase, listen_fd, ctx);
+                }
+                if (listen_fd >= 0)
+                    CloseSocket(listen_fd);
+                for (;;) {  /* the pumps run in AmiSSL: it stays open until they end */
+                    Forbid();
+                    n = tls_pumps;
+                    Permit();
+                    if (!n)
+                        break;
+                    Wait(1UL << tls_gone);
+                }
+                if (ctx)
+                    SSL_CTX_free(ctx);
+                tls_ready = FALSE;
+                CloseAmiSSL();
+            }
+            CloseLibrary(AmiSSLMasterBase);
+        }
+        CloseLibrary(SocketBase);
+    }
+    Forbid();
+    tls_task = NULL;
+    children--;
+    Signal(server, 1UL << chan_gone);
+}
+
+/* Ctrl-C to the listener and every pump. */
+static void stop_tls(void)
+{
+    LONG i;
+
+    Forbid();
+    if (tls_task)
+        Signal(tls_task, SIGBREAKF_CTRL_C);
+    for (i = 0; i < TLS_PUMPS; i++)
+        if (pump_task[i])
+            Signal(pump_task[i], SIGBREAKF_CTRL_C);
+    Permit();
+}
+
 /* ---- start ------------------------------------------------------------ */
 
 static BOOL broken(void)
@@ -2762,6 +3140,19 @@ int main(int argc, char **argv)
         complain("cannot listen on port %ld; is amigentd running already?", port);
         goto out;
     }
+    plain_port = port;
+    Forbid();
+    children++;
+    Permit();
+    if ((tls_task = (struct Task *)CreateNewProcTags(NP_Entry, (ULONG)tls_main,
+                                                     NP_Name, (ULONG)"amigentd tls listener",
+                                                     NP_Priority, 0, NP_StackSize, 32768, TAG_END)))
+        Signal(tls_task, SIGBREAKF_CTRL_F);
+    else {
+        Forbid();
+        children--;
+        Permit();
+    }
     if (setup_mode && !from_wb && !quiet)
         PutStr("amigentd: SETUP mode, waiting for amigent-setup\n");
     serve();
@@ -2781,6 +3172,7 @@ out:
         for (i = 0; i < CHANNELS; i++)
             if (chans[i].proc)
                 Signal(&chans[i].proc->pr_Task, SIGBREAKF_CTRL_C);
+        stop_tls();
         n = children;
         Permit();
         if (!n)

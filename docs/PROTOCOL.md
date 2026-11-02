@@ -25,7 +25,8 @@ What it needs: a 68020 or better for `bin/amigentd`, any 68000 for
 `bin/amigentd.000` (built with `build-amigentd CPU 68000 TO amigentd.000`; no
 68020 instructions, no word or long access at odd addresses), OS 3.0 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read
-through `graphics.library`, `cybergraphics.library` is only used when it is there.
+through `graphics.library`, `cybergraphics.library` is only used when it is there. AmiSSL 5 is
+only needed for [TLS](#tls).
 
 ## connections
 
@@ -50,8 +51,9 @@ receive that stalls for 30 seconds drops it too.
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
-the protocol version, currently `3`. Flags: `1` when a key is required (see
-[key](#key)), otherwise `0`.
+the protocol version, currently `3`. Flags, added up: `1` when a key is required
+(see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
+certificate is there.
 
 ## key
 
@@ -317,6 +319,23 @@ separated by tabs.
   as `47.115`) and `bsdsocket` as `version.revision`.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
+
+## tls
+
+With AmiSSL 5 (`amisslmaster.library` 5) and the file `S:amigent-tls.pem`, the
+service also listens on PORT+1 for TLS. Inside it is the same protocol, hello
+first, key and command channels included. The file holds the certificate and
+its private key, both PEM; an EC key (prime256v1) keeps the handshake quick,
+about 0.2 s here. The service never makes keys itself, and doesn't check
+clients: the client pins the certificate.
+
+The file is looked at every 10 seconds: when it appears the TLS port opens, when
+it changes it is loaded again (connections already open keep the old one), and
+when it goes the port closes. Without AmiSSL, or with a file that doesn't load,
+there is simply no TLS port. Up to eight TLS connections at once.
+
+Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
+an ordinary connection there. TLS 1.2 and 1.3, as AmiSSL offers them.
 
 ## setup
 
