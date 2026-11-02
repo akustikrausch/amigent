@@ -6,7 +6,7 @@
   \____|__  /|__|_|  /|__| \___  /  \___  >|___|  / |__|
           \/       \/     /_____/       \/      \/
 
-     complete remote control for a real Amiga, by AI or by hand
+     complete remote control for a real Amiga, by AI or manually
 ```
 
 <p align="center"><img src="src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
@@ -62,7 +62,7 @@ Amiga key.
 **Linux:** there is no program entry; start the remote desktop with
 `amigent-viewer`.
 
-Without an AI agent: see [installation by hand](docs/GUIDE.md#installation-by-hand).
+Without an AI agent: see the [manual installation](docs/GUIDE.md#manual-installation).
 
 ## What you need
 
@@ -99,7 +99,7 @@ More in the [guide](docs/GUIDE.md) and the [FAQ](docs/FAQ.md).
 - [MCP-AmigaOS4](https://github.com/derfsss/MCP-AmigaOS4) is for AmigaOS 4.1.
 - For emulators such as WinUAE and Amiberry there are MCP servers of their own.
 
-Amigent is the one to pick if you want to use the Amiga by hand as well, have a
+Amigent is the one to pick if you want to use the Amiga yourself as well, have a
 slow network, or want help keeping the machine in shape.
 
 ## Thanks

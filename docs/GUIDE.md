@@ -15,7 +15,7 @@ PC: Python 3.10 or newer on Windows, macOS or Linux. The remote desktop uses Edg
 or Chrome. For encrypted connections `openssl` on the PC and AmiSSL 5.1 or newer
 on the Amiga.
 
-## Installation by hand
+## Manual installation
 
 ### On the Amiga
 

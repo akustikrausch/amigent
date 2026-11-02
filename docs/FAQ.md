@@ -1,7 +1,7 @@
 # faq
 
 **`amigent-setup` can't find my Amiga.**
-Check that `amigentd SETUP` is running, then give it the address by hand:
+Check that `amigentd SETUP` is running, then give it the address directly:
 `amigent-setup 192.168.1.50`. The search only covers your own /24.
 
 **How do I get amigentd onto the Amiga without a USB stick?**
@@ -49,7 +49,7 @@ Something in `SYS:WBStartup` never exits. Services go into `S:User-Startup`.
 
 **Files are gone after pulling the plug.**
 PFS3 commits lazily, so the last minutes can be lost, while the volume stays fine.
-Use `amiga_restart`, which commits first. Or by hand: `Lock SYS: ON`, `Lock SYS: OFF`.
+Use `amiga_restart`, which commits first. Or yourself: `Lock SYS: ON`, `Lock SYS: OFF`.
 
 **No network after a boot.**
 Some setups need a cold start: 30 seconds without power. Set `AMIGENT_POWER_CMD`
