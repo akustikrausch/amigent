@@ -254,8 +254,8 @@ def test_unlabelled_gadgets_come_with_a_picture(monkeypatch):
     from PIL import Image
 
     class Screen(FakeScreen):
-        def capture(self):
-            return Image.new("RGB", (640, 256), (200, 200, 200))
+        def capture(self, x=0, y=0, w=None, h=None):
+            return Image.new("RGB", (w or 640 - x, h or 256 - y), (200, 200, 200))
 
     fake = Screen(tree=[
         {"kind": "screen", "title": "Workbench", "width": 640, "height": 256},
