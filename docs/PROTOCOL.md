@@ -14,8 +14,9 @@ quits on Ctrl-C.
 
 ## connections
 
-One client at a time. A new connection always wins: the old one is closed, even
-in the middle of a frame. Mouse buttons still held by the old client are let go.
+One client at a time. A new connection always wins: the old one is reset at once,
+even in the middle of a frame, and whatever was still queued for it is thrown
+away. Mouse buttons still held by the old client are let go.
 
 A client that sends nothing for 120 seconds is dropped. A single send or receive
 that stalls for 30 seconds drops it too.
@@ -75,9 +76,17 @@ The fine print:
   packed.
 - "Changed" means different from what the service last sent, compared in RGB332.
   A tile counts as sent once it is queued, whichever client got it.
+- After each frame the service reads the same tiles again in the background, at
+  priority -1, so only spare time goes into it. The next frame then just checks
+  what changed, and a quiet screen answers in about one network round trip.
+  Such an answer can show the screen up to half a second old. Fresh reads
+  happen for arg 1, for tiles older than that, and for everything read less
+  than a quarter of a second after the last MOVE, BUTTON, RAWKEY or CHAR, so a
+  look right after a click shows what the click did.
 - A new screen size (another screen in front) starts over: the next frame sends
   every tile.
-- Screens on the chipset are read through their palette. HAM is not decoded.
+- Screens on the chipset are read through their palette, HAM6 and HAM8
+  included.
 
 ## input
 

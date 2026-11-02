@@ -47,6 +47,8 @@ extern struct Library *CyberGfxBase;
 #define SETTLE_MS 250
 #define IO_SECONDS 30
 #define OUT_SIZE 16384
+#define SEND_BUFFER 16384  /* little queued, so a takeover is not stuck behind it */
+#define SEND_STEP 2048  /* send low water mark: writable means this much room */
 #define CHUNK 32768
 
 enum {
@@ -54,7 +56,7 @@ enum {
     CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END
 };
 
-const char version[] = "$VER: amigentd 1.0.1 (02.11.2026)";
+const char version[] = "$VER: amigentd 1.0.0 (02.11.2026)";
 
 struct Device *TimerBase;
 struct IntuitionBase *IntuitionBase;
@@ -112,7 +114,9 @@ static BOOL flush(void)
     while (done < out_len) {
         if (!ready(TRUE))
             return FALSE;
-        n = send(client, out + done, out_len - done, 0);
+        /* No more than the stack promised room for, so send() never blocks. */
+        n = out_len - done < SEND_STEP ? out_len - done : SEND_STEP;
+        n = send(client, out + done, n, 0);
         if (n < 0 && Errno() == EWOULDBLOCK)
             continue;
         if (n <= 0)
@@ -372,6 +376,29 @@ static struct Screen *front(ULONG *lock)
 
 #define rgb332(r, g, b) ((UBYTE)(((r) >> 5) | ((g) >> 5 << 3) | ((b) & 0xC0)))
 
+/* One row of HAM6 or HAM8 pens from the left edge; RGB332 out from pixel skip on.
+ * Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits become the
+ * top bits of that component, which is all RGB332 keeps. */
+static void ham_row(const UBYTE *pens, LONG width, ULONG depth, const UBYTE *pal,
+                    UBYTE *dst, LONG skip)
+{
+    UBYTE c[3], shift = depth - 2, mask = (1 << shift) - 1, up = 8 - shift;
+    LONG i;
+
+    c[0] = pal[0], c[1] = pal[1], c[2] = pal[2];  /* each row starts from colour 0 */
+    for (i = 0; i < width; i++) {
+        UBYTE p = pens[i], data = p & mask;
+        switch (p >> shift) {
+        case 0: c[0] = pal[3 * data]; c[1] = pal[3 * data + 1]; c[2] = pal[3 * data + 2]; break;
+        case 1: c[2] = data << up; break;
+        case 2: c[0] = data << up; break;
+        case 3: c[1] = data << up; break;
+        }
+        if (i >= skip)
+            dst[i - skip] = rgb332(c[0], c[1], c[2]);
+    }
+}
+
 /* Chipset screens: pens through the palette, HAM6 and HAM8 decoded along each row. */
 static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
 {
@@ -411,21 +438,7 @@ static BOOL grab_planar(struct Screen *scr, LONG x0, LONG y0, LONG cw, LONG y1)
                 dst[i] = rgb332(c[0], c[1], c[2]);
             }
         } else {
-            /* Top two bits: 0 = pen, 1 = blue, 2 = red, 3 = green. The data bits
-             * become the top bits of that component, which is all RGB332 keeps. */
-            UBYTE c[3], shift = depth - 2, mask = (1 << shift) - 1, up = 8 - shift;
-            c[0] = pal[0], c[1] = pal[1], c[2] = pal[2];
-            for (i = 0; i < (ULONG)width; i++) {
-                UBYTE p = rgb[i], data = p & mask;
-                switch (p >> shift) {
-                case 0: c[0] = pal[3 * data]; c[1] = pal[3 * data + 1]; c[2] = pal[3 * data + 2]; break;
-                case 1: c[2] = data << up; break;
-                case 2: c[0] = data << up; break;
-                case 3: c[1] = data << up; break;
-                }
-                if ((LONG)i >= x0 - from)
-                    dst[i - (x0 - from)] = rgb332(c[0], c[1], c[2]);
-            }
+            ham_row(rgb, width, depth, pal, dst, x0 - from);
         }
     }
     FreeBitMap(line);
@@ -774,6 +787,10 @@ static BOOL run_command(UWORD len)
 static void drop_client(void)
 {
     if (client >= 0) {
+        /* Reset rather than close: whatever still sits in the send buffer would
+         * otherwise hold up the next client on a slow link. */
+        struct linger now = {1, 0};
+        setsockopt(client, SOL_SOCKET, SO_LINGER, &now, sizeof(now));
         CloseSocket(client);
         client = -1;
     }
@@ -789,7 +806,7 @@ static void drop_client(void)
 static void take_client(void)
 {
     struct sockaddr_in addr;
-    LONG len = sizeof(addr), fd, one = 1;
+    LONG len = sizeof(addr), fd, one = 1, low = SEND_STEP, buffer = SEND_BUFFER;
     static const UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
 
     fd = accept(listener, (struct sockaddr *)&addr, &len);
@@ -799,6 +816,8 @@ static void take_client(void)
     client = fd;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     IoctlSocket(fd, FIONBIO, (char *)&one);  /* waits go through ready() */
+    setsockopt(fd, SOL_SOCKET, SO_SNDLOWAT, &low, sizeof(low));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer, sizeof(buffer));
     if (!put(hello, 8) || !flush())
         drop_client();
 }
