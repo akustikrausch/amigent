@@ -28,7 +28,7 @@
 #include <proto/icon.h>
 #include <string.h>
 
-const char version[] = "$VER: amigent-status 1.0.0 (02.11.2026)";
+const char version[] = "$VER: amigent-status 1.1.0 (02.11.2026)";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;

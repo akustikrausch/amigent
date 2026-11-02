@@ -59,6 +59,7 @@ extern struct Library *CyberGfxBase;
 #define PROTOCOL_VERSION 3
 #define DEFAULT_PORT 6801
 #define TILE 64
+#define RGB_TILES 2  /* tiles read in one go: 24 KB, so a 1 MB A500+ still copes */
 #define RGB_MAX (512L * 512)  /* FRAME_RGB: most pixels at once */
 /* Menu boxes relative to Intuition's layout numbers, found on OS 3.2. */
 #define MENU_X 0
@@ -96,7 +97,7 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
 };
 
-const char version[] = "$VER: amigentd 1.0.0 (02.11.2026)";
+const char version[] = "$VER: amigentd 1.1.0 (02.11.2026)";
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -500,7 +501,7 @@ static BOOL fit_frame(LONG w, LONG h)
     valid = AllocVec(cols * rows, MEMF_ANY | MEMF_CLEAR);
     want = AllocVec(cols * rows, MEMF_ANY | MEMF_CLEAR);
     stamp = AllocVec(cols * rows * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
-    rgb = AllocVec(w * TILE * 3, MEMF_ANY);
+    rgb = AllocVec(RGB_TILES * TILE * TILE * 3, MEMF_ANY);
     if (!ref || !cur || !valid || !want || !stamp || !rgb) {
         free_frame();
         return FALSE;
@@ -587,18 +588,42 @@ static void get_rgb32(struct ColorMap *cm, ULONG first, ULONG n, ULONG *out)
 }
 
 /* Pens of one row straight from the planes, for V37 where ReadPixelLine8
- * would want an AllocBitMap. Byte at a time; slow, but only Kickstart 2 pays. */
+ * would want an AllocBitMap. A table fans a plane byte out to eight pens, two
+ * longs at a time: c2p the way it was done before there was a blitter trick. */
+static ULONG fan_hi[256], fan_lo[256];
+
 static void pens_by_hand(struct BitMap *bm, LONG x0, LONG y, LONG width, ULONG depth, UBYTE *pens)
 {
     LONG x, p;
 
-    memset(pens, 0, width);
-    for (p = 0; p < (LONG)depth; p++) {
-        const UBYTE *row = bm->Planes[p] + y * bm->BytesPerRow;
-        UBYTE bit = 1 << p;
-        for (x = 0; x < width; x++)
-            if (row[(x0 + x) >> 3] & (0x80 >> ((x0 + x) & 7)))
-                pens[x] |= bit;
+    if (!fan_hi[255])
+        for (x = 0; x < 256; x++)
+            for (p = 0; p < 8; p++)
+                if (x & (0x80 >> p)) {
+                    if (p < 4) fan_hi[x] |= 1UL << (24 - 8 * p);
+                    else fan_lo[x] |= 1UL << (24 - 8 * (p - 4));
+                }
+    if (x0 & 7) {  /* off the byte grid: the slow way */
+        memset(pens, 0, width);
+        for (p = 0; p < (LONG)depth; p++) {
+            const UBYTE *row = bm->Planes[p] + y * bm->BytesPerRow;
+            UBYTE bit = 1 << p;
+            for (x = 0; x < width; x++)
+                if (row[(x0 + x) >> 3] & (0x80 >> ((x0 + x) & 7)))
+                    pens[x] |= bit;
+        }
+        return;
+    }
+    y *= bm->BytesPerRow;  /* now the row's offset in each plane */
+    for (x = 0; x < width; x += 8) {  /* pens comes from AllocVec: longs line up */
+        ULONG hi = 0, lo = 0;
+        for (p = 0; p < (LONG)depth; p++) {
+            UBYTE b = bm->Planes[p][y + ((x0 + x) >> 3)];
+            hi |= fan_hi[b] << p;
+            lo |= fan_lo[b] << p;
+        }
+        ((ULONG *)(pens + x))[0] = hi;
+        ((ULONG *)(pens + x))[1] = lo;
     }
 }
 
@@ -701,17 +726,21 @@ static BOOL differs(LONG x, LONG y, LONG tw, LONG th)
 /* Reads tiles tx0..tx1 of tile row ty from the screen into cur, as RGB332. */
 static void read_tiles(struct Screen *scr, LONG ty, LONG tx0, LONG tx1)
 {
-    LONG x0 = tx0 * TILE, y0 = ty * TILE, x, n, i;
-    LONG cw = ((tx1 + 1) * TILE < ref_w ? (tx1 + 1) * TILE : ref_w) - x0;
+    LONG y0 = ty * TILE, x, n, i, t0;
     LONG th = ref_h - y0 < TILE ? ref_h - y0 : TILE;
     ULONG ms = now_ms();
-    UBYTE *src = rgb;
 
-    read_rgb(scr, x0, y0, cw, th, rgb);
-    for (n = 0; n < th; n++) {
-        UBYTE *dst = cur + (y0 + n) * ref_w + x0;
-        for (i = 0; i < cw; i++, src += 3)
-            dst[i] = rgb332(src[0], src[1], src[2]);
+    for (t0 = tx0; t0 <= tx1; t0 += RGB_TILES) {  /* a couple of tiles at a time */
+        LONG x0 = t0 * TILE, t1 = t0 + RGB_TILES - 1 < tx1 ? t0 + RGB_TILES - 1 : tx1;
+        LONG cw = ((t1 + 1) * TILE < ref_w ? (t1 + 1) * TILE : ref_w) - x0;
+        UBYTE *src = rgb;
+
+        read_rgb(scr, x0, y0, cw, th, rgb);
+        for (n = 0; n < th; n++) {
+            UBYTE *dst = cur + (y0 + n) * ref_w + x0;
+            for (i = 0; i < cw; i++, src += 3)
+                dst[i] = rgb332(src[0], src[1], src[2]);
+        }
     }
     for (x = tx0; x <= tx1; x++) {
         UBYTE *v = valid + ty * cols + x;

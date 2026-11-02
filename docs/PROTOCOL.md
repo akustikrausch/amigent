@@ -20,7 +20,7 @@ open, see [TLS](#tls). The service runs at priority 2, waits at boot until
 
 Started from Workbench, the same come from the icon's tool types: `PORT=<n>`,
 `SETUP`, `KEY=<file>`, `QUIET`, `TLSONLY`. Tool types in brackets, like `(SETUP)`, are
-off. When it can't start (no OS 3.0, port taken, out of memory) it says so in a
+off. When it can't start (no OS 2.04, port taken, out of memory) it says so in a
 requester, unless `QUIET` is set. A port that is taken is tried for a minute
 first, as at boot.
 
@@ -28,10 +28,23 @@ What it needs: a 68020 or better for `bin/amigentd`, any 68000 for
 `bin/amigentd.000` (built with `build-amigentd CPU 68000 TO amigentd.000`; no
 68020 instructions, no word or long access at odd addresses), and for a Vampire
 `bin/amigentd.080`, built by vbcc for the 68080 (`CPU 68080`); that one is not
-tried on a real Vampire yet, `bin/amigentd` runs there as well, OS 3.0 or newer, and a TCP stack with
+tried on a real Vampire yet, `bin/amigentd` runs there as well, OS 2.04 or newer, and a TCP stack with
 `bsdsocket.library` 4. Graphics cards are optional: chipset screens are read
 through `graphics.library`, `cybergraphics.library` is only used when it is there. AmiSSL 5 is
 only needed for [TLS](#tls).
+
+On Kickstart 2.04 (V37) everything works that doesn't need a graphics card or
+AmiSSL: key, command channels, files, EXEC, ARexx, input, SCREENS, UITREE,
+MENUS and [planar](#planar) frames, which are the way to go there. Colours come
+with 4 bits a gun, as the chipset has them. The classic frame, format 2 and
+FRAME_RGB read pixels by hand there and want memory: the classic picture is
+two bytes a pixel of the whole screen, FRAME_RGB three bytes a pixel of its
+region. When that isn't to be had, the classic frame answers with no tiles,
+format 2 with width and height 0, FRAME_RGB with `0`×`0`. Measured on an A500+
+(68000 at 7 MHz, Kickstart 37.175, Workbench 2.04, 1 MB chip, no fast memory,
+640×256 with 4 colours): planar full frame 0.69 s, unchanged 0.17 s, a typed
+line 424 bytes; FRAME_RGB 320×64 in 1.9 s; the classic frame did not fit with
+two Shells open.
 
 ## connections
 
@@ -474,7 +487,7 @@ the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
 |---|---|
 | STATUS | `key=value` lines, see below |
 | CLIENTS | a line per connection: kind, address, seconds connected, tab separated |
-| VERSION | `amigentd 1.0.0 (02.11.2026)` |
+| VERSION | `amigentd 1.1.0 (02.11.2026)` |
 | HELP | the command names |
 | QUIT | `bye`, then amigentd ends as on Ctrl-C |
 
