@@ -15,7 +15,6 @@ import argparse
 import io
 import json
 import os
-import platform
 import queue
 import re
 import secrets
@@ -35,6 +34,8 @@ from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands
 from .screenfeed import Feed, InputQueue
+from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
+from .power import flush_volumes, reboot
 from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa: F401 - imported from here
                         _Handler, _Server)
 
@@ -311,7 +312,7 @@ class Viewer:
 
     def _ctl(self, fn):
         with self.ctl_lock:
-            if not self.ctl._sock:
+            if not self.ctl.connected:
                 self.ctl.connect()
             try:
                 return fn()
@@ -392,31 +393,15 @@ class Viewer:
             if self.restart:
                 self.restart()
             else:
-                self._ctl(lambda: self.ctl.flush(self.flush_volumes))
-                try:
-                    self._ctl(lambda: self.ctl.exec("Run >NIL: C:Reboot", timeout=5))
-                except AmigaError:
-                    pass  # it went down before answering
-                self.ctl.close()
+                self._ctl(lambda: reboot(self.ctl, self.flush_volumes))
         except (AmigaError, OSError) as e:
             self.event("toast", key="restart_failed", text=str(e))
-
-
-def windows_exe(name: str) -> str:
-    """A Windows program by name; WSL started from a shortcut may lack the Windows PATH."""
-    if found := shutil.which(name):
-        return found
-    for folder in ("/mnt/c/Windows/System32", "/mnt/c/Windows/System32/WindowsPowerShell/v1.0",
-                   "/mnt/c/Windows"):
-        if os.path.exists(f"{folder}/{name}"):
-            return f"{folder}/{name}"
-    return name
 
 
 def open_window(url: str) -> None:
     """Show url as its own window (Edge or Chrome app mode), else in the default browser."""
     app = [f"--app={url}", "--window-size=1440,900", "--new-window"]
-    wsl = "microsoft" in platform.release().lower()
+    wsl = in_wsl()
     commands = []
     if wsl or sys.platform == "win32":
         cmd = windows_exe("cmd.exe") if wsl else "cmd"
@@ -465,7 +450,7 @@ def focus_window(title: str) -> bool:
                 if done.stdout.strip() == "ok":
                     return True
             return False
-        if sys.platform == "win32" or "microsoft" in platform.release().lower():
+        if sys.platform == "win32" or in_wsl():
             exe = windows_exe("powershell.exe") if sys.platform != "win32" else "powershell"
             title_ps = title.replace("'", "''")
             done = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command",
@@ -541,7 +526,7 @@ def main() -> None:
         host,
         ctl_port=int(os.environ.get("AMIGENT_CTL_PORT", "6800")),
         screen_port=int(os.environ.get("AMIGENT_SCREEN_PORT", "6801")),
-        flush_volumes=os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split(),
+        flush_volumes=flush_volumes(),
         remember=True,
     )
     url = viewer.start(args.port)

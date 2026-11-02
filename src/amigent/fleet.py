@@ -17,27 +17,25 @@ import concurrent.futures
 import io
 import json
 import os
-import re
 import secrets
 import threading
 import time
-from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import machines
 from .errors import AmigaError
 from .amigentd import AmigentdError
 from .channel import Commands
-from .power import reboot
+from .power import flush_volumes, reboot
 from .secret import FOLDER
-from .viewer import STATIC, WEB, Viewer, _Server, open_window
+from .viewer import WEB, Viewer, open_window
+from .webserver import QuietServer, TokenHandler
 
 PREVIEW_EVERY = 20  # seconds between previews of one Amiga; the link has no cycles to waste
 PREVIEW_WIDTH = 480
 RUN_TIMEOUT = 120  # one command for the whole fleet: generous, plipboxes are no T1 lines
 OUTPUT_LIMIT = 8000  # chars per Amiga, tail end only; the page is no log viewer
 FLEET_STATIC = {"fleet.js": "text/javascript", "fleet.css": "text/css"}
-FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
 
 
 class Fleet:
@@ -55,9 +53,9 @@ class Fleet:
     def start(self, port: int = 6820) -> str:
         handler = type("FleetHandler", (_FleetHandler,), {"fleet": self})
         try:
-            self.httpd = _Server(("127.0.0.1", port), handler)
+            self.httpd = QuietServer(("127.0.0.1", port), handler)
         except OSError:
-            self.httpd = _Server(("127.0.0.1", 0), handler)
+            self.httpd = QuietServer(("127.0.0.1", 0), handler)
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -125,42 +123,26 @@ class Fleet:
 
     def restart(self, index: int) -> dict:
         """Disks flushed, then a warm restart; the preview picks it up once it's back."""
-        return self._command(self.entries[index], lambda commands: reboot(commands, FLUSH_VOLUMES))
+        return self._command(self.entries[index], lambda commands: reboot(commands, flush_volumes()))
 
     def open_viewer(self, index: int) -> str:
         viewer = self.entries[index]["viewer"]
         return viewer.start(0)
 
 
-class _FleetHandler(BaseHTTPRequestHandler):
+class _FleetHandler(TokenHandler):
     fleet: Fleet
-    protocol_version = "HTTP/1.1"
+    extra_static = FLEET_STATIC
 
-    def log_message(self, *args) -> None:
-        pass
-
-    def _allowed(self, query: dict) -> bool:
-        host_ok = self.headers.get("Host", "") in (
-            f"127.0.0.1:{self.fleet.port}", f"localhost:{self.fleet.port}")
-        return host_ok and secrets.compare_digest(query.get("t", [""])[0], self.fleet.token)
-
-    def _reply(self, code: int, body: bytes, kind: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+    @property
+    def gate(self):
+        return self.fleet
 
     def do_GET(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        name = url.path.lstrip("/")
-        if name in STATIC or name in FLEET_STATIC:
-            kind = STATIC.get(name) or FLEET_STATIC[name]
-            return self._reply(200, (WEB / name).read_bytes(), kind)
-        if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
-            return self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
+        if self._static(url.path.lstrip("/")):
+            return
         if not self._allowed(query):
             return self._reply(403, b"Open the overview through amigent-fleet.", "text/plain")
         if url.path == "/":

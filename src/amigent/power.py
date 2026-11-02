@@ -56,6 +56,11 @@ def power_cycle(host: str, port: int, attempts: int = 3) -> int:
     raise PowerError(f"no answer from {host}:{port} after {attempts} power cycles")
 
 
+def flush_volumes() -> list[str]:
+    """The volumes to commit before any restart: AMIGENT_FLUSH_VOLUMES, else SYS:."""
+    return os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
+
+
 def reboot(commands, volumes) -> None:
     """Flush the disks, then pull the reset: the clean way down, not the plug."""
     commands.flush(volumes)

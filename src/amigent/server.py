@@ -15,7 +15,7 @@ from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd
 from .channel import Commands, Request, perform
-from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port
+from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot
 from .power import available as power_available
 from .viewer import Viewer, open_window
 
@@ -27,7 +27,7 @@ MAX_EDGE = pictures.MAX_EDGE  # larger images get downscaled by the model API an
 SAME_SHOT = 120.0  # seconds an unchanged region counts as already seen
 LOCK_FILE = "amigent.lock"  # lives in the temp folder, see locks.py
 VIEWER_PORT = int(os.environ.get("AMIGENT_VIEWER_PORT", "6810"))
-FLUSH_VOLUMES = os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split()
+FLUSH_VOLUMES = flush_volumes()
 SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
 
 def inventory_folder() -> Path:
@@ -674,12 +674,7 @@ def amiga_restart() -> str:
     the disks were written before the restart, so nothing is lost.
     """
     with _exclusive():
-        ctl.flush(FLUSH_VOLUMES)
-        try:
-            ctl.exec("Run >NIL: C:Reboot", timeout=5)
-        except (OSError, AmigaError):
-            pass  # the machine went down before it could answer
-        ctl.close()
+        reboot(ctl, FLUSH_VOLUMES)
         with _screen_lock():
             screen.close()
         time.sleep(10)

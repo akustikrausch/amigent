@@ -100,25 +100,33 @@ class WebSocket:
 
 
 
-class _Server(ThreadingHTTPServer):
+class QuietServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def handle_error(self, request, client_address) -> None:
         pass  # a page that closes mid-request is no news
 
 
-class _Handler(BaseHTTPRequestHandler):
-    viewer: "Viewer"  # noqa: F821 - set by the viewer, which imports us
+_Server = QuietServer  # the old name, kept for old imports
+
+
+class TokenHandler(BaseHTTPRequestHandler):
+    """The bouncer every local page shares: right Host, right token, or no entry.
+
+    Subclasses set `gate`, anything with a `port` and a `token`, and may add
+    their own files to `extra_static`."""
+
+    gate = None
+    extra_static: dict[str, str] = {}
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *args) -> None:
         pass  # stdout belongs to MCP, and nobody needs the noise on stderr
 
     def _allowed(self, query: dict) -> bool:
-        host_ok = self.headers.get("Host", "") in (
-            f"127.0.0.1:{self.viewer.port}", f"localhost:{self.viewer.port}")
-        token = query.get("t", [""])[0]
-        return host_ok and secrets.compare_digest(token, self.viewer.token)
+        port = self.gate.port
+        host_ok = self.headers.get("Host", "") in (f"127.0.0.1:{port}", f"localhost:{port}")
+        return host_ok and secrets.compare_digest(query.get("t", [""])[0], self.gate.token)
 
     def _reply(self, code: int, body: bytes, kind: str = "application/json") -> None:
         self.send_response(code)
@@ -131,14 +139,29 @@ class _Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, value) -> None:
         self._reply(code, json.dumps(value).encode())
 
+    def _static(self, name: str) -> bool:
+        """Serve the page's own files and languages to anyone; True if that was the job."""
+        if name in STATIC or name in self.extra_static:
+            self._reply(200, (WEB / name).read_bytes(), STATIC.get(name) or self.extra_static[name])
+            return True
+        if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
+            self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
+            return True
+        return False
+
+
+class _Handler(TokenHandler):
+    viewer: "Viewer"  # noqa: F821 - set by the viewer, which imports us
+
+    @property
+    def gate(self):
+        return self.viewer
+
     def do_GET(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        name = url.path.lstrip("/")
-        if name in STATIC:
-            return self._reply(200, (WEB / name).read_bytes(), STATIC[name])
-        if re.fullmatch(r"locales/[a-z]{2}\.json", name) and (WEB / name).is_file():
-            return self._reply(200, (WEB / name).read_bytes(), "application/json; charset=utf-8")
+        if self._static(url.path.lstrip("/")):
+            return
         if not self._allowed(query):
             return self._reply(403, b"Open the viewer through amigent.", "text/plain")
         if url.path == "/":
