@@ -192,8 +192,8 @@ def test_setup_keeps_existing_amigactld_settings():
     from amigent.setup import allow_script
 
     script = allow_script("192.168.1.10", "SYS:amigent")
-    assert 'Search >NIL: S:amigactld.conf "ALLOW 192.168.1.10"' in script
     assert 'Echo >>S:amigactld.conf "ALLOW 192.168.1.10"' in script
+    assert "Copy S:amigactld.conf S:amigactld.conf.amigent-bak" in script
 
 
 def test_picture_is_dropped_when_others_took_frames():
@@ -214,3 +214,30 @@ def test_ui_click_by_number(monkeypatch):
     monkeypatch.setattr(server, "screen", fake)
     server.amiga_ui_click(number=6, window="Amigent")
     assert fake.calls == [("click", 1043, 588)]
+
+
+def test_refusal_is_not_retried():
+    seen = []
+    amiga = fake_amigentd(2, {7: b"\1"}, seen)
+    amiga.connect()
+    before = len(seen)
+    assert amiga.char("x") is False  # the keymap can't do it: amigentd answers 1
+    assert [c[0] for c in seen[before:]] == [7]
+
+
+def test_changes_seen_by_anyone_count():
+    amiga = fake_amigentd(2, {}, [])
+    amiga.changes.append((10.0, 0, 0, 64, 64))
+    amiga.width, amiga.height = 640, 256
+    assert amiga.changed_since(5.0, 0, 0, 100, 100) == 1
+    assert amiga.changed_since(5.0, 200, 0, 50, 50) == 0
+    assert amiga.changed_since(11.0) == 0
+
+
+def test_typing_goes_out_in_one_batch():
+    seen = []
+    amiga = fake_amigentd(2, {}, seen)
+    amiga.connect()
+    before = len(seen)
+    amiga.type_text("ab\n")
+    assert [c[0] for c in seen[before:]] == [7, 7, 5, 5]

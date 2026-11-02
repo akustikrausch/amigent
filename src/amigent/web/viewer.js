@@ -218,12 +218,19 @@
     LUT[v] = 0xff000000 | (b << 16) | (g << 8) | r;
   }
 
+  // Pictures and tiles must land in the order they came: a snapshot decodes
+  // asynchronously, so everything after it waits for it.
+  let drawing = Promise.resolve();
+
   function onBinary(buffer) {
     const kind = new Uint8Array(buffer, 0, 1)[0];
-    if (kind === 1) drawTiles(buffer);
-    else if (kind === 2) {
-      createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" }))
-        .then((bitmap) => ctx.drawImage(bitmap, 0, 0));
+    if (kind === 1) {
+      drawing = drawing.then(() => drawTiles(buffer));
+    } else if (kind === 2) {
+      drawing = drawing
+        .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
+        .then((bitmap) => ctx.drawImage(bitmap, 0, 0))
+        .catch(() => {});
     }
   }
 

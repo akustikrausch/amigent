@@ -15,13 +15,13 @@ import concurrent.futures
 import json
 import socket
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
 from . import lzh
-from .amigactl import AmigaCtl
+from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
-from .power import wait_for_port
 from .secret import load_key, new_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
@@ -76,10 +76,9 @@ def allow_script(address: str, home: str) -> str:
     return f"""FailAt 21
 If EXISTS S:amigactld.conf
   Copy S:amigactld.conf S:amigactld.conf.amigent-bak QUIET
-  Search >NIL: S:amigactld.conf "ALLOW {address}" QUIET
-  If WARN
-    Echo >>S:amigactld.conf "ALLOW {address}"
-  EndIf
+  ; Search can't match whole lines (1.2.3.5 would match 1.2.3.50), and a second
+  ; identical ALLOW line does no harm.
+  Echo >>S:amigactld.conf "ALLOW {address}"
 Else
   Echo >S:amigactld.conf "ALLOW {address}"
 EndIf
@@ -100,6 +99,19 @@ If NOT WARN
 EndIf
 Run >NIL: C:amigactld
 """
+
+
+def reach_amigactld(host: str, wait: float = 40) -> AmigaCtl | None:
+    """A working amigactld connection, or None if it stays silent or turns us away."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            ctl = AmigaCtl(host)
+            ctl.connect()
+            return ctl
+        except AmigaError:
+            time.sleep(3)
+    return None
 
 
 def run_script(link: Amigentd, text: str) -> None:
@@ -184,21 +196,15 @@ def main() -> int:
     try:
         link.connect()
         install(link, args.home, key, allow)
-        if not wait_for_port(host, 6800, 30):
+        ctl = reach_amigactld(host)
+        if ctl is None and allow:
+            # The Amiga sees us under another address: undo the restriction while we still can.
+            print("amigactld turns this PC away; removing the ALLOW line again")
+            run_script(link, UNDO_ALLOW)
+            ctl = reach_amigactld(host)
+        if ctl is None:
             print("amigactld does not answer yet. A reboot of the Amiga should sort that out.")
             return 1
-        try:
-            ctl = AmigaCtl(host)
-            ctl.connect()
-        except OSError as e:
-            if not allow:
-                raise
-            # The Amiga sees us under another address: undo the restriction while we still can.
-            print(f"amigactld turned this PC away ({e}); removing the ALLOW line again")
-            run_script(link, UNDO_ALLOW)
-            wait_for_port(host, 6800, 20)
-            ctl = AmigaCtl(host)
-            ctl.connect()
         link.end_setup()
     except AmigentdError as e:
         print(f"{e}\nStart `amigentd SETUP` on the Amiga and try again.")

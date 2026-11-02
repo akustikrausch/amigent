@@ -14,6 +14,11 @@ CHUNK_SIZE = 4096
 MAX_LINE = 4096
 
 
+def join_path(folder: str, name: str) -> str:
+    """Amiga path of name inside folder ('RAM:' + 'x' or 'Work:Games' + 'x')."""
+    return folder + name if folder.endswith((":", "/")) else f"{folder}/{name}"
+
+
 class AmigaError(Exception):
     """The daemon answered with ERR, or the connection failed."""
 

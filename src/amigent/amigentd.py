@@ -6,6 +6,7 @@ import random
 import socket
 import struct
 import time
+from collections import deque
 
 from PIL import Image
 
@@ -39,11 +40,15 @@ class AmigentdError(Exception):
     pass
 
 
+class AmigentdRefused(AmigentdError):
+    """amigentd answered, but said no: the link is fine, so nothing is retried."""
+
+
 def decode_tile(data: bytes, w: int, h: int) -> Image.Image:
     size = w * h
     if len(data) != size or size == 0:
         out = bytearray()
-        for i in range(0, len(data), 2):
+        for i in range(0, len(data) - 1, 2):
             out += bytes([data[i + 1]]) * (data[i] + 1)
         data = bytes(out)
     if len(data) != size:
@@ -58,6 +63,7 @@ class Amigentd:
         self.host = host
         self.key = key
         self.client_id = random.getrandbits(32)  # lets amigentd tell us if others took frames
+        self.changes = deque(maxlen=4096)  # (time, x, y, w, h) of tiles received, by anyone
         self.port = port
         self.timeout = timeout
         self._sock: socket.socket | None = None
@@ -153,7 +159,9 @@ class Amigentd:
             self.connect()
         try:
             result = fn()
-        except (OSError, AmigentdError):
+        except AmigentdRefused:
+            raise
+        except (OSError, AmigentdError, AssertionError):
             if self.protocol < 2 and time.monotonic() - self._last_used < 100:
                 # Old amigentd: not the idle timeout, so another client took over
                 # and may have received tiles our picture is missing.
@@ -167,29 +175,45 @@ class Amigentd:
         def call():
             self._send(*args)
             if self._exact(1) != b"\0":
-                raise AmigentdError(f"command {args[0]} refused")
+                raise AmigentdRefused(f"command {args[0]} refused")
 
         self._retry(call)
 
     def ping(self) -> None:
         self._ok(CMD_PING)
 
+    def _once(self, fn):
+        """For requests that must not be repeated: a broken link closes the socket."""
+        if not self._sock:
+            self.connect()
+        try:
+            return fn()
+        except (OSError, AmigentdError):
+            self.close()  # a late reply must not be taken for the next command's
+            raise
+
     def put(self, path: str, data: bytes) -> None:
         """Store a file; needs amigentd started with SETUP."""
         raw = path.encode("iso-8859-1")
-        self._send(CMD_PUT, 0, len(raw), 0, len(data) >> 16, len(data) & 0xFFFF)
-        assert self._sock
-        self._sock.sendall(raw + data)
-        if self._exact(1) != b"\0":
-            raise AmigentdError(f"could not write {path}")
+
+        def call():
+            self._send(CMD_PUT, 0, len(raw), 0, len(data) >> 16, len(data) & 0xFFFF)
+            self._sock.sendall(raw + data)
+            return self._exact(1)
+
+        if self._once(call) != b"\0":
+            raise AmigentdRefused(f"could not write {path}")
 
     def run(self, command: str) -> int:
         """Run a command line and return its code; needs SETUP."""
         raw = command.encode("iso-8859-1")
-        self._send(CMD_RUN, 0, len(raw))
-        assert self._sock
-        self._sock.sendall(raw)
-        return self._exact(1)[0]
+
+        def call():
+            self._send(CMD_RUN, 0, len(raw))
+            self._sock.sendall(raw)
+            return self._exact(1)[0]
+
+        return self._once(call)
 
     def end_setup(self) -> None:
         self._ok(CMD_SETUP_END)
@@ -218,6 +242,8 @@ class Amigentd:
                 self._frame = None  # the service has moved on, ours is incomplete
                 raise
             if tiles:
+                now = time.monotonic()
+                self.changes.extend((now, t[0], t[1], t[2], t[3]) for t in tiles)
                 self._notify("tiles", tiles)
             return len(tiles)
 
@@ -226,7 +252,11 @@ class Amigentd:
     def capture(self, x: int = 0, y: int = 0, w: int | None = None,
                 h: int | None = None) -> Image.Image:
         """Return a region, transferring only tiles changed since the last call."""
-        self.poll()
+        self._retry(lambda: self._apply_size(*self._info()))  # the front screen may have changed
+        if self._frame is None:
+            self.poll()
+        else:
+            self.poll(x, y, w, h)  # tiles elsewhere wait in amigentd for later
         return self._frame.crop((x, y, x + (w or self.width - x), y + (h or self.height - y)))
 
     def snapshot(self) -> Image.Image | None:
@@ -247,10 +277,15 @@ class Amigentd:
     def rawkey(self, code: int, down: bool, qualifier: int = 0) -> None:
         self._ok(CMD_RAWKEY, int(down), code & 0x7F, qualifier)
 
-    def char(self, ch: str, qualifier: int = 0) -> None:
-        """Type one character through the Amiga's keymap; others than Latin-1 are skipped."""
-        if ord(ch) < 256:
+    def char(self, ch: str, qualifier: int = 0) -> bool:
+        """Type one character through the Amiga's keymap; False if it has no key for it."""
+        if ord(ch) >= 256:
+            return False
+        try:
             self._ok(CMD_CHAR, 0, ord(ch), qualifier)
+        except AmigentdRefused:
+            return False
+        return True
 
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         self.move(x, y)
@@ -361,7 +396,7 @@ class Amigentd:
             if not kind:
                 continue
             index = {"M": 2, "I": 3, "U": 4}[f[0]]
-            if len(f) < index + (4 if kind == "menu" else 6):
+            if len(f) < index + (6 if kind == "menu" else 7):
                 continue
             path = [int(v) for v in f[1:index]]
             x, y, w, h = (int(v) for v in f[index:index + 4])
@@ -375,12 +410,31 @@ class Amigentd:
             items.append(entry)
         return items
 
+    def changed_since(self, since: float, x: int = 0, y: int = 0, w: int | None = None,
+                      h: int | None = None) -> int:
+        """Tiles received after since that touch the region, whoever asked for them."""
+        right, bottom = x + (w or self.width), y + (h or self.height)
+        return sum(1 for t, tx, ty, tw, th in list(self.changes)
+                   if t > since and tx < right and tx + tw > x and ty < bottom and ty + th > y)
+
     def type_text(self, text: str) -> None:
+        """Type text; the keystrokes go out in batches and are answered together."""
+        commands = []
         for ch in text:
             if ch == "\n":
-                self.press("return")
-            else:
-                self.char(ch)
+                code = RAWKEYS["return"]
+                commands += [(CMD_RAWKEY, 1, code, 0), (CMD_RAWKEY, 0, code, 0)]
+            elif ord(ch) < 256:
+                commands.append((CMD_CHAR, 0, ord(ch), 0))
+        for start in range(0, len(commands), 64):
+            batch = commands[start:start + 64]
+
+            def call():
+                self._sock.sendall(b"".join(struct.pack(">BBHHHH", c, a, x, y, 0, 0)
+                                            for c, a, x, y in batch))
+                self._exact(len(batch))  # characters the keymap lacks just answer 1
+
+            self._retry(call)
 
     def press(self, combo: str) -> None:
         """Press a combination such as 'lamiga+n', 'return' or 'shift+f1'."""

@@ -36,7 +36,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .amigactl import AmigaCtl, AmigaError
+from .amigactl import AmigaCtl, AmigaError, join_path
 from .amigentd import Amigentd, AmigentdError
 
 WEB = Path(__file__).with_name("web")
@@ -52,6 +52,8 @@ MAX_UPLOAD = 512 * 2**20
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WHEEL_UP, WHEEL_DOWN = 0x7A, 0x7B  # NewMouse convention
 REPEAT = 0x0200
+MAX_MESSAGE = 1 << 20
+SEND_TIMEOUT = 5  # a page that stops reading must not hold the screen lock
 
 
 class WebSocket:
@@ -90,6 +92,8 @@ class WebSocket:
                 n = struct.unpack(">H", self._exact(2))[0]
             elif n == 127:
                 n = struct.unpack(">Q", self._exact(8))[0]
+            if n > MAX_MESSAGE:
+                raise EOFError  # nothing the page sends is that large
             mask = self._exact(4) if b2 & 0x80 else b""
             payload = self._exact(n)
             if mask and n:
@@ -149,8 +153,7 @@ def tiles_message(tiles) -> bytes:
     return b"".join(parts)
 
 
-def _join(folder: str, name: str) -> str:
-    return folder + name if folder.endswith((":", "/")) else f"{folder}/{name}"
+_join = join_path
 
 
 def _amiga_name(name: str) -> str:
@@ -215,8 +218,9 @@ class Viewer:
             if not self.remember:
                 raise OSError
             STATE.parent.mkdir(parents=True, exist_ok=True)
-            STATE.write_text(json.dumps({"url": self.url, "host": self.host}))
-            STATE.chmod(0o600)
+            handle = os.open(STATE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(handle, "w") as out:
+                out.write(json.dumps({"url": self.url, "host": self.host}))
         except OSError:
             pass
         for target in (self.httpd.serve_forever, self._work, self._upload_worker, self._stats):
@@ -337,10 +341,20 @@ class Viewer:
     # screen
 
     def _regions(self):
-        """Bands top to bottom, with the area around the pointer in between while in use."""
+        """Bands top to bottom, with the area around the pointer in between while in use.
+
+        amigentd from protocol 2 reads the screen ahead in the background, so an
+        unchanged whole screen costs one round trip and bands are not needed.
+        """
         band = 0
         while True:
             height = max(self.screen.height, 1)
+            if self.screen.protocol >= 2:
+                if band == 0:
+                    yield "size"
+                band = (band + 1) % 10  # check the size every tenth look
+                yield (0, 0, self.screen.width, height)
+                continue
             if band * BAND >= height:
                 band = 0
             if band == 0:
@@ -375,9 +389,10 @@ class Viewer:
                         changed = self.screen.poll(*region)
                 spent = time.perf_counter() - start
                 self._set_online(True)
-            except (OSError, AmigentdError, EOFError) as e:
-                self.screen.close()
-                self._set_online(False, str(e))
+            except Exception as e:  # noqa: BLE001 - the worker must survive anything
+                with self.lock():
+                    self.screen.close()
+                self._set_online(False, str(e) or type(e).__name__)
                 self.wake.wait(2)
                 self.wake.clear()
                 continue
@@ -572,7 +587,12 @@ class _Handler(BaseHTTPRequestHandler):
         query = parse_qs(url.query)
         if not self._allowed(query) or url.path != "/api/upload":
             return self._reply(403, b"forbidden", "text/plain")
-        size = int(self.headers.get("Content-Length", "0"))
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            size = -1
+        if size < 0:
+            return self._json(400, {"error": "length missing"})
         if size > MAX_UPLOAD:
             return self._json(413, {"error": "file too large"})
         data = self.rfile.read(size)
@@ -595,6 +615,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        try:  # sends give up instead of waiting forever for a page that stopped reading
+            if sys.platform == "win32":
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, SEND_TIMEOUT * 1000)
+            else:
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO,
+                                           struct.pack("ll", SEND_TIMEOUT, 0))
+        except OSError:
+            pass
         ws = WebSocket(self.rfile, self.connection)
         try:
             self.viewer.join(ws)

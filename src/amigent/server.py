@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import inventory
-from .amigactl import AmigaCtl, AmigaError
+from .amigactl import AmigaCtl, AmigaError, join_path
 from .amigentd import Amigentd
 from .power import power_cycle, set_power, wait_for_port
 from .viewer import Viewer, open_window
@@ -38,7 +38,7 @@ screen = Amigentd(HOST, SCREEN_PORT)
 @contextmanager
 def _exclusive(name: str = LOCK_FILE):
     """Serialise access across all amigent processes and threads on this PC."""
-    with open(name, "w") as lock:
+    with open(name, "a") as lock:  # "a": never truncates whatever the path points to
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
 
@@ -59,6 +59,10 @@ def _with_ctl(fn):
             if isinstance(e, AmigaError) and e.code is not None:
                 raise  # the daemon answered, this is a real command error
             ctl.close()
+            if isinstance(e, TimeoutError):
+                # The command reached the Amiga and may still run: repeating it could run it twice.
+                raise AmigaError("no answer in time; the command may still be running on the "
+                                 "Amiga. Use amiga_job for long work") from e
             try:
                 ctl.connect()
             except AmigaError as down:
@@ -75,8 +79,7 @@ def _with_screen(fn):
         return fn()
 
 
-def _join(parent: str, name: str) -> str:
-    return parent + name if parent.endswith((":", "/")) else f"{parent}/{name}"
+_join = join_path
 
 
 @mcp.tool()
@@ -227,24 +230,29 @@ def amiga_put(local_path: str, amiga_path: str) -> str:
     files = [src] if src.is_file() else sorted(p for p in src.rglob("*") if p.is_file())
     if not src.exists():
         raise AmigaError(f"{src} does not exist")
+    made: set = set()
     if src.is_dir():
-        _makedirs(amiga_path)
+        _makedirs(amiga_path, made)
     for f in files:
         rel = f.relative_to(src) if src.is_dir() else None
         target = amiga_path
         if rel:
             if len(rel.parts) > 1:
-                _makedirs(_join(amiga_path, rel.parent.as_posix()))
+                _makedirs(_join(amiga_path, rel.parent.as_posix()), made)
             target = _join(amiga_path, rel.as_posix())
         _with_ctl(lambda: ctl.write_file(target, f.read_bytes()))
     return f"copied {len(files)} file(s) to {amiga_path}"
 
 
-def _makedirs(path: str) -> None:
+def _makedirs(path: str, made: set | None = None) -> None:
     volume, _, rest = path.rpartition(":")
     current = f"{volume}:"
     for part in PurePosixPath(rest).parts:
         current = _join(current, part)
+        if made is not None:
+            if current.lower() in made:
+                continue
+            made.add(current.lower())
         try:
             _with_ctl(lambda: ctl.makedir(current))
         except AmigaError as e:
@@ -357,10 +365,13 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
 
     Use it after a click or command instead of taking screenshots in a loop.
     """
+    region = (x, y, width or None, height or None)
+    _with_screen(lambda: screen.poll(*region))  # settle first
     start = time.monotonic()
-    _with_screen(lambda: screen.poll(x, y, width or None, height or None))  # settle first
     while time.monotonic() - start < timeout:
-        changed = _with_screen(lambda: screen.poll(x, y, width or None, height or None))
+        _with_screen(lambda: screen.poll(*region))
+        # Count tiles whoever fetched them: an open viewer may have taken them first.
+        changed = screen.changed_since(start, *region)
         if changed:
             return f"changed after {time.monotonic() - start:.1f} s ({changed} tiles)"
         time.sleep(0.25)
@@ -600,6 +611,9 @@ def amiga_power(action: str) -> str:
     Last resort for a hung Amiga: cutting power loses file changes from the
     last minutes. Prefer amiga_restart while the Amiga still answers.
     """
+    action = action.strip().lower()
+    if action not in ("on", "off", "cycle"):
+        raise AmigaError("action must be 'on', 'off' or 'cycle'")
     if action == "cycle":
         with _exclusive():
             ctl.close()

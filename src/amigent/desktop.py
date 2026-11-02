@@ -71,6 +71,11 @@ def _launcher(host: str) -> tuple[str, str]:
     return _script(NAME, [host, "--exit-when-closed"])
 
 
+def _ps(text) -> str:
+    """Text for inside single quotes in PowerShell."""
+    return str(text).replace("'", "''")
+
+
 def _runner() -> str:
     """The program that runs our scripts without a console window."""
     if _wsl():
@@ -102,9 +107,9 @@ foreach ($dir in @([Environment]::GetFolderPath('Programs'), [Environment]::GetF
   foreach ($old in @({old})) {{ $p = Join-Path $dir $old; if (Test-Path $p) {{ Remove-Item $p }} }}
   $link = $shell.CreateShortcut((Join-Path $dir '{NAME}.lnk'))
   $link.TargetPath = "{_runner()}"
-  $link.Arguments = '"{launcher}"'
-  $link.WorkingDirectory = '{folder}'
-  $link.IconLocation = '{icon},0'
+  $link.Arguments = '"{_ps(launcher)}"'
+  $link.WorkingDirectory = '{_ps(folder)}'
+  $link.IconLocation = '{_ps(icon)},0'
   $link.Description = 'Watch and drive the Amiga'
   $link.Save()
   $link.FullName
@@ -113,9 +118,9 @@ $key = '{REGISTRY}'
 New-Item -Path $key -Force | Out-Null
 $values = @{{
   DisplayName = '{NAME}'; DisplayVersion = '{__version__}'; Publisher = '{PUBLISHER}'
-  DisplayIcon = '{icon}'; InstallLocation = '{folder}'; URLInfoAbout = '{HOMEPAGE}'
+  DisplayIcon = '{_ps(icon)}'; InstallLocation = '{_ps(folder)}'; URLInfoAbout = '{HOMEPAGE}'
   Comments = 'Watch and drive your Amiga over the network'
-  UninstallString = '"' + "{_runner()}" + '" "{remover}"'
+  UninstallString = '"' + "{_runner()}" + '" "{_ps(remover)}"'
 }}
 foreach ($v in $values.GetEnumerator()) {{ Set-ItemProperty -Path $key -Name $v.Key -Value $v.Value }}
 foreach ($flag in 'NoModify', 'NoRepair') {{ New-ItemProperty -Path $key -Name $flag -Value 1 -PropertyType DWord -Force | Out-Null }}

@@ -35,8 +35,10 @@ def load_key(host: str = "") -> str | None:
 def save_key(key: str) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
     path = FOLDER / "key"
-    path.write_text(key + "\n")
-    path.chmod(0o600)
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w") as out:
+        out.write(key + "\n")
+    os.chmod(path, 0o600)  # an older file keeps its mode otherwise
     return path
 
 
