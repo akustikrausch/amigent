@@ -215,3 +215,25 @@ def test_lock_plain_touches_only_the_startup_line():
     assert "SYS:amigent/amigent.tlsonly" in disk.files
     again = Files("RUN >NIL: C:amigentd TLSONLY\n")
     assert tls.lock_plain(again, "SYS:amigent") and list(again.files) == ["S:User-Startup"]
+
+
+def test_certificate_is_what_amissl_reads(tmp_path, monkeypatch):
+    """The pem for the Amiga: one EC P-256 certificate plus its key, both PEM, as AmiSSL loads it."""
+    import ssl
+    import subprocess
+
+    from amigent import tls
+
+    monkeypatch.setattr(tls, "FOLDER", tmp_path)
+    made = tls.make_certificate("10.0.0.1")
+    if made is None:
+        pytest.skip("no openssl")
+    for_amiga, certificate = made
+    text = for_amiga.decode()
+    assert text.count("BEGIN CERTIFICATE") == 1 and "PRIVATE KEY-----" in text
+    (tmp_path / "both.pem").write_bytes(for_amiga)
+    ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(tmp_path / "both.pem")
+    (tmp_path / "cert.pem").write_bytes(certificate)
+    shown = subprocess.run([tls.find_openssl(), "x509", "-in", str(tmp_path / "cert.pem"), "-noout",
+                            "-text"], capture_output=True, text=True).stdout
+    assert "prime256v1" in shown or "P-256" in shown

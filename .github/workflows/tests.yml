@@ -22,8 +22,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pytest
+      - name: openssl on this runner
+        run: openssl version
       - name: test
-        run: python -m pytest -q
+        run: python -m pytest -q -rs
 
   package:
     runs-on: ubuntu-latest
