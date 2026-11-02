@@ -26,6 +26,28 @@ Both work at the same time and share one connection to the Amiga.
 
 By Andreas Wendorf (Akustikrausch).
 
+## What Amigent is built for
+
+- **AI and hands-on control in one tool.** The agent and you use the same
+  connection. You see every click the agent makes in the remote desktop and can
+  take over at any moment, or ask the agent to open the window for you.
+- **A remote desktop for Windows and any browser.** On Windows, Amigent installs
+  like a normal program with Start menu entry and uninstaller. On Linux and macOS
+  it runs in Chrome or Edge. On the Amiga only the two small services that
+  Amigent installs anyway are needed, no VNC server.
+- **Slow networks.** Only the parts of the screen that changed are sent, in small
+  compressed tiles. A full 1920×1080 Workbench takes a few hundred kilobytes and
+  about four seconds over a plipbox on the parallel port (about 50 KB/s);
+  checking an unchanged screen takes about 5 ms.
+- **Looking after the machine.** A scan of installed programs and versions,
+  comparison with the last scan, repair after OS updates, a restart that writes
+  pending data to disk first, and mains power through a smart plug.
+- **Installation over the network.** One small file goes onto the Amiga by hand,
+  everything else is copied and set up from the PC.
+
+It is made for accelerated Amigas running AmigaOS 3.x, such as PiStorm systems
+or 68040/060 cards. Tested on an A1200 with PiStorm.
+
 ## Requirements
 
 Amiga: AmigaOS 3.x, a 68040 or faster (for example a PiStorm), an RTG graphics
