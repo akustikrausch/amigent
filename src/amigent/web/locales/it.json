@@ -98,5 +98,19 @@
  "fleet_hint": "Le anteprime si aggiornano ogni 20 secondi. Aggiungi Amiga con amigent-fleet --add NOME INDIRIZZO.",
  "fleet_offline": "non raggiungibile",
  "fleet_open": "Apri {name}",
- "fleet_summary": "{up} di {total} raggiungibili"
+ "fleet_summary": "{up} di {total} raggiungibili",
+ "get_file": "Prendi file",
+ "get_tip": "Copia file dall'Amiga a questo PC",
+ "get_title": "Prendi dall'Amiga",
+ "no_files": "nessun file",
+ "getting": "Prelievo di {path} …",
+ "clipboard": "Appunti",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Copia gli appunti dell'Amiga su questo PC",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Metti gli appunti di questo PC in quelli dell'Amiga",
+ "clip_empty": "Gli appunti sono vuoti.",
+ "clip_got": "Appunti dell'Amiga copiati su questo PC.",
+ "clip_put_done": "Negli appunti dell'Amiga. Incolla con Amiga destro+V.",
+ "clip_failed": "Appunti: {error}"
 }

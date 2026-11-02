@@ -12,6 +12,7 @@
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-upload" viewBox="0 0 20 20"><path d="M10 13V3.5M6 7.5l4-4 4 4M3.5 12.5v3a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 20 20"><path d="M10 3.5V13M6 9l4 4 4-4M3.5 12.5v3a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-3"/></symbol>
   <symbol id="i-type" viewBox="0 0 20 20"><rect x="2.5" y="5" width="15" height="10" rx="2"/><path d="M5.5 8h1M9.5 8h1M13.5 8h1M6.5 12h7"/></symbol>
   <symbol id="i-fit" viewBox="0 0 20 20"><path d="M3 7V4a1 1 0 0 1 1-1h3M13 3h3a1 1 0 0 1 1 1v3M17 13v3a1 1 0 0 1-1 1h-3M7 17H4a1 1 0 0 1-1-1v-3"/></symbol>
   <symbol id="i-full" viewBox="0 0 20 20"><path d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/></symbol>
@@ -33,6 +34,9 @@
   <div class="actions">
     <button id="upload" class="primary" data-i18n-title="send_tip" title="Copy files from this PC to the Amiga">
       <svg><use href="#i-upload"/></svg><span data-i18n="send_file">Send file</span>
+    </button>
+    <button id="download" data-i18n-title="get_tip" title="Copy files from the Amiga to this PC">
+      <svg><use href="#i-download"/></svg><span data-i18n="get_file">Get file</span>
     </button>
     <button id="type" data-i18n-title="type_tip" title="Type text on the Amiga">
       <svg><use href="#i-type"/></svg><span data-i18n="type_text">Type text</span>
@@ -77,6 +81,14 @@
         <button data-combo="ramiga+v" data-i18n="paste">Paste</button>
         <button data-combo="ramiga+a" data-i18n="select_all">Select all</button>
         <button data-combo="ramiga+z" data-i18n="undo">Undo</button>
+      </div>
+    </section>
+
+    <section>
+      <h2 data-i18n="clipboard">Clipboard</h2>
+      <div class="grid two">
+        <button id="clip-get" data-i18n="clip_get" data-i18n-title="clip_get_tip" title="Copy the Amiga's clipboard to this PC">Amiga → PC</button>
+        <button id="clip-put" data-i18n="clip_put" data-i18n-title="clip_put_tip" title="Put this PC's clipboard on the Amiga's clipboard">PC → Amiga</button>
       </div>
     </section>
 
@@ -142,7 +154,7 @@
 
 <dialog id="send-dialog">
   <form method="dialog">
-    <h3 data-i18n="send_title">Send to the Amiga</h3>
+    <h3 id="send-title" data-i18n="send_title">Send to the Amiga</h3>
     <ul id="send-files"></ul>
     <label for="folder" data-i18n="target_folder">Folder on the Amiga</label>
     <input id="folder" autocomplete="off" spellcheck="false" value="RAM:">
@@ -151,7 +163,7 @@
       <ul id="folders" aria-label="Folders" data-i18n-aria="folders_label"></ul>
     </div>
     <div class="buttons">
-      <button value="cancel" data-i18n="cancel">Cancel</button>
+      <button id="send-cancel" value="cancel" data-i18n="cancel">Cancel</button>
       <button id="send-go" value="send" class="primary" data-i18n="send">Send</button>
     </div>
   </form>

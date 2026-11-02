@@ -98,5 +98,19 @@
  "fleet_hint": "Die Vorschau erneuert sich alle 20 Sekunden. Amigas kommen mit amigent-fleet --add NAME ADRESSE dazu.",
  "fleet_offline": "nicht erreichbar",
  "fleet_open": "{name} öffnen",
- "fleet_summary": "{up} von {total} erreichbar"
+ "fleet_summary": "{up} von {total} erreichbar",
+ "get_file": "Datei holen",
+ "get_tip": "Dateien vom Amiga auf diesen PC kopieren",
+ "get_title": "Vom Amiga holen",
+ "no_files": "keine Dateien",
+ "getting": "Hole {path} …",
+ "clipboard": "Zwischenablage",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Zwischenablage des Amiga auf diesen PC kopieren",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Zwischenablage dieses PCs in die des Amiga legen",
+ "clip_empty": "Die Zwischenablage ist leer.",
+ "clip_got": "Zwischenablage des Amiga auf den PC kopiert.",
+ "clip_put_done": "Liegt in der Zwischenablage des Amiga. Einfügen mit Rechts-Amiga+V.",
+ "clip_failed": "Zwischenablage: {error}"
 }

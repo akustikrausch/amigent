@@ -98,5 +98,19 @@
  "fleet_hint": "Previews refresh every 20 seconds. Add Amigas with amigent-fleet --add NAME ADDRESS.",
  "fleet_offline": "not reachable",
  "fleet_open": "Open {name}",
- "fleet_summary": "{up} of {total} reachable"
+ "fleet_summary": "{up} of {total} reachable",
+ "get_file": "Get file",
+ "get_tip": "Copy files from the Amiga to this PC",
+ "get_title": "Get from the Amiga",
+ "no_files": "no files",
+ "getting": "Getting {path} …",
+ "clipboard": "Clipboard",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Copy the Amiga's clipboard to this PC",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Put this PC's clipboard on the Amiga's clipboard",
+ "clip_empty": "The clipboard is empty.",
+ "clip_got": "Copied the Amiga's clipboard to this PC.",
+ "clip_put_done": "On the Amiga's clipboard. Paste with Right Amiga+V.",
+ "clip_failed": "Clipboard: {error}"
 }

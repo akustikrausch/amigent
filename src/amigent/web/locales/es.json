@@ -98,5 +98,19 @@
  "fleet_hint": "Las vistas previas se actualizan cada 20 segundos. Añade Amigas con amigent-fleet --add NOMBRE DIRECCIÓN.",
  "fleet_offline": "no disponible",
  "fleet_open": "Abrir {name}",
- "fleet_summary": "{up} de {total} disponibles"
+ "fleet_summary": "{up} de {total} disponibles",
+ "get_file": "Obtener archivo",
+ "get_tip": "Copiar archivos del Amiga a este PC",
+ "get_title": "Obtener del Amiga",
+ "no_files": "no hay archivos",
+ "getting": "Obteniendo {path} …",
+ "clipboard": "Portapapeles",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Copiar el portapapeles del Amiga a este PC",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Poner el portapapeles de este PC en el del Amiga",
+ "clip_empty": "El portapapeles está vacío.",
+ "clip_got": "Portapapeles del Amiga copiado a este PC.",
+ "clip_put_done": "En el portapapeles del Amiga. Pegar con Amiga derecha+V.",
+ "clip_failed": "Portapapeles: {error}"
 }

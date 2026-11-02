@@ -33,7 +33,7 @@ import webbrowser
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from . import __version__
 from .amigactl import AmigaError, join_path
@@ -50,6 +50,8 @@ POINTER_BOX = 3 * TILE
 ACTIVE_SECS = 3  # after input, poll around the pointer between bands
 UPLOAD_CHUNK = 32 * 1024
 MAX_UPLOAD = 512 * 2**20
+MAX_DOWNLOAD = 128 * 2**20
+CLIPBOARD = "CLIPS:0"  # clipboard.device keeps unit 0 there as IFF FTXT
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WHEEL_UP, WHEEL_DOWN = 0x7A, 0x7B  # NewMouse convention
 REPEAT = 0x0200
@@ -160,6 +162,26 @@ _join = join_path
 def _amiga_name(name: str) -> str:
     name = name.replace("/", "_").replace(":", "_").strip() or "file"
     return name.encode("iso-8859-1", "replace").decode("iso-8859-1").replace("?", "_")[:100]
+
+
+def ftxt(text: str) -> bytes:
+    """Text as the IFF FTXT form the Amiga clipboard holds."""
+    raw = text.replace("\r\n", "\n").replace("\r", "\n").encode("iso-8859-1", "replace")
+    chars = b"CHRS" + struct.pack(">I", len(raw)) + raw + (b"\0" if len(raw) % 2 else b"")
+    return b"FORM" + struct.pack(">I", 4 + len(chars)) + b"FTXT" + chars
+
+
+def ftxt_text(data: bytes) -> str:
+    """The text of every CHRS chunk in an FTXT form; anything else gives ''."""
+    if len(data) < 12 or data[:4] != b"FORM" or data[8:12] != b"FTXT":
+        return ""
+    out, at = [], 12
+    while at + 8 <= len(data):
+        size = struct.unpack(">I", data[at + 4:at + 8])[0]
+        if data[at:at + 4] == b"CHRS":
+            out.append(data[at + 8:at + 8 + size])
+        at += 8 + size + (size & 1)
+    return b"".join(out).decode("iso-8859-1")
 
 
 class Viewer:
@@ -393,6 +415,15 @@ class Viewer:
             except Exception as e:  # noqa: BLE001 - the worker must survive anything
                 with self.lock():
                     self.screen.close()
+                    if self.online:
+                        # Another program on the network may just have taken the screen
+                        # over for a moment (amigentd serves one screen client): try again
+                        # at once before telling anyone.
+                        try:
+                            self.screen.connect()
+                            continue
+                        except Exception:  # noqa: BLE001
+                            self.screen.close()
                 self._set_online(False, str(e) or type(e).__name__)
                 self.wake.wait(2)
                 self.wake.clear()
@@ -481,7 +512,29 @@ class Viewer:
             folders = sorted((e["name"] for e in entries  # soft links to icons show up as DIR
                               if e["type"].upper() == "DIR" and not e["name"].lower().endswith(".info")),
                              key=str.lower)
-        return {"path": path, "volumes": volumes, "folders": folders}
+        files = []
+        if path:
+            files = sorted(({"name": e["name"], "size": e["size"]} for e in entries
+                            if e["type"].upper() == "FILE" and not e["name"].lower().endswith(".info")),
+                           key=lambda f: f["name"].lower())
+        return {"path": path, "volumes": volumes, "folders": folders, "files": files}
+
+    def download(self, path: str) -> bytes:
+        size = int(self._ctl(lambda: self.ctl.stat(path)).get("size", 0) or 0)
+        if size > MAX_DOWNLOAD:
+            raise AmigaError(f"{path} is larger than {MAX_DOWNLOAD >> 20} MB")
+        return self._ctl(lambda: self.ctl.read_file(path))
+
+    def read_clipboard(self) -> str:
+        try:
+            return ftxt_text(self._ctl(lambda: self.ctl.read_file(CLIPBOARD)))
+        except AmigaError as e:
+            if e.code is None:
+                raise
+            return ""  # nothing copied yet
+
+    def write_clipboard(self, text: str) -> None:
+        self._ctl(lambda: self.ctl.write_file(CLIPBOARD, ftxt(text)))
 
     def queue_upload(self, folder: str, name: str, data: bytes, overwrite: bool) -> dict:
         path = _join(folder.strip() or "RAM:", _amiga_name(name))
@@ -581,12 +634,32 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.viewer.folders(query.get("path", [""])[0]))
             except (AmigaError, OSError) as e:
                 return self._json(502, {"error": str(e)})
+        if url.path == "/api/download":
+            path = query.get("path", [""])[0]
+            try:
+                data = self.viewer.download(path)
+            except (AmigaError, OSError) as e:
+                return self._json(502, {"error": str(e)})
+            name = re.split(r"[:/]", path)[-1] or "file"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if url.path == "/api/clipboard":
+            try:
+                return self._json(200, {"text": self.viewer.read_clipboard()})
+            except (AmigaError, OSError) as e:
+                return self._json(502, {"error": str(e)})
         self._reply(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query) or url.path != "/api/upload":
+        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard"):
             return self._reply(403, b"forbidden", "text/plain")
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -594,9 +667,15 @@ class _Handler(BaseHTTPRequestHandler):
             size = -1
         if size < 0:
             return self._json(400, {"error": "length missing"})
-        if size > MAX_UPLOAD:
+        if size > (MAX_UPLOAD if url.path == "/api/upload" else MAX_MESSAGE):
             return self._json(413, {"error": "file too large"})
         data = self.rfile.read(size)
+        if url.path == "/api/clipboard":
+            try:
+                self.viewer.write_clipboard(data.decode("utf-8", "replace"))
+            except (AmigaError, OSError) as e:
+                return self._json(502, {"error": str(e)})
+            return self._json(200, {})
         try:
             job = self.viewer.queue_upload(query.get("folder", ["RAM:"])[0],
                                            query.get("name", ["file"])[0], data,

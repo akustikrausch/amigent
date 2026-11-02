@@ -339,6 +339,10 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 #folders li.up::before { content: "↰"; }
 #folders li.note { color: var(--muted); cursor: default; }
 #folders li.note::before { content: ""; }
+#folders li.file::before { content: "↓"; }
+#folders li.file span { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+[hidden] { display: none !important; }
 
 .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .buttons button { min-width: 96px; }

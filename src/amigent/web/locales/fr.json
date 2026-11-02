@@ -98,5 +98,19 @@
  "fleet_hint": "Les aperçus se rafraîchissent toutes les 20 secondes. Ajoutez des Amiga avec amigent-fleet --add NOM ADRESSE.",
  "fleet_offline": "injoignable",
  "fleet_open": "Ouvrir {name}",
- "fleet_summary": "{up} sur {total} joignables"
+ "fleet_summary": "{up} sur {total} joignables",
+ "get_file": "Récupérer",
+ "get_tip": "Copier des fichiers de l'Amiga vers ce PC",
+ "get_title": "Récupérer depuis l'Amiga",
+ "no_files": "aucun fichier",
+ "getting": "Récupération de {path} …",
+ "clipboard": "Presse-papiers",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Copier le presse-papiers de l'Amiga sur ce PC",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Placer le presse-papiers de ce PC dans celui de l'Amiga",
+ "clip_empty": "Le presse-papiers est vide.",
+ "clip_got": "Presse-papiers de l'Amiga copié sur ce PC.",
+ "clip_put_done": "Dans le presse-papiers de l'Amiga. Coller avec Amiga droite+V.",
+ "clip_failed": "Presse-papiers : {error}"
 }

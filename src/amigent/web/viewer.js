@@ -681,7 +681,10 @@
       const parent = parentOf(path);
       if (parent) list.append(folderItem("..", parent, true));
       for (const name of data.folders) list.append(folderItem(name, joinPath(path, name)));
-      if (!data.folders.length) list.insertAdjacentHTML("beforeend", `<li class="note">${t("no_folders")}</li>`);
+      if (getting) for (const file of data.files) list.append(fileItem(file, joinPath(path, file.name)));
+      if (!data.folders.length && !(getting && data.files.length)) {
+        list.insertAdjacentHTML("beforeend", `<li class="note">${t(getting ? "no_files" : "no_folders")}</li>`);
+      }
     } catch {
       list.innerHTML = `<li class="note">${t("folder_error")}</li>`;
       const parent = parentOf(path);
@@ -704,9 +707,52 @@
     return li;
   }
 
+  // A file in the folder list while getting: a click downloads it to the PC.
+  function fileItem(file, path) {
+    const li = document.createElement("li");
+    li.className = "file";
+    li.textContent = file.name;
+    const size = document.createElement("span");
+    size.textContent = sizeText(file.size);
+    li.append(size);
+    li.tabIndex = 0;
+    const get = () => {
+      const link = document.createElement("a");
+      link.href = api("/api/download", { path });
+      link.download = file.name;
+      link.click();
+      toast(t("getting", { path }));
+    };
+    li.addEventListener("click", get);
+    li.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        get();
+      }
+    });
+    return li;
+  }
+
+  let getting = false;
+
+  function setMode(get) {
+    getting = get;
+    $("send-title").textContent = t(get ? "get_title" : "send_title");
+    $("send-files").hidden = get;
+    $("send-go").hidden = get;
+    $("send-cancel").textContent = t(get ? "close" : "cancel");
+  }
+
+  function openGet() {
+    setMode(true);
+    $("send-dialog").showModal();
+    browse(folderPath);
+  }
+
   function openSend(files) {
     chosen = [...files].filter((f) => f.size >= 0);
     if (!chosen.length) return;
+    setMode(false);
     const list = $("send-files");
     list.innerHTML = "";
     for (const f of chosen) {
@@ -730,7 +776,8 @@
 
   $("send-dialog").addEventListener("close", async () => {
     canvas.focus();
-    if ($("send-dialog").returnValue !== "send") return;
+    if (getting) store.set("folder", folderPath);
+    if (getting || $("send-dialog").returnValue !== "send") return;
     const folder = $("folder").value.trim() || "RAM:";
     store.set("folder", folder);
     folderPath = folder;
@@ -784,6 +831,36 @@
   }
 
   $("upload").addEventListener("click", () => $("file").click());
+  $("download").addEventListener("click", openGet);
+
+  // ---------------------------------------------------------------- clipboard
+
+  $("clip-get").addEventListener("click", async () => {
+    try {
+      const reply = await fetch(api("/api/clipboard"));
+      const data = await reply.json();
+      if (!reply.ok) throw new Error(data.error);
+      if (!data.text) return toast(t("clip_empty"));
+      await navigator.clipboard.writeText(data.text);
+      toast(t("clip_got"));
+    } catch (error) {
+      toast(t("clip_failed", { error: error.message }), true);
+    }
+    canvas.focus();
+  });
+
+  $("clip-put").addEventListener("click", async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return toast(t("clip_empty"));
+      const reply = await fetch(api("/api/clipboard"), { method: "POST", body: text });
+      if (!reply.ok) throw new Error((await reply.json()).error);
+      toast(t("clip_put_done"));
+    } catch (error) {
+      toast(t("clip_failed", { error: error.message }), true);
+    }
+    canvas.focus();
+  });
   $("file").addEventListener("change", () => {
     openSend($("file").files);
     $("file").value = "";

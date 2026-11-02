@@ -169,3 +169,12 @@ def test_mac_app_bundle(monkeypatch, tmp_path):
     assert "export AMIGENT_FLUSH_VOLUMES='Work: SYS:'" in script
     assert (app / "Resources" / "amigent.icns").exists() and "<string>Amigent</string>" in (app / "Info.plist").read_text()
     assert desktop.uninstall() == [str(tmp_path / "Amigent.app")]
+
+
+def test_clipboard_text_round_trip():
+    from amigent.viewer import ftxt, ftxt_text
+
+    data = ftxt("Grüße\r\nvom PC")
+    assert data[:4] == b"FORM" and data[8:12] == b"FTXT" and len(data) % 2 == 0
+    assert ftxt_text(data) == "Grüße\nvom PC"
+    assert ftxt_text(b"FORM\0\0\0\4ILBM") == ""

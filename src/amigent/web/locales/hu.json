@@ -98,5 +98,19 @@
  "fleet_hint": "Az előnézetek 20 másodpercenként frissülnek. Amigát az amigent-fleet --add NÉV CÍM paranccsal adhatsz hozzá.",
  "fleet_offline": "nem elérhető",
  "fleet_open": "{name} megnyitása",
- "fleet_summary": "{up} / {total} elérhető"
+ "fleet_summary": "{up} / {total} elérhető",
+ "get_file": "Fájl letöltése",
+ "get_tip": "Fájlok másolása az Amigáról erre a gépre",
+ "get_title": "Letöltés az Amigáról",
+ "no_files": "nincsenek fájlok",
+ "getting": "{path} letöltése …",
+ "clipboard": "Vágólap",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Az Amiga vágólapjának másolása erre a gépre",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "E gép vágólapjának átadása az Amiga vágólapjára",
+ "clip_empty": "A vágólap üres.",
+ "clip_got": "Az Amiga vágólapja átmásolva erre a gépre.",
+ "clip_put_done": "Az Amiga vágólapján van. Beillesztés: jobb Amiga+V.",
+ "clip_failed": "Vágólap: {error}"
 }

@@ -98,5 +98,19 @@
  "fleet_hint": "Förhandsvisningarna uppdateras var 20:e sekund. Lägg till Amigor med amigent-fleet --add NAMN ADRESS.",
  "fleet_offline": "inte nåbar",
  "fleet_open": "Öppna {name}",
- "fleet_summary": "{up} av {total} nåbara"
+ "fleet_summary": "{up} av {total} nåbara",
+ "get_file": "Hämta fil",
+ "get_tip": "Kopiera filer från Amigan till den här datorn",
+ "get_title": "Hämta från Amigan",
+ "no_files": "inga filer",
+ "getting": "Hämtar {path} …",
+ "clipboard": "Urklipp",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Kopiera Amigans urklipp till den här datorn",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Lägg den här datorns urklipp i Amigans",
+ "clip_empty": "Urklipp är tomt.",
+ "clip_got": "Amigans urklipp kopierat till den här datorn.",
+ "clip_put_done": "Ligger i Amigans urklipp. Klistra in med höger Amiga+V.",
+ "clip_failed": "Urklipp: {error}"
 }

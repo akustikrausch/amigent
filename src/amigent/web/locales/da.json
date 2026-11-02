@@ -98,5 +98,19 @@
  "fleet_hint": "Forhåndsvisningerne opdateres hvert 20. sekund. Tilføj Amigaer med amigent-fleet --add NAVN ADRESSE.",
  "fleet_offline": "ikke tilgængelig",
  "fleet_open": "Åbn {name}",
- "fleet_summary": "{up} af {total} tilgængelige"
+ "fleet_summary": "{up} af {total} tilgængelige",
+ "get_file": "Hent fil",
+ "get_tip": "Kopiér filer fra Amigaen til denne pc",
+ "get_title": "Hent fra Amigaen",
+ "no_files": "ingen filer",
+ "getting": "Henter {path} …",
+ "clipboard": "Udklipsholder",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Kopiér Amigaens udklipsholder til denne pc",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Læg denne pc's udklipsholder i Amigaens",
+ "clip_empty": "Udklipsholderen er tom.",
+ "clip_got": "Amigaens udklipsholder kopieret til denne pc.",
+ "clip_put_done": "Ligger i Amigaens udklipsholder. Indsæt med højre Amiga+V.",
+ "clip_failed": "Udklipsholder: {error}"
 }

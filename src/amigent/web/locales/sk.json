@@ -98,5 +98,19 @@
  "fleet_hint": "Náhľady sa obnovujú každých 20 sekúnd. Amigy pridáte príkazom amigent-fleet --add NÁZOV ADRESA.",
  "fleet_offline": "nedostupná",
  "fleet_open": "Otvoriť {name}",
- "fleet_summary": "{up} z {total} dostupných"
+ "fleet_summary": "{up} z {total} dostupných",
+ "get_file": "Stiahnuť súbor",
+ "get_tip": "Kopírovať súbory z Amigy do tohto PC",
+ "get_title": "Stiahnuť z Amigy",
+ "no_files": "žiadne súbory",
+ "getting": "Sťahujem {path} …",
+ "clipboard": "Schránka",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Skopírovať schránku Amigy do tohto PC",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Vložiť schránku tohto PC do schránky Amigy",
+ "clip_empty": "Schránka je prázdna.",
+ "clip_got": "Schránka Amigy skopírovaná do tohto PC.",
+ "clip_put_done": "Je v schránke Amigy. Vložte pravou Amiga+V.",
+ "clip_failed": "Schránka: {error}"
 }

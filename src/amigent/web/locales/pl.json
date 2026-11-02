@@ -98,5 +98,19 @@
  "fleet_hint": "Podgląd odświeża się co 20 sekund. Dodaj Amigi przez amigent-fleet --add NAZWA ADRES.",
  "fleet_offline": "nieosiągalna",
  "fleet_open": "Otwórz {name}",
- "fleet_summary": "{up} z {total} osiągalnych"
+ "fleet_summary": "{up} z {total} osiągalnych",
+ "get_file": "Pobierz plik",
+ "get_tip": "Kopiuj pliki z Amigi na ten komputer",
+ "get_title": "Pobierz z Amigi",
+ "no_files": "brak plików",
+ "getting": "Pobieranie {path} …",
+ "clipboard": "Schowek",
+ "clip_get": "Amiga → PC",
+ "clip_get_tip": "Skopiuj schowek Amigi na ten komputer",
+ "clip_put": "PC → Amiga",
+ "clip_put_tip": "Umieść schowek tego komputera w schowku Amigi",
+ "clip_empty": "Schowek jest pusty.",
+ "clip_got": "Skopiowano schowek Amigi na ten komputer.",
+ "clip_put_done": "Jest w schowku Amigi. Wklej przez prawy Amiga+V.",
+ "clip_failed": "Schowek: {error}"
 }
