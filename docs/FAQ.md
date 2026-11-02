@@ -30,7 +30,9 @@ Shell.
 Yes, from Kickstart 2.04 on: commands, files, the remote desktop and the ARexx
 port. Encryption needs OS 3.0 with AmiSSL. On a 1 MB machine the chipset screen
 goes out as bitplanes, which needs no extra memory; the full-colour region tool
-may refuse there for lack of memory.
+may refuse there for lack of memory. Workbench 2.04 has no `C:Reboot`, so
+`amiga_restart` says so instead of restarting; copy `C:Reboot` over from a newer
+Workbench, or restart by hand.
 
 **Does it run on a 68000?**
 Use `amigentd.000`; `amigent-setup` picks it by itself. On a 7 MHz 68000 a whole

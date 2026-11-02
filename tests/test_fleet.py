@@ -19,6 +19,9 @@ class FakeCommands:
         FakeCommands.log.append((self.host, command))
         return ExecResult(0 if command != "Fail" else 10, f"{self.host}: {command}\n")
 
+    def stat(self, path):
+        return {"type": "file"}
+
     def flush(self, volumes):
         FakeCommands.log.append((self.host, "flush " + " ".join(volumes)))
 

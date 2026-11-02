@@ -15,7 +15,7 @@ from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd
 from .channel import Commands, Request, perform
-from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot
+from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot, wait_gone
 from .power import available as power_available
 from .viewer import Viewer, open_window
 
@@ -677,7 +677,9 @@ def amiga_restart() -> str:
         reboot(ctl, FLUSH_VOLUMES)
         with _screen_lock():
             screen.close()
-        time.sleep(10)
+        if not wait_gone(HOST, SCREEN_PORT):
+            raise AmigaError("the Amiga is still up: C:Reboot did not restart it")
+        time.sleep(5)
         # amigentd greets even before a key
         if wait_for_port(HOST, SCREEN_PORT, RESTART_WAIT if power_available() else BOOT_WAIT):
             return "Amiga restarted"

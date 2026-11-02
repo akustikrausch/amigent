@@ -3,11 +3,18 @@ import contextlib
 import amigent.server as s
 
 
-def restart_with(monkeypatch, answers: bool, power: bool):
+def restart_with(monkeypatch, answers: bool, power: bool, has_reboot: bool = True, goes_down: bool = True):
     calls = []
-    monkeypatch.setattr(s, "ctl", type("Ctl", (), {"flush": lambda self, v: None,
+
+    def stat(self, path):
+        if not has_reboot:
+            raise s.AmigaError("object not found", 205)
+        return {"type": "file"}
+
+    monkeypatch.setattr(s, "ctl", type("Ctl", (), {"flush": lambda self, v: None, "stat": stat,
                                                     "exec": lambda self, c, timeout=None: None,
                                                     "close": lambda self: None})())
+    monkeypatch.setattr(s, "wait_gone", lambda h, p: goes_down)
     monkeypatch.setattr(s.screen, "close", lambda: None)
     monkeypatch.setattr(s, "_exclusive", contextlib.nullcontext)
     monkeypatch.setattr(s.time, "sleep", lambda n: None)
@@ -59,3 +66,22 @@ def test_the_lock_is_exclusive_across_threads():
     hold("b")
     first.join()
     assert order == ["a in", "a out", "b in", "b out"]
+
+
+def test_restart_without_c_reboot_says_so(monkeypatch):
+    restart_with(monkeypatch, answers=True, power=True, has_reboot=False)
+    try:
+        s.amiga_restart()
+        raise AssertionError("expected an error")
+    except s.AmigaError as e:
+        assert "C:Reboot" in str(e)
+
+
+def test_restart_that_never_went_down_is_no_restart(monkeypatch):
+    calls = restart_with(monkeypatch, answers=True, power=True, goes_down=False)
+    try:
+        s.amiga_restart()
+        raise AssertionError("expected an error")
+    except s.AmigaError as e:
+        assert "still up" in str(e)
+    assert calls == []

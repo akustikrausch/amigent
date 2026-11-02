@@ -45,6 +45,16 @@ def wait_for_port(host: str, port: int, wait: float) -> bool:
     return False
 
 
+def wait_gone(host: str, port: int, wait: float = 30) -> bool:
+    """True once the service stops saying hello: proof the restart really happened."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if not greet(address(host), port, 3, connect_timeout=3):
+            return True
+        time.sleep(1)
+    return False
+
+
 def power_cycle(host: str, port: int, attempts: int = 3) -> int:
     """Off, wait, on, until the service answers; returns the attempts it took."""
     for attempt in range(1, attempts + 1):
@@ -63,6 +73,13 @@ def flush_volumes() -> list[str]:
 
 def reboot(commands, volumes) -> None:
     """Flush the disks, then pull the reset: the clean way down, not the plug."""
+    try:
+        commands.stat("C:Reboot")
+    except AmigaError as e:
+        if e.code is None:
+            raise
+        raise AmigaError("this Amiga has no C:Reboot (Workbench before 3.0 lacks it): restart it by "
+                         "hand, or copy C:Reboot over from a newer Workbench") from e
     commands.flush(volumes)
     try:
         commands.exec("Run >NIL: C:Reboot", timeout=5)
