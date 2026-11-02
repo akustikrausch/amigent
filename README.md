@@ -7,6 +7,7 @@
           \/       \/     /_____/       \/      \/
 
      complete remote control for a real Amiga, by AI or manually
+            tuned for slow Amigas and slow networks
 ```
 
 <p align="center"><img src="https://raw.githubusercontent.com/akustikrausch/amigent/main/src/amigent/web/icon.png" width="96" alt="Amigent icon"></p>
@@ -19,12 +20,13 @@ Amigent connects your PC or Mac to your real Amiga over the home network. Then y
 - **use the Amiga yourself from your computer**, as a remote desktop like
   TeamViewer or VNC: a window with the live screen, your own mouse and
   keyboard, file transfer and a shared clipboard.
+- **and both of these quickly, even on a slow machine.** Amigent is tuned for
+  slow Amigas and slow networks: a 7 MHz 68000 sends its whole screen in
+  0.6 s, and over a plipbox a click shows its result in a fraction of a second.
+  [How it stays fast](https://github.com/akustikrausch/amigent#made-for-slow-machines-and-slow-wires).
 
 Both at the same time: you see every click the agent makes and can take over at
 any moment.
-
-Amigent is built for the Amiga you actually have: a plain A500 on a plipbox
-works, an accelerated one flies.
 
 ![Amigent with a Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
 

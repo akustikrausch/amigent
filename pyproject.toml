@@ -1,7 +1,7 @@
 [project]
 name = "amigent"
 dynamic = ["version"]
-description = "Complete remote control for a real Amiga, by AI or manually"
+description = "Complete remote control for a real Amiga, by AI or manually, tuned for slow Amigas and slow networks"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
