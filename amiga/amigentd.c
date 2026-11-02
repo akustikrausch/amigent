@@ -39,6 +39,9 @@
 #include <proto/keymap.h>
 #include <proto/icon.h>
 #include <proto/bsdsocket.h>
+#include <proto/rexxsyslib.h>
+#include <rexx/storage.h>
+#include <rexx/errors.h>
 #include <netinet/tcp.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
@@ -132,7 +135,7 @@ static struct newcomer {
     LONG fd, have;
     UBYTE cmd[10];
     BOOL authed, screen;
-    ULONG since;
+    ULONG since, addr;
 } pend[PENDING];
 
 /* Command channels run in processes of their own, see channel_main. */
@@ -141,7 +144,9 @@ static struct channel {
     LONG id;
     volatile BOOL busy;
     volatile ULONG last;
+    ULONG addr, since;  /* for CLIENTS on the ARexx port */
 } chans[CHANNELS];
+static ULONG client_addr, client_since, start_ms;
 static BYTE chan_gone = -1;  /* a channel or exec runner ended */
 static LONG children;  /* channel and runner processes alive, changed under Forbid */
 static ULONG runs;  /* numbers temporary names, under Forbid */
@@ -160,6 +165,8 @@ static UBYTE in_cmd[10];
 static LONG in_have, nacks;
 static UBYTE acks[64];
 static BOOL sneak_input(void);
+static void rexx_messages(void);
+static ULONG rexx_signal(void);
 static UBYTE tile_buf[12 + TILE * TILE * 2];
 
 /* ---- network ---------------------------------------------------------- */
@@ -172,7 +179,7 @@ static BOOL ready(BOOL writing)
     for (;;) {
         fd_set r, w;
         struct timeval tv = {IO_SECONDS, 0};
-        ULONG sigs = SIGBREAKF_CTRL_C;
+        ULONG sigs = SIGBREAKF_CTRL_C | rexx_signal();
         LONG n, top;
 
         BOOL sneak = writing && in_have < (LONG)sizeof(in_cmd) && nacks < (LONG)sizeof(acks);
@@ -186,6 +193,10 @@ static BOOL ready(BOOL writing)
         n = WaitSelect(top + 1, &r, &w, NULL, &tv, &sigs);
         if (sigs & SIGBREAKF_CTRL_C)
             quit = TRUE;
+        if (sigs & rexx_signal())  /* a question from ARexx doesn't wait for the frame */
+            rexx_messages();
+        if (n == 0 && (sigs & rexx_signal()))
+            continue;
         if (n <= 0 || quit || newcomers(&r))
             return FALSE;
         if (sneak && FD_ISSET(client, &r) && !sneak_input())
@@ -2357,6 +2368,7 @@ static void accept_pending(void)
         return;
     }
     pend[i].fd = fd;
+    pend[i].addr = addr.sin_addr.s_addr;
     pend[i].have = 0;
     pend[i].authed = secret_len == 0;
     pend[i].screen = FALSE;
@@ -3251,7 +3263,8 @@ static void start_channel(LONG i)
 
     if (c && (c->id = ReleaseSocket(p->fd, UNIQUE_ID)) != -1) {
         c->busy = FALSE;
-        c->last = now_ms();
+        c->last = c->since = now_ms();
+        c->addr = p->addr;
         Forbid();
         children++;
         Permit();
@@ -3390,13 +3403,15 @@ static void serve(void)
     while (!quit) {
         fd_set r;
         struct timeval tv = {1, 0};
-        ULONG sigs = SIGBREAKF_CTRL_C;
+        ULONG sigs = SIGBREAKF_CTRL_C | rexx_signal();
 
         for (i = 0; i < PENDING && !(pend[i].fd >= 0 && pend[i].screen); i++)
             ;
         if (i < PENDING) {  /* the newcomer wins */
             drop_client();
             client = pend[i].fd;
+            client_addr = pend[i].addr;
+            client_since = now_ms();
             pend[i].fd = -1;
             authed = TRUE;
             client_id = 0;
@@ -3421,6 +3436,8 @@ static void serve(void)
         n = WaitSelect(top + 1, &r, NULL, NULL, &tv, &sigs);
         if (sigs & SIGBREAKF_CTRL_C)
             return;
+        if (sigs & rexx_signal())
+            rexx_messages();
         if (n <= 0)
             continue;
         newcomers(&r);
@@ -3520,11 +3537,13 @@ static struct Task *volatile tls_task;
 static UWORD plain_port;
 static LONG tls_pumps;  /* under Forbid */
 static struct Task *pump_task[TLS_PUMPS];  /* under Forbid, for stop_tls() */
+static ULONG pump_addr[TLS_PUMPS], pump_since[TLS_PUMPS];  /* for CLIENTS */
 static BYTE tls_gone = -1;  /* the listener's: a pump ended */
 
 struct pump {
     LONG id;
     SSL *ssl;
+    ULONG addr;
 };
 
 /* Everything in buf to the socket, blocking. */
@@ -3611,8 +3630,11 @@ static void __saveds pump_main(void)
     Forbid();
     for (n = 0; n < TLS_PUMPS && pump_task[n]; n++)
         ;
-    if (n < TLS_PUMPS)
+    if (n < TLS_PUMPS) {
         pump_task[n] = FindTask(NULL);
+        pump_addr[n] = p->addr;
+        pump_since[n] = now_ms();
+    }
     Permit();
     if ((SocketBase = OpenLibrary("bsdsocket.library", 4))) {
         if (buf && InitAmiSSL(AmiSSL_SocketBase, SocketBase, AmiSSL_ErrNoPtr, &err, TAG_DONE) == 0) {
@@ -3711,6 +3733,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     if (!full && (p = AllocVec(sizeof(*p), MEMF_CLEAR)) && (p->ssl = SSL_new(ctx)) &&
         (p->id = ReleaseSocket(fd, UNIQUE_ID)) != -1) {
+        p->addr = addr.sin_addr.s_addr;
         Forbid();
         tls_pumps++;
         children++;
@@ -3826,6 +3849,205 @@ static void stop_tls(void)
 }
 
 /* ---- start ------------------------------------------------------------ */
+
+/* ---- ARexx --------------------------------------------------------------- */
+
+/* Port AMIGENT, or AMIGENT.<port> when a first copy has it. The main process
+ * answers between two looks at the network, so a reply takes a few ms; while a
+ * frame goes out, between two tiles. See "arexx" in docs/PROTOCOL.md. */
+struct RxsLib *RexxSysBase;
+static struct MsgPort *rexx_port;
+static char rexx_name[20];
+
+static void rexx_open(UWORD port)
+{
+    if (!(RexxSysBase = (struct RxsLib *)OpenLibrary("rexxsyslib.library", 36)) ||
+        !(rexx_port = CreateMsgPort()))
+        return;  /* no ARexx, no port: the rest runs regardless */
+    strcpy(rexx_name, "AMIGENT");
+    Forbid();
+    if (FindPort(rexx_name)) {  /* a sibling on another port got here first */
+        char *d = rexx_name + 7;
+        UWORD v = port, div = 10000;
+        *d++ = '.';
+        while (div > 1 && v / div == 0)
+            div /= 10;
+        for (; div; div /= 10)
+            *d++ = '0' + v / div % 10;
+        *d = 0;
+    }
+    rexx_port->mp_Node.ln_Name = rexx_name;
+    rexx_port->mp_Node.ln_Pri = 0;
+    AddPort(rexx_port);
+    Permit();
+}
+
+static void rexx_close(void)
+{
+    struct RexxMsg *m;
+
+    if (rexx_port) {
+        Forbid();
+        RemPort(rexx_port);
+        Permit();
+        while ((m = (struct RexxMsg *)GetMsg(rexx_port))) {  /* nobody waits forever */
+            m->rm_Result1 = RC_FATAL;
+            m->rm_Result2 = 0;
+            ReplyMsg((struct Message *)m);
+        }
+        DeleteMsgPort(rexx_port);
+        rexx_port = NULL;
+    }
+    if (RexxSysBase)
+        CloseLibrary((struct Library *)RexxSysBase);
+    RexxSysBase = NULL;
+}
+
+static ULONG rexx_signal(void)
+{
+    return rexx_port ? 1UL << rexx_port->mp_SigBit : 0;
+}
+
+static void t_ip(struct text *t, ULONG a)
+{
+    t_num(t, a >> 24 & 255), t_chr(t, '.');
+    t_num(t, a >> 16 & 255), t_chr(t, '.');
+    t_num(t, a >> 8 & 255), t_chr(t, '.');
+    t_num(t, a & 255);
+}
+
+static void t_line(struct text *t, const char *key, LONG v)
+{
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_chr(t, '=');
+    t_num(t, v);
+    t_chr(t, '\n');
+}
+
+static void t_flag(struct text *t, const char *key, BOOL on)
+{
+    t_str(t, (const UBYTE *)key, FALSE);
+    t_str(t, (const UBYTE *)(on ? "=on" : "=off"), FALSE);
+    t_chr(t, '\n');
+}
+
+/* kind, address, seconds connected; a tab between, a line each. */
+static void t_client(struct text *t, const char *kind, ULONG addr, ULONG since)
+{
+    t_str(t, (const UBYTE *)kind, FALSE);
+    t_chr(t, '\t');
+    t_ip(t, addr);
+    t_chr(t, '\t');
+    t_num(t, (now_ms() - since) / 1000);
+    t_chr(t, '\n');
+}
+
+static LONG count_channels(void)
+{
+    LONG i, n = 0;
+
+    for (i = 0; i < CHANNELS; i++)
+        if (chans[i].proc)
+            n++;
+    return n;
+}
+
+static void rexx_status(struct text *t)
+{
+    const UBYTE *s;
+    LONG i, n = 0;
+
+    t_str(t, (const UBYTE *)"version=", FALSE);
+    for (s = (const UBYTE *)version + 15; *s && *s != ' '; s++)  /* past "$VER: amigentd " */
+        t_chr(t, *s);
+    t_chr(t, '\n');
+    t_line(t, "protocol", PROTOCOL_VERSION);
+    t_line(t, "port", plain_port);
+    t_line(t, "uptime", (now_ms() - start_ms) / 1000);
+    t_flag(t, "tls", tls_open);
+    t_flag(t, "tls_only", tls_only);
+    t_flag(t, "setup", setup_mode);
+    t_flag(t, "key", secret_len > 0);
+    t_line(t, "screen", client >= 0);
+    t_line(t, "channels", count_channels());
+    Forbid();
+    t_line(t, "tls_clients", tls_pumps);
+    Permit();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0)
+            n++;
+    t_line(t, "pending", n);
+}
+
+static void rexx_clients(struct text *t)
+{
+    LONG i;
+
+    if (client >= 0)
+        t_client(t, "screen", client_addr, client_since);
+    for (i = 0; i < CHANNELS; i++)
+        if (chans[i].proc)
+            t_client(t, "channel", chans[i].addr, chans[i].since);
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0)
+            t_client(t, "pending", pend[i].addr, pend[i].since);
+    Forbid();
+    for (i = 0; i < TLS_PUMPS; i++)
+        if (pump_task[i])
+            t_client(t, "tls", pump_addr[i], pump_since[i]);
+    Permit();
+}
+
+/* Same word, ignoring case; the rest of the line may only be blanks or args. */
+static BOOL is_word(const UBYTE *s, const char *w)
+{
+    for (; *w; s++, w++)
+        if ((*s & 0xDF) != *w)
+            return FALSE;
+    return *s == 0 || *s == ' ' || *s == '\t';
+}
+
+/* All messages waiting on the port: answer each, a result string if asked. */
+static void rexx_messages(void)
+{
+    struct RexxMsg *m;
+
+    while (rexx_port && (m = (struct RexxMsg *)GetMsg(rexx_port))) {
+        struct text t = {NULL, 0, 0, FALSE};
+        const UBYTE *s = (const UBYTE *)m->rm_Args[0];
+        LONG rc = 0;
+
+        while (s && (*s == ' ' || *s == '\t'))
+            s++;
+        if ((m->rm_Action & RXCODEMASK) != RXCOMM || !s)
+            rc = RC_ERROR;
+        else if (is_word(s, "STATUS"))
+            rexx_status(&t);
+        else if (is_word(s, "CLIENTS"))
+            rexx_clients(&t);
+        else if (is_word(s, "VERSION"))
+            t_str(&t, (const UBYTE *)version + 6, FALSE);  /* past "$VER: " */
+        else if (is_word(s, "HELP"))
+            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION HELP QUIT", FALSE);
+        else if (is_word(s, "QUIT")) {
+            t_str(&t, (const UBYTE *)"bye", FALSE);
+            quit = TRUE;  /* the main loop sees it on its next turn */
+        } else
+            rc = RC_ERROR;
+        m->rm_Result1 = rc;
+        m->rm_Result2 = 0;
+        if (!rc && (m->rm_Action & RXFF_RESULT)) {
+            if (t.broke)
+                m->rm_Result1 = RC_ERROR;
+            else  /* the text minus a trailing newline, as ARexx likes it */
+                m->rm_Result2 = (LONG)CreateArgstring((STRPTR)(t.buf ? t.buf : (UBYTE *)""),
+                                                      t.len && t.buf[t.len - 1] == '\n' ? t.len - 1 : t.len);
+        }
+        FreeVec(t.buf);
+        ReplyMsg((struct Message *)m);
+    }
+}
+
 
 static BOOL broken(void)
 {
@@ -3987,6 +4209,7 @@ int main(int argc, char **argv)
         goto out;
     }
     TimerBase = timer_io->tr_node.io_Device;
+    start_ms = now_ms();
     input_port = CreateMsgPort();
     if (!input_port) {
         complain("out of memory", 0);
@@ -4016,6 +4239,7 @@ int main(int argc, char **argv)
         goto out;
     }
     plain_port = port;
+    rexx_open(port);
     Forbid();
     children++;
     Permit();
@@ -4054,6 +4278,7 @@ out:
             break;
         Wait(1UL << chan_gone);
     }
+    rexx_close();
     if (chan_gone >= 0)
         FreeSignal(chan_gone);
     if (reader) {

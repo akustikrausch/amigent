@@ -9,6 +9,8 @@ keyboard; up to four more run commands and move files, see
 
     amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
 
+Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
+
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
@@ -457,6 +459,40 @@ without AmiSSL, there is no TLS port and the plain port works as usual, so a los
 certificate never locks you out. In SETUP mode the plain port stays open, so
 `amigent-setup` can deliver the certificate; after SETUP_END new plain connections
 from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
+
+## arexx
+
+amigentd opens the ARexx port `AMIGENT`; a second copy on another port, while
+the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
+`rexxsyslib.library`, no port; the rest runs regardless. Commands, any case:
+
+| command | result |
+|---|---|
+| STATUS | `key=value` lines, see below |
+| CLIENTS | a line per connection: kind, address, seconds connected, tab separated |
+| VERSION | `amigentd 1.0.0 (02.11.2026)` |
+| HELP | the command names |
+| QUIT | `bye`, then amigentd ends as on Ctrl-C |
+
+STATUS: `version`, `protocol`, `port`, `uptime` in seconds, `tls`, `tls_only`,
+`setup` and `key` as `on` or `off` (`tls` is on while the TLS port listens,
+`key` while a key file is in force), `screen` (0 or 1), `channels`,
+`tls_clients`, `pending` (connections that haven't said yet what they are).
+
+CLIENTS kinds: `screen`, `channel`, `pending`, and `tls` for each TLS connection
+with the address it came from. A TLS connection reaches the plain port through
+127.0.0.1, so it shows twice: as `tls` with its real address, and as `screen`
+or `channel` with `127.0.0.1`.
+
+Results come back with `options results`; an unknown command gives return code
+10. The answer comes between two looks at the network, also between two tiles
+of a frame going out.
+
+    /* who is on? */
+    options results
+    address AMIGENT
+    'CLIENTS'
+    say result
 
 ## setup
 
