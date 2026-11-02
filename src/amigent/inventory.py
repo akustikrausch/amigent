@@ -1,10 +1,10 @@
-"""Parse the output of the amigent-scan script and compare two scans."""
+"""Read what amigent-scan spits out, and diff two scans like a tracker diffs patterns."""
 
 from __future__ import annotations
 
 
 def parse(text: str) -> dict[str, dict]:
-    """Turn '@path|size' records, each followed by Version output, into a dict."""
+    """'@path|size' records, each trailed by Version output, into a dict."""
     items: dict[str, dict] = {}
     current = None
     for line in text.splitlines():
@@ -18,6 +18,7 @@ def parse(text: str) -> dict[str, dict]:
 
 
 def _is_failure(line: str) -> bool:
+    # Version shrugging, in English and German: not a version string
     return line.startswith(("Could not find version", "Objekt nicht gefunden")) or (
         "fehlgeschlagen" in line
     )

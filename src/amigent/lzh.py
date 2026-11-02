@@ -1,10 +1,10 @@
-"""Just enough LHA to pull a file out of an archive: -lh0- and -lh5-."""
+"""Just enough LHA to rip one file out of an archive: -lh0- and -lh5-, the Aminet staples."""
 
 from __future__ import annotations
 
 import struct
 
-WINDOW = 1 << 13
+WINDOW = 1 << 13  # 8 KB sliding dictionary, -lh5- style
 MAX_MATCH = 256
 THRESHOLD = 3
 NC = 255 + MAX_MATCH + 2 - THRESHOLD
@@ -15,7 +15,7 @@ NT = 19
 class Bits:
     def __init__(self, data: bytes):
         self.data = data
-        self.pos = 0  # in bits
+        self.pos = 0  # in bits, MSB first, like the blitter likes it
 
     def peek(self, n: int) -> int:
         byte = self.pos >> 3
@@ -32,7 +32,7 @@ class Bits:
 
 
 def _table(lengths: list[int]) -> tuple[int, dict]:
-    """Canonical Huffman codes as {(length, code): symbol}."""
+    """Canonical Huffman codes as {(length, code): symbol}; bit-by-bit lookup, fine for one archive per setup."""
     codes = {}
     code = 0
     for length in range(1, 17):
@@ -119,7 +119,7 @@ def lh5_decode(data: bytes, size: int) -> bytes:
 
 
 def entries(archive: bytes):
-    """Yield (name, method, packed, size) for each member."""
+    """Yield (name, method, packed body, size) per member; header levels 0, 1 and 2."""
     pos = 0
     while pos < len(archive) and archive[pos]:
         level = archive[pos + 20]
@@ -165,7 +165,7 @@ def entries(archive: bytes):
 
 
 def extract(archive: bytes, suffix: str) -> bytes:
-    """Return the first member whose name ends with suffix."""
+    """The first member whose name ends with suffix, unpacked."""
     for name, method, body, size in entries(archive):
         if name.lower().endswith(suffix.lower()):
             if method == b"-lh0-":

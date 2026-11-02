@@ -1,10 +1,9 @@
-"""The shared key between the PC and amigentd.
+"""The handshake secret between PC and amigentd. No key, no party.
 
-amigent-setup creates one per Amiga, puts it there as S:amigent.key and keeps a
-copy in ~/.config/amigent/key-<address> (found again under the Amiga's name,
-see machines.py). The first one also goes to
-~/.config/amigent/key, which serves any address without a key of its own.
-AMIGENT_KEY overrides the files.
+amigent-setup rolls one per Amiga, drops it there as S:amigent.key and keeps a
+copy in ~/.config/amigent/key-<address> (also found under the Amiga's name,
+see machines.py). The first one doubles as ~/.config/amigent/key, the
+fallback for any address without a key of its own. AMIGENT_KEY trumps the files.
 """
 
 from __future__ import annotations
@@ -19,13 +18,12 @@ FOLDER = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ami
 
 
 def safe(host: str) -> str:
-    """host as part of a file name: IPv6 colons and path characters become _."""
+    """host squeezed into a file name: IPv6 colons and path characters become _."""
     return re.sub(r"[^A-Za-z0-9._-]", "_", host).strip(".") or "_"
 
 
 def _own(host: str) -> Path | None:
-    """The key file of this Amiga: under its name, one of its addresses, or the address a
-    host name resolves to."""
+    """This Amiga's own key file: by name, by any address it ever had, or by what DNS says."""
     from . import machines
     names = machines.stems(host)
     try:
@@ -40,10 +38,10 @@ def _own(host: str) -> Path | None:
 
 
 def key_file(host: str = "") -> Path:
-    """The key for this host: its own, the one kept under one of its addresses, or the common key.
+    """The key for this host: its own, one filed under an old address, or the common key.
 
-    The common key belongs to the first Amiga set up. Once there are keys for
-    several Amigas it is only used for a host that resolves to none of them.
+    The common key belongs to the first Amiga set up. With several Amigas on
+    file it only covers a host that matches none of them.
     """
     return (_own(host) if host else None) or FOLDER / "key"
 
@@ -59,7 +57,7 @@ def load_key(host: str = "") -> str | None:
 
 
 def own_key(host: str) -> str | None:
-    """The key kept for exactly this host, ignoring the common one."""
+    """The key filed for exactly this host; the common one doesn't count."""
     path = _own(host)
     try:
         return path.read_text().strip() or None if path else None
@@ -71,7 +69,7 @@ def _write(path: Path, key: str) -> None:
     handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(handle, "w") as out:
         out.write(key + "\n")
-    os.chmod(path, 0o600)  # an older file keeps its mode otherwise
+    os.chmod(path, 0o600)  # O_CREAT's mode only bites on new files; old ones get 0600 here
 
 
 def save_key(key: str, host: str) -> Path:

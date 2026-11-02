@@ -1,10 +1,10 @@
-"""Optional TLS to amigentd, with the Amiga's certificate pinned on the PC.
+"""Optional TLS to amigentd, the Amiga's cert pinned like a dongle: no CA, no DNS, no mercy.
 
-amigent-setup creates a small EC certificate (fast enough for a 68k), puts
+amigent-setup cooks a small EC certificate (a 68k can chew that), puts
 certificate and key into S:amigent-tls.pem on the Amiga and keeps the
 certificate in ~/.config/amigent/tls-<host>.pem. With that file present the
-clients talk TLS on the port after amigentd's; AMIGENT_TLS=off turns it off.
-The pin also identifies the Amiga when it has to be found again under a new
+clients speak TLS on the port after amigentd's; AMIGENT_TLS=off kills it.
+The pin doubles as the Amiga's fingerprint when it turns up under a new
 address (see machines.py).
 """
 
@@ -22,8 +22,7 @@ from .secret import FOLDER, safe
 
 
 def pinned(host: str) -> Path:
-    """The certificate kept for this Amiga: under its name, one of its addresses, or the
-    address a host name resolves to."""
+    """This Amiga's pinned cert: by name, by any address it ever had, or by what DNS says."""
     from . import machines
     names = machines.stems(host) or [host]
     try:
@@ -42,9 +41,9 @@ def wanted(host: str) -> bool:
 
 
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
-    """TLS over sock, accepting exactly the certificate pinned for host."""
+    """TLS over sock; the pinned certificate gets in, nobody else."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False  # the pin is the identity; Amigas have no DNS names
+    context.check_hostname = False  # the pin is the identity; Amigas don't do DNS names
     context.verify_mode = ssl.CERT_REQUIRED
     context.load_verify_locations(cafile=str(pinned(host)))
     return context.wrap_socket(sock)
@@ -62,10 +61,10 @@ def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
 
 
 def connect(host: str, port: int, timeout: float) -> socket.socket:
-    """A plain connection to port, or TLS to port + 1 when a certificate is pinned.
+    """Plain to port, or TLS to port + 1 when a certificate is pinned.
 
-    host is a name or an address. When the Amiga does not answer there, it is
-    looked for on the local network once, and found again under its new address.
+    host is a name or an address. No answer there? One sweep of the local
+    network, and the Amiga is picked up again at its new address.
     """
     from . import machines
     address = machines.address(host)
@@ -79,7 +78,7 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
 
 
 def find_openssl() -> str | None:
-    """openssl on the PATH, else the one Git for Windows brings along."""
+    """openssl from the PATH, else the copy Git for Windows smuggles in."""
     if tool := shutil.which("openssl"):
         return tool
     for root in (os.environ.get("ProgramFiles", r"C:\Program Files"),
@@ -91,7 +90,7 @@ def find_openssl() -> str | None:
 
 
 def make_certificate(host: str) -> tuple[bytes, bytes] | None:
-    """(certificate + key for the Amiga, certificate for the PC), or None without openssl."""
+    """(certificate + key for the Amiga, certificate for the PC); None when openssl is AWOL."""
     tool = find_openssl()
     if not tool:
         return None

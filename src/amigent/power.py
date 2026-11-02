@@ -1,7 +1,7 @@
-"""Optional mains power control through a user-supplied command.
+"""Optional mains power control: the big red switch, via a command you supply.
 
-AMIGENT_POWER_CMD names a program that accepts 'on' or 'off', for example a
-script for your smart plug. Without it the amiga_power tool reports an error.
+AMIGENT_POWER_CMD names a program that takes 'on' or 'off', say a script for
+your smart plug. Without it the amiga_power tool reports an error.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from .amigactl import AmigaError
 
 OFF_SECONDS = 30
 BOOT_WAIT = 300
-RESTART_WAIT = 120  # after a restart: how long to wait before cutting the power, if we can
+RESTART_WAIT = 120  # grace after a restart before we reach for the plug, if we have one
 
 
 class PowerError(Exception):
@@ -35,7 +35,7 @@ def set_power(on: bool) -> None:
 
 
 def wait_for_port(host: str, port: int, wait: float) -> bool:
-    """True once the service sends its greeting."""
+    """True once the service says hello; polls every 10 s until wait runs out."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         try:
@@ -51,7 +51,7 @@ def wait_for_port(host: str, port: int, wait: float) -> bool:
 
 
 def power_cycle(host: str, port: int, attempts: int = 3) -> int:
-    """Cycle the power until the service answers; returns the attempts used."""
+    """Off, wait, on, until the service answers; returns the attempts it took."""
     for attempt in range(1, attempts + 1):
         set_power(False)
         time.sleep(OFF_SECONDS)
