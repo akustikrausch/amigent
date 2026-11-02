@@ -183,6 +183,7 @@ class FakeAmiga:
         self.wake_reader = threading.Event()
         self.commands = 0
         self.frames = 0
+        self.takeovers = 0  # screen clients that came in
         self.cpu_time = 0.0  # seconds the 680x0 spent reading and packing for us
         self.busy = None  # (x, y, w, h) of a region that scrolls on its own
         self.listener = socket.socket()
@@ -295,6 +296,7 @@ class FakeAmiga:
                         c.sock.sendall(b"\1")
                         c.sock.close()
                         return
+                    self.takeovers += 1
                     if self.client:  # the newcomer wins
                         try:
                             self.client.shutdown(socket.SHUT_RDWR)

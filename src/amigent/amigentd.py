@@ -295,11 +295,12 @@ class Amigentd:
             self._planes = Planes(depth, width, height)
             self._missing = self._all_tiles()
         planes = self._planes
-        planes.repaint = planes.repaint or flags != planes.flags
+        planes.repaint = planes.repaint or (flags ^ planes.flags) & ~HAS_PALETTE != 0
         planes.flags = flags
         if flags & HAS_PALETTE:
             count = struct.unpack(">H", (yield 2))[0]
-            if planes.set_palette((yield 3 * count)):
+            fresh = self._missing == self._all_tiles()  # nothing on the page yet: nothing to recolour
+            if planes.set_palette((yield 3 * count)) and not fresh:
                 planes.repaint = True
             size += 2 + 3 * count
         count = struct.unpack(">I", (yield 4))[0]
