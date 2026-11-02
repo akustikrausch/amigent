@@ -41,7 +41,7 @@ and works without an AI agent.
 
 **1. Copy one file to the Amiga**
 
-[`amiga/bin/amigentd`](amiga/bin/amigentd), about 10 KB, for example to `RAM:`.
+[`amiga/bin/amigentd`](amiga/bin/amigentd), about 14 KB, for example to `RAM:`.
 Any way works: browser, USB stick, SD card, null modem cable.
 
 **2. Start it in a Shell**

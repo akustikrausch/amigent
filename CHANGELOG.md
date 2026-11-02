@@ -3,17 +3,6 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
-## 1.0.1 (2026-11-02)
-
-- `amigentd` written from scratch, from the protocol alone. Same wire format, so
-  nothing changes for clients.
-- Chipset screens are read through their palette, so games and demos on a
-  native screen show up in the picture too.
-- `amigentd PORT <n>` runs a second copy on another port, next to the first.
-- [docs/PROTOCOL.md](docs/PROTOCOL.md) spells out the fine print: tile grid,
-  colour bits, runs, takeover, timeouts, what SETUP does when something fails.
-- `amiga/build-amigentd` takes `SOURCE` and `TO`.
-
 ## 1.0.0 (2026-11-02)
 
 The first full release. Everything from the 0.x line, now considered stable:
@@ -27,6 +16,18 @@ The first full release. Everything from the 0.x line, now considered stable:
 - **Install in three steps**: one small file on the Amiga, the rest done by
   `amigent-setup` over the network.
 - **Repair after system updates**: `amigent-repair` and a module per program.
+
+`amigentd` in this release:
+
+- Written from scratch, from the protocol alone
+  ([docs/PROTOCOL.md](docs/PROTOCOL.md) spells out tile grid, colour bits,
+  runs, takeover, timeouts and what SETUP does when something fails).
+- An unchanged screen costs about one network round trip (~5 ms) to check.
+- A new connection takes over at once, even in the middle of a frame.
+- Chipset screens are read through their palette, HAM6 and HAM8 included, so
+  games and demos on native screens show up too.
+- `amigentd PORT <n>` runs a second copy on another port;
+  `amiga/build-amigentd` takes `SOURCE` and `TO`.
 
 ## 0.5.0 (2026-11-02)
 
