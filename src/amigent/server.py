@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import inventory
+from . import inventory, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands
@@ -21,7 +21,7 @@ from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_por
 from .power import available as power_available
 from .viewer import Viewer, open_window
 
-HOST = os.environ.get("AMIGENT_HOST", "")
+HOST = machines.pick()  # AMIGENT_HOST (a name or an address), else the known Amiga
 CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
 SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
@@ -88,8 +88,34 @@ _join = join_path
 def amiga_status() -> str:
     """Show memory, OS and TCP stack versions, and mounted volumes with free space."""
     return json.dumps(
-        {"sysinfo": _with_ctl(ctl.sysinfo), "volumes": _with_ctl(ctl.volumes)}, indent=1
+        {"amiga": machines.name_of(HOST), "address": machines.address(HOST),
+         "sysinfo": _with_ctl(ctl.sysinfo), "volumes": _with_ctl(ctl.volumes)}, indent=1
     )
+
+
+@mcp.tool()
+def amiga_find(address: str = "") -> str:
+    """Find the Amiga again when it does not answer, for example after its address changed.
+
+    Without an address the home network is searched; Amigent takes only the Amiga
+    that proves to be this one (its certificate or key). Pass an address when the
+    user knows it. Amigent remembers the result for the remote desktop as well.
+    """
+    if not HOST:
+        return "No Amiga known yet: run amigent-setup."
+    before = machines.address(HOST)
+    if address:
+        machines.move(HOST, address.strip())
+        found = address.strip()
+    else:
+        machines._searched.pop(HOST, None)
+        found = machines.relocate(HOST)
+    ctl.close()
+    screen.close()
+    if not found:
+        return (f"The Amiga does not answer at {before} and is not elsewhere on this network. "
+                "Is it switched on and amigentd running? Ask the user for its address.")
+    return f'"{machines.name_of(HOST)}" is at {found} now (was {before}).'
 
 
 @mcp.tool()
@@ -710,7 +736,7 @@ def amiga_power(action: str) -> str:
 
 def main() -> None:
     if not HOST:
-        raise SystemExit("set AMIGENT_HOST to the Amiga's address")
+        raise SystemExit("no Amiga known yet: run amigent-setup, or set AMIGENT_HOST")
     mcp.run()
 
 

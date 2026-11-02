@@ -22,26 +22,22 @@ import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
+from . import machines
 from .amigactl import AmigaError
 from .amigentd import AmigentdError
 from .secret import FOLDER
 from .viewer import STATIC, WEB, Viewer, _Server, open_window
 
-LIST = FOLDER / "amigas.json"
 PREVIEW_EVERY = 20  # seconds between previews of one Amiga
 PREVIEW_WIDTH = 480
 
 
 def load_amigas() -> list[dict]:
-    try:
-        return json.loads(LIST.read_text())
-    except (OSError, ValueError):
-        return []
+    return machines.load()
 
 
 def save_amigas(amigas: list[dict]) -> None:
-    FOLDER.mkdir(parents=True, exist_ok=True)
-    LIST.write_text(json.dumps(amigas, indent=1))
+    machines.save(amigas)
 
 
 class Fleet:
@@ -49,7 +45,7 @@ class Fleet:
         self.token = secrets.token_urlsafe(18)
         self.entries = []
         for amiga in amigas:
-            viewer = Viewer(amiga["host"])
+            viewer = Viewer(amiga["name"])  # by name, so a new address is found again
             self.entries.append({"name": amiga["name"], "host": amiga["host"], "viewer": viewer,
                                  "online": None, "info": {}, "preview": None, "seen": 0.0})
         self.httpd = None
@@ -94,7 +90,8 @@ class Fleet:
         rows = []
         for i, e in enumerate(self.entries):
             info = e["info"]
-            rows.append({"id": i, "name": e["name"], "host": e["host"], "online": e["online"],
+            rows.append({"id": i, "name": e["name"], "host": machines.address(e["name"]),
+                         "online": e["online"],
                          "os": info.get("os", ""), "cpu": info.get("cpu", ""),
                          "free": info.get("chip_free", 0) + info.get("fast_free", 0),
                          "seen": e["seen"], "watching": bool(e["viewer"].clients)})
@@ -168,13 +165,15 @@ def main() -> None:
     amigas = load_amigas()
     if args.add:
         name, host = args.add
-        amigas = [a for a in amigas if a["name"] != name] + [{"name": name, "host": host}]
-        save_amigas(amigas)
-        print(f"{name} at {host} added; a key for it goes into {FOLDER / ('key-' + host)} "
-              "if it differs from the common one")
+        known = machines.find(host)
+        if not (known and known["name"] != name and machines.rename(known["name"], name)):
+            machines.remember(name, machines.address(host))
+        print(f"{name} at {machines.address(host)} added; a key for it goes into "
+              f"{FOLDER / ('key-' + name)} if it differs from the common one")
         return
     if args.remove:
-        save_amigas([a for a in amigas if a["name"] != args.remove])
+        if not machines.forget(args.remove):
+            print(f"no Amiga called {args.remove}")
         return
     if args.list or not amigas:
         for a in amigas:

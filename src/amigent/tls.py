@@ -4,6 +4,8 @@ amigent-setup creates a small EC certificate (fast enough for a 68k), puts
 certificate and key into S:amigent-tls.pem on the Amiga and keeps the
 certificate in ~/.config/amigent/tls-<host>.pem. With that file present the
 clients talk TLS on the port after amigentd's; AMIGENT_TLS=off turns it off.
+The pin also identifies the Amiga when it has to be found again under a new
+address (see machines.py).
 """
 
 from __future__ import annotations
@@ -20,16 +22,19 @@ from .secret import FOLDER, safe
 
 
 def pinned(host: str) -> Path:
-    """The certificate pinned for host, also when host is a name for an address set up earlier."""
-    path = FOLDER / f"tls-{safe(host)}.pem"
-    if not path.exists():
-        try:
-            by_address = FOLDER / f"tls-{safe(socket.gethostbyname(host))}.pem"
-        except OSError:
+    """The certificate kept for this Amiga: under its name, one of its addresses, or the
+    address a host name resolves to."""
+    from . import machines
+    names = machines.stems(host) or [host]
+    try:
+        names = [*names, socket.gethostbyname(host)]
+    except OSError:
+        pass
+    for name in names:
+        path = FOLDER / f"tls-{safe(name)}.pem"
+        if path.exists():
             return path
-        if by_address.exists():
-            return by_address
-    return path
+    return FOLDER / f"tls-{safe(names[0])}.pem"
 
 
 def wanted(host: str) -> bool:
@@ -45,16 +50,32 @@ def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     return context.wrap_socket(sock)
 
 
-def connect(host: str, port: int, timeout: float) -> socket.socket:
-    """A plain connection to port, or TLS to port + 1 when a certificate is pinned."""
+def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
     if wanted(host):
-        sock = socket.create_connection((host, port + 1), timeout)
+        sock = socket.create_connection((address, port + 1), timeout)
         try:
             return wrap(sock, host)
         except (OSError, ssl.SSLError):
             sock.close()
             raise
-    return socket.create_connection((host, port), timeout)
+    return socket.create_connection((address, port), timeout)
+
+
+def connect(host: str, port: int, timeout: float) -> socket.socket:
+    """A plain connection to port, or TLS to port + 1 when a certificate is pinned.
+
+    host is a name or an address. When the Amiga does not answer there, it is
+    looked for on the local network once, and found again under its new address.
+    """
+    from . import machines
+    address = machines.address(host)
+    try:
+        return _dial(address, host, port, timeout)
+    except (OSError, ssl.SSLError):
+        moved = machines.relocate(host)
+        if not moved or moved == address:
+            raise
+        return _dial(moved, host, port, timeout)
 
 
 def make_certificate(host: str) -> tuple[bytes, bytes] | None:
@@ -74,6 +95,6 @@ def make_certificate(host: str) -> tuple[bytes, bytes] | None:
 
 def remember(host: str, certificate: bytes) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = pinned(host)
+    path = FOLDER / f"tls-{safe(host)}.pem"
     path.write_bytes(certificate)
     return path

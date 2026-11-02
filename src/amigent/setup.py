@@ -12,7 +12,6 @@ accept only this PC.
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import socket
 import sys
@@ -24,7 +23,7 @@ from . import lzh
 from .amigactl import AmigaCtl, AmigaError
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
-from . import tls
+from . import machines, tls
 from .secret import new_key, own_key, save_key
 
 REPO = Path(__file__).resolve().parents[2]
@@ -35,22 +34,7 @@ SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 
 def find_amiga() -> str | None:
     """Look for amigentd on the local /24."""
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    probe.connect(("192.0.2.1", 9))
-    mine = probe.getsockname()[0]
-    probe.close()
-    net = mine.rsplit(".", 1)[0]
-
-    def check(host: str) -> str | None:
-        try:
-            with socket.create_connection((host, 6801), 1) as s:
-                s.settimeout(2)
-                return host if s.recv(4) == b"AMGT" else None
-        except OSError:
-            return None
-
-    with concurrent.futures.ThreadPoolExecutor(64) as pool:
-        hits = [h for h in pool.map(check, (f"{net}.{i}" for i in range(1, 255))) if h]
+    hits = machines.scan()
     return hits[0] if hits else None
 
 
@@ -218,6 +202,7 @@ def main() -> int:
     parser.add_argument("--no-allow", action="store_true", help="let amigactld accept any address")
     parser.add_argument("--serve", nargs="?", const=8001, type=int, metavar="PORT",
                         help="first step: offer amigentd to the Amiga over the network (port 8001)")
+    parser.add_argument("--name", help="what to call this Amiga (default: Amiga, or the name it has)")
     args = parser.parse_args()
     if args.serve:
         from .serve import serve
@@ -227,6 +212,9 @@ def main() -> int:
     if not host:
         print("No Amiga in sight. Is `amigentd SETUP` running over there?")
         return 1
+    known = machines.find(host)
+    name = args.name or (known["name"] if known else machines._unique("Amiga", machines.load()))
+    host = machines.address(host)
     print(f"Amiga at {host}")
     allow = None if args.no_allow else args.allow
     if not allow and not args.no_allow:
@@ -254,8 +242,7 @@ def main() -> int:
             path = save_key(key, host)
             print("Done. amigentd handles screen, commands and files, and starts with the machine.")
             print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
-            print(f"AMIGENT_HOST={host}")
-            return 0
+            return _named(name, host)
         ctl = reach_amigactld(host)
         if ctl is None and allow:
             # The Amiga sees us under another address: undo the restriction while we still can.
@@ -272,7 +259,13 @@ def main() -> int:
     path = save_key(key, host)
     print(f"Done. {ctl.banner} and amigentd are up, and both start with the machine.")
     print(f"The key is in {path} and in S:amigent.key; amigentd asks for it from now on.")
-    print(f"AMIGENT_HOST={host}")
+    return _named(name, host)
+
+
+def _named(name: str, host: str) -> int:
+    machines.remember(name, host)
+    print(f'This Amiga is "{name}" now. Should its address change, Amigent finds it again.')
+    print(f"AMIGENT_HOST={name}")
     return 0
 
 

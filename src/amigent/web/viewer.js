@@ -54,6 +54,7 @@
     if (MAC) for (const el of document.querySelectorAll('[data-i18n="tip_paste"], [data-i18n="tip_keys"]')) el.dataset.i18n += "_mac";
     for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
     for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+    for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
     for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
     for (const el of document.querySelectorAll("[data-i18n-label]")) {
       el.title = t(el.dataset.i18nLabel);
@@ -117,6 +118,7 @@
     else if (amigaOnline === null) message = t("connecting");
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
+    $("find").hidden = !(socketOpen && amigaOnline === false);
     pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
     $("state-text").textContent = socketOpen && amigaOnline ? [host, amiga.os, amiga.cpu].filter(Boolean).join(" · ") : t("state_offline");
   }
@@ -176,7 +178,7 @@
           $("st-version").textContent = `Amigent ${m.version}`;
           $("about-version").textContent = t("version", { version: m.version });
         }
-        $("about-host").textContent = host;
+        $("about-host").textContent = m.address && m.address !== host ? `${host} (${m.address})` : host;
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
         amigaOnline = m.online;
@@ -195,6 +197,9 @@
       case "online":
         amigaOnline = m.online;
         showState();
+        break;
+      case "address":
+        $("about-host").textContent = `${host} (${m.address})`;
         break;
       case "stats":
         $("st-size").textContent = `${m.w}×${m.h}`;
@@ -857,6 +862,17 @@
 
   $("upload").addEventListener("click", () => $("file").click());
   $("download").addEventListener("click", openGet);
+
+  // ---------------------------------------------------------------- address
+
+  $("find").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const address = $("find-address").value.trim();
+    if (!address) return;
+    const reply = await fetch(api("/api/address"), { method: "POST", body: address }).catch(() => null);
+    if (!reply || !reply.ok) return toast(t("find_bad"), true);
+    toast(t("find_trying", { address }));
+  });
 
   // ---------------------------------------------------------------- clipboard
 

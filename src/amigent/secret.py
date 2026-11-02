@@ -1,7 +1,8 @@
 """The shared key between the PC and amigentd.
 
 amigent-setup creates one per Amiga, puts it there as S:amigent.key and keeps a
-copy in ~/.config/amigent/key-<address>. The first one also goes to
+copy in ~/.config/amigent/key-<address> (found again under the Amiga's name,
+see machines.py). The first one also goes to
 ~/.config/amigent/key, which serves any address without a key of its own.
 AMIGENT_KEY overrides the files.
 """
@@ -22,24 +23,29 @@ def safe(host: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", host).strip(".") or "_"
 
 
+def _own(host: str) -> Path | None:
+    """The key file of this Amiga: under its name, one of its addresses, or the address a
+    host name resolves to."""
+    from . import machines
+    names = machines.stems(host)
+    try:
+        names.append(socket.gethostbyname(host))
+    except OSError:
+        pass
+    for name in names:
+        path = FOLDER / f"key-{safe(name)}"
+        if path.exists():
+            return path
+    return None
+
+
 def key_file(host: str = "") -> Path:
-    """The key for this host: its own, the one kept under its address, or the common key.
+    """The key for this host: its own, the one kept under one of its addresses, or the common key.
 
     The common key belongs to the first Amiga set up. Once there are keys for
     several Amigas it is only used for a host that resolves to none of them.
     """
-    if host:
-        own = FOLDER / f"key-{safe(host)}"
-        if own.exists():
-            return own
-        try:
-            address = socket.gethostbyname(host)
-        except OSError:
-            address = ""
-        by_address = FOLDER / f"key-{safe(address)}"
-        if address and by_address.exists():
-            return by_address
-    return FOLDER / "key"
+    return (_own(host) if host else None) or FOLDER / "key"
 
 
 def load_key(host: str = "") -> str | None:
@@ -54,8 +60,9 @@ def load_key(host: str = "") -> str | None:
 
 def own_key(host: str) -> str | None:
     """The key kept for exactly this host, ignoring the common one."""
+    path = _own(host)
     try:
-        return (FOLDER / f"key-{safe(host)}").read_text().strip() or None
+        return path.read_text().strip() or None if path else None
     except OSError:
         return None
 

@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import __version__
+from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, AmigentdError
 from .channel import Commands
@@ -256,7 +256,8 @@ class Viewer:
     def join(self, ws: WebSocket) -> None:
         with self.lock():
             picture = self.screen.snapshot()
-            ws.send(json.dumps({"type": "hello", "host": self.host, "online": self.online,
+            ws.send(json.dumps({"type": "hello", "host": machines.name_of(self.host),
+                                "address": machines.address(self.host), "online": self.online,
                                 "version": __version__, "amiga": self.amiga,
                                 "screens": self.screen_list,
                                 "w": self.screen.width, "h": self.screen.height}))
@@ -440,6 +441,19 @@ class Viewer:
                 quiet = min(quiet + 1, 20)
             self.wake.wait(spent + 0.01 * quiet)
             self.wake.clear()
+
+    def set_address(self, new: str) -> None:
+        """The user says where the Amiga is now."""
+        new = new.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
+            raise ValueError("not an address")
+        machines.move(self.host, new)
+        with self.lock():
+            self.screen.close()
+        with self.ctl_lock:
+            self.ctl.close()
+        self.event("address", address=new)
+        self.wake.set()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
@@ -656,6 +670,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if url.path == "/api/clients":
+            with self.viewer.clients_lock:
+                return self._json(200, {"clients": len(self.viewer.clients)})
         if url.path == "/api/clipboard":
             try:
                 return self._json(200, {"text": self.viewer.read_clipboard()})
@@ -666,7 +683,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard"):
+        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address"):
             return self._reply(403, b"forbidden", "text/plain")
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -677,6 +694,12 @@ class _Handler(BaseHTTPRequestHandler):
         if size > (MAX_UPLOAD if url.path == "/api/upload" else MAX_MESSAGE):
             return self._json(413, {"error": "file too large"})
         data = self.rfile.read(size)
+        if url.path == "/api/address":
+            try:
+                self.viewer.set_address(data.decode("utf-8", "replace"))
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {})
         if url.path == "/api/clipboard":
             try:
                 self.viewer.write_clipboard(data.decode("utf-8", "replace"))
@@ -771,11 +794,59 @@ def open_window(url: str) -> None:
     webbrowser.open(url)
 
 
+def focus_window(title: str) -> bool:
+    """Bring the browser window whose title starts with title to the front."""
+    try:
+        if sys.platform == "darwin":
+            for browser in ("Google Chrome", "Microsoft Edge", "Chromium"):
+                if not any((folder / f"{browser}.app").exists()
+                           for folder in (Path("/Applications"), Path.home() / "Applications")):
+                    continue  # osascript would ask where a missing program is
+                script = (f'if application "{browser}" is running then\n'
+                          f'tell application "{browser}"\n'
+                          f'repeat with w in windows\n'
+                          f'if title of w starts with "{title}" then\n'
+                          f'set index of w to 1\nactivate\nreturn "ok"\nend if\n'
+                          f'end repeat\nend tell\nend if\nreturn ""')
+                done = subprocess.run(["osascript", "-e", script], capture_output=True, text=True,
+                                      timeout=10)
+                if done.stdout.strip() == "ok":
+                    return True
+            return False
+        if sys.platform == "win32" or "microsoft" in platform.release().lower():
+            exe = windows_exe("powershell.exe") if sys.platform != "win32" else "powershell"
+            title_ps = title.replace("'", "''")
+            done = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command",
+                                   f"(New-Object -ComObject WScript.Shell).AppActivate('{title_ps}')"],
+                                  capture_output=True, text=True, timeout=15,
+                                  cwd="/mnt/c" if os.path.isdir("/mnt/c") else None)
+            return done.stdout.strip().lower() == "true"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return False
+
+
+def _pages(url: str) -> int:
+    """How many pages the running viewer at url has open."""
+    try:
+        api = url.replace("/?t=", "/api/clients?t=")
+        with urllib.request.urlopen(api, timeout=2) as reply:
+            return int(json.loads(reply.read()).get("clients", 0))
+    except (OSError, ValueError):
+        return 0
+
+
+def show(url: str, host: str) -> None:
+    """Bring the viewer's window up: the open one if there is one, else a new one."""
+    if not (_pages(url) and focus_window(f"Amigent · {machines.name_of(host)}")):
+        open_window(url)
+
+
 def running_viewer(host: str) -> str | None:
     """The address of a viewer for host that already runs on this PC, if any."""
     try:
         state = json.loads(STATE.read_text())
-        if state.get("host") != host:
+        if machines.name_of(state.get("host", "")) != machines.name_of(host):
             return None
         with urllib.request.urlopen(state["url"], timeout=2) as reply:
             return state["url"] if reply.status == 200 else None
@@ -785,7 +856,8 @@ def running_viewer(host: str) -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="amigent-viewer", description="Watch and drive the Amiga.")
-    parser.add_argument("host", nargs="?", default=os.environ.get("AMIGENT_HOST", ""))
+    parser.add_argument("host", nargs="?", default="",
+                        help="the Amiga's name or address (default: AMIGENT_HOST, else the known Amiga)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("AMIGENT_VIEWER_PORT", "6810")))
     parser.add_argument("--no-window", action="store_true", help="only print the address")
     parser.add_argument("--exit-when-closed", action="store_true",
@@ -800,20 +872,21 @@ def main() -> None:
         for path in uninstall():
             print(f"removed {path}")
         return
-    if not args.host:
-        parser.error("give the Amiga's address or set AMIGENT_HOST")
+    host = machines.pick(args.host)
+    if not host:
+        parser.error("no Amiga known yet: run amigent-setup, or give the Amiga's address")
     if args.install:
         from .desktop import install
-        for path in install(args.host):
+        for path in install(machines.name_of(host)):
             print(f"created {path}")
         return
-    if url := running_viewer(args.host):
+    if url := running_viewer(host):
         if not args.no_window:
-            open_window(url)
+            show(url, host)
         print(f"Amigent viewer already running: {url}", flush=True)
         return
     viewer = Viewer(
-        args.host,
+        host,
         ctl_port=int(os.environ.get("AMIGENT_CTL_PORT", "6800")),
         screen_port=int(os.environ.get("AMIGENT_SCREEN_PORT", "6801")),
         flush_volumes=os.environ.get("AMIGENT_FLUSH_VOLUMES", "SYS:").split(),

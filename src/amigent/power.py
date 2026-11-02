@@ -37,7 +37,8 @@ def wait_for_port(host: str, port: int, wait: float) -> bool:
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, port), 5) as s:
+            from .machines import address
+            with socket.create_connection((address(host), port), 5) as s:
                 s.settimeout(8)
                 if s.recv(8):
                     return True

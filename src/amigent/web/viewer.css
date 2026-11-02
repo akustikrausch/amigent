@@ -163,6 +163,11 @@ button.icon[aria-pressed="true"] { background: var(--control); border-color: var
 }
 
 .overlay.show { display: flex; }
+.find { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; }
+.find[hidden] { display: none; }
+.find p { margin: 0; color: #c4cad3; }
+.find-row { display: flex; gap: 8px; width: 100%; }
+.find-row input { flex: 1; min-width: 0; }
 .drop { margin: 14px; border: 2px dashed var(--accent); border-radius: 12px; color: #fff; font-size: 16px; }
 
 .spinner {

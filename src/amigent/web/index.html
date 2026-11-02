@@ -56,7 +56,15 @@
 <div id="body">
   <main id="stage">
     <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen" data-i18n-aria="screen_label"></canvas>
-    <div id="overlay" class="overlay"><div class="spinner"></div><p id="overlay-text"></p></div>
+    <div id="overlay" class="overlay"><div class="spinner"></div><p id="overlay-text"></p>
+      <form id="find" class="find" hidden>
+        <p data-i18n="find_hint">If the Amiga got a new address, Amigent finds it again by itself. Or enter it here:</p>
+        <div class="find-row">
+          <input id="find-address" autocomplete="off" spellcheck="false" data-i18n-placeholder="find_placeholder" placeholder="for example 192.168.1.20">
+          <button id="find-go" class="primary" type="submit" data-i18n="find_connect">Connect</button>
+        </div>
+      </form>
+    </div>
     <div id="drop" class="overlay drop"><p data-i18n="drop_here">Drop to send to the Amiga</p></div>
     <div id="uploads" aria-live="polite"></div>
   </main>

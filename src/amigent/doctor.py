@@ -1,6 +1,8 @@
 """Check the connection to the Amiga and measure what the link can carry.
 
-Usage: python -m amigent.doctor HOST
+Usage: python -m amigent.doctor [NAME OR ADDRESS]
+
+Without an argument it checks AMIGENT_HOST, else the Amiga amigent-setup set up.
 """
 
 from __future__ import annotations
@@ -8,16 +10,20 @@ from __future__ import annotations
 import sys
 import time
 
+from . import machines
 from .amigactl import AmigaError
 from .channel import Commands
 from .amigentd import Amigentd, AmigentdError
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) > 2 or sys.argv[1:] in (["-h"], ["--help"]):
         print(__doc__)
         return 2
-    host = sys.argv[1]
+    host = machines.pick(sys.argv[1] if len(sys.argv) == 2 else "")
+    if not host:
+        print("No Amiga known yet: run amigent-setup, or give the Amiga's address.")
+        return 2
     failed = False
 
     ctl = Commands(host)
@@ -54,6 +60,9 @@ def main() -> int:
         print(f"amigentd   FAIL {e}")
         failed = True
 
+    entry = machines.find(host)
+    where = f'"{entry["name"]}" at {entry["host"]}' if entry else host
+    print(f"amiga      {where}")
     return 1 if failed else 0
 
 
