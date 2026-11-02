@@ -402,6 +402,36 @@ static ULONG now_ms(void)
     return ms ? ms : 1;  /* 0 means never read */
 }
 
+/* Waits for sigs, or ms milliseconds when ms >= 0; returns the signals that came.
+ * Instead of WaitSelect without sockets, whose timeout WinUAE's bsdsocket ignores. */
+static ULONG wait_ms(LONG ms, ULONG sigs)
+{
+    struct MsgPort *port = ms >= 0 ? CreateMsgPort() : NULL;
+    struct timerequest *t = port ? (struct timerequest *)CreateIORequest(port, sizeof(*t)) : NULL;
+    ULONG got;
+
+    if (t && OpenDevice(TIMERNAME, UNIT_VBLANK, (struct IORequest *)t, 0) == 0) {
+        t->tr_node.io_Command = TR_ADDREQUEST;
+        t->tr_time.tv_secs = ms / 1000;
+        t->tr_time.tv_micro = ms % 1000 * 1000;
+        SendIO((struct IORequest *)t);
+        got = Wait(sigs | 1UL << port->mp_SigBit) & sigs;
+        if (!CheckIO((struct IORequest *)t))
+            AbortIO((struct IORequest *)t);
+        WaitIO((struct IORequest *)t);
+        CloseDevice((struct IORequest *)t);
+    } else if (ms >= 0) {
+        Delay(ms / 20 + 1);
+        got = SetSignal(0, sigs) & sigs;
+    } else
+        got = Wait(sigs);
+    if (t)
+        DeleteIORequest((struct IORequest *)t);
+    if (port)
+        DeleteMsgPort(port);
+    return got;
+}
+
 static void free_frame(void)
 {
     FreeVec(ref);
@@ -2300,16 +2330,11 @@ static BOOL c_exec(struct link *l, UWORD len, UWORD dir_len, UWORD secs)
     Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
 
     while (!r->done) {
-        struct timeval tv;
-        ULONG sigs = (1UL << r->sig) | SIGBREAKF_CTRL_C;
+        ULONG sigs;
 
-        if (secs) {
-            if ((left = secs * 1000L - (LONG)(now_ms() - start)) <= 0)
-                break;
-            tv.tv_sec = left / 1000;
-            tv.tv_usec = left % 1000 * 1000;
-        }
-        WaitSelect(0, NULL, NULL, NULL, secs ? &tv : NULL, &sigs);
+        if (secs && (left = secs * 1000L - (LONG)(now_ms() - start)) <= 0)
+            break;
+        sigs = wait_ms(secs ? left : -1, (1UL << r->sig) | SIGBREAKF_CTRL_C);
         if (sigs & SIGBREAKF_CTRL_C) {
             quitting = TRUE;
             break;
@@ -2911,11 +2936,15 @@ static void __saveds tls_main(void)
                         CloseSocket(listen_fd);
                         listen_fd = -1;
                     }
-                    FD_ZERO(&r);
-                    if (listen_fd >= 0)
-                        FD_SET(listen_fd, &r);
                     sigs = SIGBREAKF_CTRL_C;
-                    n = WaitSelect(listen_fd + 1, listen_fd >= 0 ? &r : NULL, NULL, NULL, &tv, &sigs);
+                    if (listen_fd >= 0) {
+                        FD_ZERO(&r);
+                        FD_SET(listen_fd, &r);
+                        n = WaitSelect(listen_fd + 1, &r, NULL, NULL, &tv, &sigs);
+                    } else {
+                        sigs = wait_ms(TLS_CHECK_SECONDS * 1000L, sigs);
+                        n = 0;
+                    }
                     if (sigs & SIGBREAKF_CTRL_C)
                         break;
                     if (n > 0 && listen_fd >= 0 && FD_ISSET(listen_fd, &r))
