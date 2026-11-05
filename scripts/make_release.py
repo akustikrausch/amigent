@@ -3,8 +3,11 @@
 Usage: make_release.py HOST
 
 Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
-Writes dist/amigent-<version>.lha with an Amigent drawer: amigentd (68020),
-amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe and the licence.
+Writes dist/amigent.lha with an Amigent drawer: amigentd (68020),
+amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe and the licence,
+and next to it amigent.readme for Aminet. Aminet wants the version in the
+readme, not in the file name: uploading amigent.lha again replaces the last one.
+The same archive goes to the GitHub release as amigent-<version>.lha.
 """
 
 from __future__ import annotations
@@ -78,6 +81,125 @@ Licence: MIT, see LICENSE.
 """
 
 
+# Aminet files from before the archive lost its version number; they go away with
+# the next upload. Empty this once Aminet shows only amigent.lha.
+REPLACES = "comm/net/amigent-1.1.1.lha"
+
+AMINET_HEAD = f"""Short:        Remote desktop and AI agent for Amigas
+Author:       Andreas Wendorf (Akustikrausch)
+Uploader:     akustikrausch@gmail.com (Andreas Wendorf)
+Type:         comm/net
+Version:      {__version__}
+""" + (f"Replaces:     {REPLACES}\n" if REPLACES else "") + """\
+Architecture: m68k-amigaos >= 2.0.4
+Distribution: Aminet
+Requires:     a TCP/IP stack with bsdsocket.library, such as Roadshow
+"""
+
+AMINET_BODY = """
+A REMOTE DESKTOP FOR YOUR REAL AMIGA, LIKE TEAMVIEWER OR VNC
+
+Sit at your PC or Mac and use your Amiga as if it were in front of you: its
+screen live in a window, your own mouse and keyboard on it, Amiga keys and
+shortcuts on a side panel, files in either direction (drop them on the
+window to send them) and one shared clipboard. No VNC server and no extra
+software on the Amiga beyond this archive, and it stays quick even on a
+7 MHz 68000 behind a plipbox.
+
+And if you like, an AI agent (Claude, Codex or any other MCP client) takes
+over the same way: it runs commands, copies files, installs software and
+clicks through programs, while you watch every click in that window and can
+take over at any moment.
+
+This archive is the Amiga half: amigentd, the small service that does the
+work on the Amiga, amigent-status, a window that shows who is connected, and
+Amigent-Update for updating an earlier installation. The PC or Mac half is a
+Python package:
+
+    pipx install amigent
+
+or just tell your AI agent: "Install Amigent from
+https://github.com/akustikrausch/amigent for me." It then finds the Amiga on
+the network and sets everything up from the PC.
+
+
+NEW IN THIS VERSION
+
+- Pause the picture: the Amiga stops reading its screen for a while, so a
+  test, a benchmark or a demo has the CPU and the chip bus to itself. From
+  the remote desktop (1, 5 or 15 minutes), from the AI agent, or by ARexx:
+  address AMIGENT 'PAUSE 300' and 'RESUME'. Mouse, keys, commands and files
+  keep working.
+- Updating is one double-click on Amigent-Update, or amigent-setup --update
+  from the PC.
+
+
+TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
+
+Chipset screens go out as the bitplanes the Amiga keeps anyway, graphics card
+screens as tiles with their own small palette, and only what changed. Mouse
+and keys are carried out at once, even while a picture is still on its way.
+
+  68000 at 7 MHz, 640x256:  whole screen 0.6-1.0 s, unchanged 80 ms,
+                            under 10% of the CPU while the PC watches
+  68020 at 14 MHz:          whole screen 0.1 s, 2-3% of the CPU
+  1920x1080 RTG on a plipbox (about 50 KB/s): whole screen about 3 s
+
+
+INSTALLATION
+
+1. Unpack the archive, e.g.  LhA x amigent.lha RAM:
+2. Double-click amigentd (amigentd.000 on a plain 68000), or in a Shell:
+       RAM:Amigent/amigentd SETUP
+3. On the PC or Mac: pipx install amigent, then amigent-setup.
+   It copies amigentd to C:, adds it to S:User-Startup and gives it a key.
+4. For the remote desktop alone, no AI agent needed: amigent-viewer --install
+   puts Amigent into the Start menu (Windows) or Applications (macOS).
+
+A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
+SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY. amigentd answers ARexx on the
+port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, HELP, QUIT).
+
+
+UPDATING FROM AN EARLIER AMIGENT
+
+On the Amiga: unpack the archive, double-click Amigent-Update in its drawer.
+From the PC or Mac: pipx upgrade amigent, then amigent-setup --update.
+Key, certificate and the start line in S:User-Startup stay. Should the new
+amigentd not start, the old one starts again.
+
+
+REQUIREMENTS
+
+AmigaOS 2.04 or newer, any CPU from the 68000 on, a network connection (a
+plipbox on the parallel port is enough). Encrypted connections need OS 3.0
+and AmiSSL 5.1 or newer. Updating on the Amiga needs ARexx (RexxMast). On
+the PC: Windows, macOS or Linux with Python 3.10 or newer.
+
+
+SECURITY
+
+amigentd asks every connection for a key that amigent-setup creates, and with
+AmiSSL it encrypts the connection with TLS, pinned to the certificate made for
+this Amiga. Keep it in your home network; do not open its port to the
+internet.
+
+
+Source, documentation and the wire protocol:
+https://github.com/akustikrausch/amigent
+
+Licence: MIT.
+"""
+
+
+def aminet_readme() -> str:
+    text = AMINET_HEAD + AMINET_BODY
+    short = text.splitlines()[0].split(":", 1)[1].strip()
+    assert len(short) <= 40, "Aminet allows 40 characters in Short:"
+    assert all(len(line) <= 78 for line in text.splitlines()), "keep readme lines short"
+    return text
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
@@ -106,7 +228,7 @@ def main() -> None:
     for name in ("amigentd", "amigentd.000", "amigent-status"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
-    archive = f"amigent-{__version__}.lha"
+    archive = "amigent.lha"
     result = ctl.exec(f"LhA -r -x -q a {stage}/{archive} Amigent Amigent.info", cd=stage, timeout=120)
     if result.rc > 5:
         raise SystemExit(f"LhA said {result.rc}:\n{result.output}")
@@ -115,7 +237,9 @@ def main() -> None:
     out = ROOT / "dist" / archive
     out.parent.mkdir(exist_ok=True)
     out.write_bytes(data)
-    print(f"{out} ({len(data)} bytes)")
+    (out.parent / f"amigent-{__version__}.lha").write_bytes(data)
+    (out.parent / "amigent.readme").write_text(aminet_readme(), encoding="iso-8859-1")
+    print(f"{out} ({len(data)} bytes), amigent-{__version__}.lha for GitHub, amigent.readme")
 
 
 if __name__ == "__main__":

@@ -116,6 +116,12 @@ All numbers, how they were taken and how to repeat them are in
 - **New address after a restart?** Amigent finds the Amiga again by itself. It
   takes only the one that proves to be yours.
 - **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
+- **Updating Amigent?** `pipx upgrade amigent`, then `amigent-setup --update`
+  puts the new amigentd on the Amiga. At the Amiga, double-click
+  *Amigent-Update* in the new archive's drawer.
+- **Running a test or a benchmark?** *Pause the picture* in the remote desktop
+  (or `PAUSE` by ARexx) gives the Amiga's CPU back to it for a while; mouse,
+  keys and files keep working.
 - **After a big OS update**, `amigent-repair` puts back what the update removed.
 - **Safe at home.** A key keeps other computers on the network out, and the
   connection can be encrypted. Don't open the Amiga to the internet.
