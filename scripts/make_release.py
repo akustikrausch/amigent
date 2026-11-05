@@ -52,6 +52,10 @@ On the PC or Mac
 
    The full guide is on the project page above.
 
+Updating from an earlier Amigent: on the PC or Mac "pipx upgrade amigent",
+then "amigent-setup --update". That puts the new amigentd on the Amiga by
+network; nothing to do at the Amiga.
+
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
 any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
 TCP/IP stack with bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
@@ -61,7 +65,9 @@ KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
 
 amigent-status shows a small window with amigentd's state and its
 connections, refreshed every 2 seconds. amigentd also answers ARexx on the
-port AMIGENT: STATUS, CLIENTS, VERSION, HELP, QUIT.
+port AMIGENT: STATUS, CLIENTS, VERSION, PAUSE, RESUME, HELP, QUIT.
+PAUSE <seconds> stops all screen reading for that long, so a test or a
+benchmark has the CPU to itself; RESUME ends it.
 
 Licence: MIT, see LICENSE.
 """

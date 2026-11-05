@@ -134,6 +134,22 @@ When the Amiga sits in another network, the remote desktop offers a field for it
 address while it does not answer, and the agent has `amiga_find` to search or to
 set an address you tell it. A fixed address in the router saves the search.
 
+### Updating
+
+Update the PC side as you installed it, for example `pipx upgrade amigent`.
+When a new version brings a new amigentd, bring the Amiga along by network:
+
+```bash
+amigent-setup --update
+```
+
+It needs nobody at the Amiga and keeps key, certificate and the start line in
+`S:User-Startup` (`TLSONLY` included). The new amigentd goes to `C:`, the old
+one stays as `C:amigentd.old`; should the new one not start, the Amiga starts
+the old one again. With several Amigas, give the name: `amigent-setup --update
+A1200`; with a scripts folder other than `SYS:amigent`, add `--home` so the copy
+there that `amigent-repair` uses gets updated too.
+
 ## Tools for the AI agent
 
 | tool | purpose |

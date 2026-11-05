@@ -372,7 +372,7 @@ class AmigaChannel(VolumeFlush):
             self.connect()
         if self.protocol < PAUSE_PROTOCOL:
             raise AmigaError(f"amigentd on the Amiga speaks protocol {self.protocol}, pausing the "
-                             f"screen needs {PAUSE_PROTOCOL}: update amigentd (amigent-setup)")
+                             f"screen needs {PAUSE_PROTOCOL}: run amigent-setup --update")
         self._sock.settimeout(self.timeout)
         self._header(PAUSE, 0, max(0, min(int(seconds), PAUSE_MAX)))
         self._status()

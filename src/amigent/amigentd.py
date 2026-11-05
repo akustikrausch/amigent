@@ -574,7 +574,7 @@ class Amigentd:
             self._retry(lambda: None)  # connect, once more if another client cut in
         if self.protocol < version:
             raise AmigentdError(f"amigentd on the Amiga speaks protocol {self.protocol}, this needs "
-                                f"{version}; install the current amigentd")
+                                f"{version}; run amigent-setup --update")
 
     def _text(self, cmd: int) -> list[list[str]]:
         def call():

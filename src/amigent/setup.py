@@ -1,20 +1,26 @@
 """One-shot installer, run from the PC once amigentd is up on the Amiga.
 
 Usage: amigent-setup [HOST] [--home DIR] [--with-amigactld [--allow IP | --no-allow]]
+       amigent-setup --update [HOST] [--home DIR]
 
 Start `amigentd SETUP` on the Amiga first. This finds the machine, drops
 amigentd and the scripts in place, hooks it into S:User-Startup and hands it a
 key. amigentd does commands and files on its own; older versions of it, or
 --with-amigactld, also pull amigactld from its project page and let it
 accept only this PC.
+
+--update swaps the amigentd that already runs for the one in this package, over
+the usual key and TLS, with nobody at the Amiga. Should the new one not come up,
+the Amiga starts the old one again.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 
-from . import machines, tls
+from . import __version__, machines, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from .errors import AmigaError
@@ -96,6 +102,113 @@ EndIf
     run(link, "Execute T:amigent-setup")
 
 
+# Runs on the Amiga, detached, so it outlives the amigentd it replaces. The start line
+# comes from S:User-Startup, so TLSONLY and friends stay as they were.
+UPDATE_REXX = """/* Amigent: swap amigentd for C:amigentd.new, fall back to the old one */
+line = 'Run >NIL: C:amigentd'
+if open('f', 'S:User-Startup', 'R') then do
+  do until eof('f')
+    l = strip(readln('f'))
+    if l ~= '' & left(l, 1) ~= ';' & pos('C:AMIGENTD', upper(l)) > 0 then line = l
+  end
+  call close('f')
+end
+address command 'Wait 2'
+if ~show('P', 'AMIGENT') then do
+  /* too old for an ARexx port: it cannot be stopped from here, the next boot starts the new one */
+  address command 'Copy C:amigentd C:amigentd.old QUIET'
+  address command 'Copy C:amigentd.new C:amigentd QUIET'
+  address command 'Protect C:amigentd rwed'
+  address command 'Delete >NIL: C:amigentd.new QUIET'
+  outcome = 'reboot'
+end
+else do
+  address AMIGENT 'QUIT'
+  do 15 while show('P', 'AMIGENT'); address command 'Wait 1'; end
+  if show('P', 'AMIGENT') then outcome = 'busy'
+  else do
+    address command 'Copy C:amigentd C:amigentd.old QUIET'
+    address command 'Copy C:amigentd.new C:amigentd QUIET'
+    address command 'Protect C:amigentd rwed'
+    address command line
+    do 15 until show('P', 'AMIGENT'); address command 'Wait 1'; end
+    if show('P', 'AMIGENT') then do
+      address command 'Delete >NIL: C:amigentd.new QUIET'
+      if exists('%HOME%/amigentd') then address command 'Copy C:amigentd %HOME%/ QUIET'
+      outcome = 'new'
+    end
+    else do
+      address command 'Copy C:amigentd.old C:amigentd QUIET'
+      address command line
+      outcome = 'old'
+    end
+  end
+end
+if open('d', 'T:amigent-update.done', 'W') then do; call writeln('d', outcome); call close('d'); end
+"""
+UPDATE_TROUBLE = {
+    b"old": "The new amigentd did not start, so the Amiga runs the old one again.",
+    b"busy": "The running amigentd did not stop, so nothing was changed.",
+    b"reboot": "This amigentd is too old to restart itself. The new one is in C:amigentd now; "
+               "restart the Amiga to start it.",
+}
+UPDATE_WAIT = 90.0  # seconds for the old amigentd to go and the new one to answer
+
+
+def update(host: str, home: str) -> int:
+    """Put this package's amigentd on an Amiga that runs an older one, by network."""
+    channel = AmigaChannel(host, timeout=30)
+    try:
+        channel.connect()
+        cpu = channel.exec("CPU CHECK 68020").rc
+        if cpu not in (0, 5):
+            print(f"C:CPU answered {cpu}, so the CPU is unknown. Copy C:CPU from the Workbench "
+                  "disk and try again.")
+            return 1
+        build = "amigentd.000" if cpu == 5 else "amigentd"
+        new = (AMIGA / "bin" / build).read_bytes()
+        if channel.read_file("C:amigentd") == new:
+            print(f"amigentd on {host} is already the one from Amigent {__version__}.")
+            channel.close()
+            return 0
+        print(f"uploading {build} to {host}")
+        channel.write_file("C:amigentd.new", new)
+        channel.exec("Delete >NIL: T:amigent-update.done QUIET")
+        channel.write_file("T:amigent-update.rexx", UPDATE_REXX.replace("%HOME%", home).encode("iso-8859-1"))
+        channel.exec("Run >NIL: RexxMast >NIL:")  # ARexx is running on most Amigas; this makes sure
+        channel.exec("Run >NIL: rx T:amigent-update.rexx")
+        channel.close()
+    except AmigaError as e:
+        channel.close()
+        print(f"{e}\nWithout a working connection the update needs `amigentd SETUP` on the Amiga "
+              "and amigent-setup without --update.")
+        return 1
+    print("restarting amigentd on the Amiga", end="", flush=True)
+    time.sleep(6)
+    deadline = time.monotonic() + UPDATE_WAIT
+    while time.monotonic() < deadline:
+        channel = AmigaChannel(host, timeout=30)
+        try:
+            channel.connect()
+            done = channel.read_file("T:amigent-update.done").strip()  # AmigaError until then
+            if done != b"new":
+                channel.close()
+                print("\n" + UPDATE_TROUBLE.get(done, f"The update script said {done!r}."))
+                return 0 if done == b"reboot" else 1
+            version = channel.exec("Version C:amigentd").output.strip()
+            channel.exec("Delete >NIL: T:amigent-update.done T:amigent-update.rexx QUIET")
+            channel.close()
+            print(f"\nDone: {version}, protocol {channel.protocol}.")
+            return 0
+        except AmigaError:
+            channel.close()
+            print(".", end="", flush=True)
+            time.sleep(3)
+    print(f"\namigentd on {host} has not answered for {UPDATE_WAIT:.0f} s. Restart the Amiga; "
+          "C:amigentd.old is the previous version.")
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("host", nargs="?")
@@ -109,7 +222,11 @@ def main() -> int:
     parser.add_argument("--name", help="what to call this Amiga (default: Amiga, or the name it has)")
     parser.add_argument("--allow-plain", action="store_true",
                         help="keep unencrypted connections from other computers even when TLS works")
+    parser.add_argument("--update", action="store_true",
+                        help="replace the amigentd that already runs with this version's, by network")
     args = parser.parse_args()
+    if args.update:
+        return update(machines.address(machines.pick(args.host or "")), args.home)
     if args.serve:
         from .serve import serve
         return serve(args.serve)

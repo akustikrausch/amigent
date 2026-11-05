@@ -21,6 +21,13 @@ Versions follow [semver](https://semver.org). The number lives in
   and the ARexx STATUS (`paused`). Older clients work unchanged; the pause
   needs the new amigentd.
 
+### Updating the Amiga
+
+- `amigent-setup --update` puts the new amigentd on an Amiga that already runs
+  one, by network and with nobody at the Amiga. Key, certificate and the start
+  line (`TLSONLY` too) stay; if the new amigentd does not start, the Amiga
+  starts the old one again.
+
 ## 1.1.1 (2026-11-03)
 
 The first release of Amigent: complete remote control for a real Amiga from a
