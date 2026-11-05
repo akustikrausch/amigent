@@ -58,6 +58,8 @@ class FakeAmiga:
         self.counts: dict[int, int] = {}
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
+        self.protocol = 4
+        self.pause_end = 0.0  # time.monotonic() at the end of a screen pause
         self.lock = threading.Lock()
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -106,7 +108,7 @@ class FakeAmiga:
         self.listener.close()
 
     def _serve(self, conn):
-        conn.sendall(b"AMGT" + struct.pack(">HH", 3, 0))
+        conn.sendall(b"AMGT" + struct.pack(">HH", self.protocol, 0))
         rd = conn.makefile("rb")
         channel, me = False, {"client": None}
         try:
@@ -142,6 +144,9 @@ class FakeAmiga:
         return b"\0" + struct.pack(">I", len(raw)) + raw
 
     def _channel(self, rd, cmd, arg, x, y, w, h) -> bytes:
+        if cmd == 19 and self.protocol >= 4:  # x is seconds here, no path follows
+            self.set_pause(x)
+            return self.ok()
         path = rd.read(x).decode("iso-8859-1")
         if cmd in (22, 23, 24, 25, 26, 27, 28, 29) and self.op_delay:
             time.sleep(self.op_delay)  # a 7 MHz CPU and a floppy-grade disk say hello
@@ -190,7 +195,7 @@ class FakeAmiga:
                 time.sleep(len(self.files[path]) / self.crc_rate)
             return self.ok(struct.pack(">I", zlib.crc32(self.files[path])))
         if cmd == 30:
-            return self.text("chip_free=100\nkickstart=47.115\n")
+            return self.text(f"chip_free=100\nkickstart=47.115\nscreen_paused={self.pause_left()}\n")
         if cmd == 31:
             return self.text("RAM Disk:\t10\t20\t30\t512\n")
         if cmd == 6:
@@ -220,10 +225,23 @@ class FakeAmiga:
 
     # screen client
 
+    def set_pause(self, seconds: int) -> None:
+        self.pause_end = time.monotonic() + seconds if seconds else 0.0
+
+    def pause_left(self) -> int:
+        left = self.pause_end - time.monotonic()
+        return -int(-left // 1) if left > 0 else 0
+
     def _screen(self, me, cmd, arg, x, y, w, h) -> bytes:
         width, height = self.picture.size
+        if cmd in (2, 13) and self.pause_left():
+            x = y = 0x7FFF  # paused: off screen, as amigentd does it
+            w = h = 1
         if cmd == 1:
-            return struct.pack(">HHHH", width, height, TILE, 0)
+            return struct.pack(">HHHH", width, height, TILE, self.pause_left() if self.protocol >= 4 else 0)
+        if cmd == 19 and self.protocol >= 4:
+            self.set_pause(x)
+            return b"\0"
         if cmd == 18:
             me["client"] = x << 16 | y
             return b"\0" if me["client"] == self.owner else b"\1"

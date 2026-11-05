@@ -125,5 +125,13 @@
  "fleet_running": "Probíhá {command} …",
  "fleet_details": "Podrobnosti",
  "fleet_restart": "Restartovat",
- "fleet_restart_confirm": "Zapsat disky a restartovat {name}?"
+ "fleet_restart_confirm": "Zapsat disky a restartovat {name}?",
+ "pause_title": "Pozastavit obraz",
+ "pause_hint": "Amiga přestane číst svou obrazovku, takže test nebo benchmark má procesor jen pro sebe. Myš, klávesy a soubory fungují dál.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Obraz na Amize pozastaven, zbývá {time}. Myš a klávesy fungují dál.",
+ "resume": "Pokračovat",
+ "pause_failed": "Pozastavení se nezdařilo"
 }

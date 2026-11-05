@@ -239,6 +239,13 @@ class Viewer:
         if op.get("t") == "restart":
             threading.Thread(target=self._restart, daemon=True).start()
             return
+        if op.get("t") == "pause":
+            try:
+                seconds = max(0, min(int(op.get("seconds", 0)), 0xFFFF))
+            except (TypeError, ValueError):
+                return  # malformed message from the page
+            threading.Thread(target=self._pause, args=(seconds,), daemon=True).start()
+            return
         self.inputs.put(op)
         self.feed.ring()
 
@@ -270,7 +277,8 @@ class Viewer:
             if not watching:
                 continue
             self.event("stats", kbps=round((self.screen.received - before) / 1024, 1),
-                       rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height)
+                       rtt=round(self.rtt, 1), w=self.screen.width, h=self.screen.height,
+                       paused=self.screen.pause_left(ask=False))
             if self.online and seconds % 2 == 0:
                 self._read_screens()
             if self.online and (not self.amiga or seconds % 30 == 0):
@@ -386,6 +394,18 @@ class Viewer:
                 self.event("upload", state="done", done=done, **job)
             except (AmigaError, OSError) as e:
                 self.event("upload", state="failed", error=str(e), **job)
+
+    def _pause(self, seconds: int) -> None:
+        """Stop the Amiga reading its screen for a while, or let it go on (0)."""
+        try:
+            left = self._ctl(lambda: self.ctl.pause_screen(seconds))
+        except (AmigaError, OSError, AttributeError) as e:  # AttributeError: amigactld only
+            self.event("toast", key="pause_failed", text=str(e))
+            return
+        self.screen.paused_until = time.monotonic() + left if left else 0.0
+        self.event("stats", kbps=0, rtt=round(self.rtt, 1), w=self.screen.width,
+                   h=self.screen.height, paused=left)
+        self.feed.ring()  # a resume wants a fresh look now, not in five seconds
 
     def _restart(self) -> None:
         self.event("toast", key="restarting")

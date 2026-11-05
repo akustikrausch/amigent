@@ -125,5 +125,13 @@
  "fleet_running": "Prebieha {command} …",
  "fleet_details": "Podrobnosti",
  "fleet_restart": "Reštartovať",
- "fleet_restart_confirm": "Zapísať disky a reštartovať {name}?"
+ "fleet_restart_confirm": "Zapísať disky a reštartovať {name}?",
+ "pause_title": "Pozastaviť obraz",
+ "pause_hint": "Amiga prestane čítať svoju obrazovku, takže test alebo benchmark má procesor len pre seba. Myš, klávesy a súbory fungujú ďalej.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Obraz na Amige pozastavený, zostáva {time}. Myš a klávesy fungujú ďalej.",
+ "resume": "Pokračovať",
+ "pause_failed": "Pozastavenie zlyhalo"
 }

@@ -125,5 +125,13 @@
  "fleet_running": "Kører {command} …",
  "fleet_details": "Detaljer",
  "fleet_restart": "Genstart",
- "fleet_restart_confirm": "Skriv diskene og genstart {name}?"
+ "fleet_restart_confirm": "Skriv diskene og genstart {name}?",
+ "pause_title": "Sæt billedet på pause",
+ "pause_hint": "Amigaen holder op med at læse sin skærm, så en test eller benchmark har CPU'en for sig selv. Mus, taster og filer virker stadig.",
+ "pause_1": "1 min.",
+ "pause_5": "5 min.",
+ "pause_15": "15 min.",
+ "paused": "Billedet er sat på pause på Amigaen, {time} tilbage. Mus og taster virker stadig.",
+ "resume": "Fortsæt",
+ "pause_failed": "Pause mislykkedes"
 }

@@ -125,5 +125,13 @@
  "fleet_running": "Uruchamianie {command} …",
  "fleet_details": "Szczegóły",
  "fleet_restart": "Uruchom ponownie",
- "fleet_restart_confirm": "Zapisać dyski i uruchomić ponownie {name}?"
+ "fleet_restart_confirm": "Zapisać dyski i uruchomić ponownie {name}?",
+ "pause_title": "Wstrzymaj obraz",
+ "pause_hint": "Amiga przestaje odczytywać swój ekran, więc test lub benchmark ma procesor tylko dla siebie. Mysz, klawisze i pliki działają dalej.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Obraz wstrzymany na Amidze, pozostało {time}. Mysz i klawisze działają dalej.",
+ "resume": "Wznów",
+ "pause_failed": "Nie udało się wstrzymać"
 }

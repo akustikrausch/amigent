@@ -73,7 +73,7 @@ with it: the hello waits behind the frame data already queued.
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
-the protocol version, currently `3`. Flags, added up: `1` when a key is required
+the protocol version, currently `4`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
 certificate is there, `4` when the plain port is closed to other machines
 (`TLSONLY`): a plain connection from another machine is closed right after the
@@ -120,6 +120,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 16 | MENUS | | | text |
 | 17 | AUTH | | x = key length | ok |
 | 18 | CLIENT | | x = id high word, y = id low word | ok |
+| 19 | PAUSE | | x = seconds, 0 ends the pause | ok |
 | 20 | CHANNEL | | | ok |
 | 21-31 | | | | see [command channels](#command-channels) |
 
@@ -129,8 +130,23 @@ sends the command line. Both work only in `SETUP` mode.
 
 ## info
 
-`u16 width`, `u16 height`, `u16 tile size`, `u16 reserved`. Size of the front
-screen, tile size `64`, reserved `0`.
+`u16 width`, `u16 height`, `u16 tile size`, `u16 paused`. Size of the front
+screen, tile size `64`, and from protocol 4 the seconds the screen pause still
+runs, rounded up; `0` without a pause. Before protocol 4 that field was always
+`0`.
+
+## pause
+
+PAUSE (19, protocol 4) stops all screen reading for `x` seconds, at most 65535:
+until then every FRAME and FRAME_RGB is answered as if its region lay off the
+screen, so it carries no tiles, and nothing reads the screen in the background
+either. A test or benchmark on the Amiga then has the CPU and the chip bus to
+itself. Mouse, keys, SCREENS, UITREE, MENUS and the command channels go on as
+usual. A new PAUSE replaces the running one, `x` = 0 ends it. The pause belongs
+to the Amiga, not to a connection: it holds for every client and outlives the
+one that set it. It works on a command channel too, and through ARexx (PAUSE,
+RESUME). INFO, SYSINFO (`screen_paused`) and the ARexx STATUS (`paused`) tell
+the seconds left. After the pause the next frame sends what changed meanwhile.
 
 ## frame
 
@@ -402,10 +418,11 @@ everything else.
 | 27 | RENAME | | x = old length, y = new length | old, new | |
 | 28 | MAKEDIR | | x = path length | path | |
 | 29 | CHECKSUM | | x = path length | path | `u32 CRC-32` |
+| 19 | PAUSE | | x = seconds, 0 ends it | | |
 | 30 | SYSINFO | | | | text |
 | 31 | VOLUMES | | | | text |
 
-PING answers `0` on a channel too. Screen commands (1-18 but PING) get status `1`
+PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
 takes the data they carry.
 
@@ -446,7 +463,8 @@ separated by tabs.
   `exec_version`, `kickstart` (exec's version and the Kickstart revision, such
   as `47.115`), `bsdsocket` and `graphics` as `version.revision`, `cpu` (68000,
   68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows) and
-  `attn_flags`, exec's AttnFlags as a number, for bits newer than that list.
+  `attn_flags`, exec's AttnFlags as a number, for bits newer than that list,
+  and from protocol 4 `screen_paused`, the seconds of [pause](#pause) left.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 
@@ -487,14 +505,17 @@ the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
 |---|---|
 | STATUS | `key=value` lines, see below |
 | CLIENTS | a line per connection: kind, address, seconds connected, tab separated |
-| VERSION | `amigentd 1.1.1 (03.11.2026)` |
+| VERSION | `amigentd 1.2.0 (05.11.2026)` |
+| PAUSE [seconds] | stops screen reading for that long, see [pause](#pause); the seconds left, without a number just those |
+| RESUME | ends the pause, `0` |
 | HELP | the command names |
 | QUIT | `bye`, then amigentd ends as on Ctrl-C |
 
 STATUS: `version`, `protocol`, `port`, `uptime` in seconds, `tls`, `tls_only`,
 `setup` and `key` as `on` or `off` (`tls` is on while the TLS port listens,
 `key` while a key file is in force), `screen` (0 or 1), `channels`,
-`tls_clients`, `pending` (connections that haven't said yet what they are).
+`tls_clients`, `pending` (connections that haven't said yet what they are),
+`paused` (seconds of screen pause left).
 
 CLIENTS kinds: `screen`, `channel`, `pending`, and `tls` for each TLS connection
 with the address it came from. A TLS connection reaches the plain port through

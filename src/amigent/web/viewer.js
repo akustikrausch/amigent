@@ -125,6 +125,13 @@
 
   let amiga = {};
 
+  function showPaused(seconds) {
+    $("paused").hidden = !seconds;
+    if (!seconds) return;
+    const m = Math.floor(seconds / 60), s = String(seconds % 60).padStart(2, "0");
+    $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
+  }
+
   function bytes(n) {
     if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
     if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
@@ -206,6 +213,7 @@
         $("about-screen").textContent = `${m.w} × ${m.h}`;
         $("st-rate").textContent = `${m.kbps.toFixed(1)} KB/s`;
         $("st-rtt").textContent = `${m.rtt.toFixed(0)} ms`;
+        showPaused(m.paused || 0);
         break;
       case "upload":
         onUpload(m);
@@ -403,6 +411,11 @@
   // Games read mouse movement, not the pointer position: capture the mouse and send deltas.
   let relative = false;
   let relX = 0, relY = 0, relFrame = 0;
+
+  for (const button of document.querySelectorAll("[data-pause]")) {
+    button.addEventListener("click", () => send({ t: "pause", seconds: Number(button.dataset.pause) }));
+  }
+  $("resume").addEventListener("click", () => send({ t: "pause", seconds: 0 }));
 
   $("rel-mouse").addEventListener("click", () => {
     if (document.pointerLockElement === canvas) document.exitPointerLock();

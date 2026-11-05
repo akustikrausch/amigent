@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import select
 import socket
@@ -20,7 +21,8 @@ from .secret import load_key
 CMD_INFO, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING, CMD_CHAR = range(1, 8)
 CMD_PUT, CMD_RUN, CMD_SETUP_END = 8, 9, 10
 CMD_SCREENS, CMD_SCREEN_FRONT, CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS = range(11, 17)
-CMD_AUTH, CMD_CLIENT = 17, 18
+CMD_AUTH, CMD_CLIENT, CMD_PAUSE = 17, 18, 19
+PAUSE_PROTOCOL = 4  # INFO tells the seconds of screen pause left, PAUSE sets them
 RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
 FRAME_PLANAR = 2 | 4  # FRAME arg bits: planes or chunky tiles, all methods; PROTOCOL.md "planar"
 
@@ -118,6 +120,7 @@ class Amigentd:
         self._last_used = 0.0
         self.protocol = 0
         self.flags = 0
+        self.paused_until = 0.0  # monotonic end of the screen pause, as INFO last told
         self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
 
     def connect(self) -> None:
@@ -160,7 +163,29 @@ class Amigentd:
 
     def _info(self) -> tuple[int, int]:
         self._send(CMD_INFO)
-        return struct.unpack(">HH", self._exact(8)[:4])
+        return self._note_info(self._exact(8))
+
+    def _note_info(self, raw: bytes) -> tuple[int, int]:
+        """INFO: the size, and from protocol 4 the seconds of screen pause left."""
+        width, height, _, left = struct.unpack(">HHHH", raw)
+        if self.protocol >= PAUSE_PROTOCOL:
+            self.paused_until = time.monotonic() + left if left else 0.0
+        return width, height
+
+    def pause_left(self, ask: bool = True) -> int:
+        """Seconds the Amiga's screen pause still runs: asked anew, or as last heard."""
+        if ask:
+            if not self._sock:
+                self._retry(lambda: None)
+            if self.protocol >= PAUSE_PROTOCOL:
+                self._apply_size(*self._retry(self._info))
+        return max(0, math.ceil(self.paused_until - time.monotonic()))
+
+    def pause(self, seconds: int) -> int:
+        """Pause the screen for seconds (0 ends it) over this connection; seconds left after."""
+        self._need(PAUSE_PROTOCOL)
+        self._ok(CMD_PAUSE, 0, max(0, min(int(seconds), 0xFFFF)))
+        return self.pause_left()
 
     def _probe_planar(self) -> tuple[int, int]:
         """Does amigentd speak planar? Ask for an empty planar frame, then INFO.
@@ -175,14 +200,13 @@ class Amigentd:
         if first in (b"\1", b"\2"):
             self.planar = True
             self._drive(self._format_reply(first[0], lambda tile: None))
-            return struct.unpack(">HH", self._exact(8)[:4])
+            return self._note_info(self._exact(8))
         head = first + self._exact(11)
         if head[9] == 64 and head[8] == 0:  # u32 0, then INFO: the old kind
             self.planar = False
-            return struct.unpack(">HH", head[4:8])
+            return self._note_info(head[4:12])
         self.planar = True  # format 0, u32 0, INFO: planar, but a screen planes can't show
-        self._exact(1)  # INFO's last byte
-        return struct.unpack(">HH", head[5:9])
+        return self._note_info(head[5:12] + self._exact(1))  # INFO's last byte
 
     def _apply_size(self, width: int, height: int) -> None:
         if (width, height) != (self.width, self.height):
@@ -735,7 +759,7 @@ class Pipeline:
 
     def info(self) -> None:
         def parse():
-            self.screen._apply_size(*struct.unpack(">HH", (yield 8)[:4]))
+            self.screen._apply_size(*self.screen._note_info((yield 8)))
 
         self._ask("other", parse(), CMD_INFO)
 

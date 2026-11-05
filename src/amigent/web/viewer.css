@@ -296,6 +296,27 @@ h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .upload.done .bar i { background: var(--ok); }
 .upload.failed .bar i { background: var(--bad); width: 100%; }
 
+/* picture paused on the Amiga: a note over the last picture, input stays live */
+
+.paused {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 99px;
+  background: rgba(233, 235, 238, .98);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .35);
+  white-space: nowrap;
+}
+
+.paused[hidden] { display: none; }
+.hint { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+
 /* dialogs */
 
 dialog {

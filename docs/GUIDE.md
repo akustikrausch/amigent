@@ -145,6 +145,7 @@ set an address you tell it. A fixed address in the router saves the search.
 | `amiga_screenshot` | look at the screen or a part of it, 256 colours |
 | `amiga_screenshot_color` | a region in full colour, for small text and exact colours |
 | `amiga_wait_change` | wait until something on the screen changes, without sending pictures |
+| `amiga_pause_screen` | stop all screen reading for a while, so a test or benchmark has the CPU |
 | `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
 | `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label or number |
 | `amiga_menus`, `amiga_menu_select` | menus as text, pick an item by name |
@@ -190,6 +191,20 @@ interrupted copy.
 - **View.** Fit to window or 1:1, full screen (where the Windows or Cmd keys act
   as the Amiga keys), screenshot as PNG, and a restart that writes pending data
   to disk first.
+- **Pause the picture.** *Pause the picture* in the panel stops the Amiga
+  reading its screen for 1, 5 or 15 minutes, so a test, a benchmark or a demo
+  has the CPU and the chip bus to itself. The window keeps the last picture and
+  shows the time left; mouse, keys and files keep working. *Resume* ends it
+  early. The pause holds for every client: the AI agent's screenshots wait as
+  well. On the Amiga, a script can do the same through ARexx:
+
+  ```rexx
+  address AMIGENT
+  'PAUSE 300'   /* seconds; without a number it tells the seconds left */
+  /* ... the test ... */
+  'RESUME'
+  ```
+
 - **System information.** The *i* button shows Kickstart and Workbench versions,
   CPU, FPU, memory, the network stack and the free space of each volume.
 

@@ -3,6 +3,24 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.2.0 (2026-11-05)
+
+### Pause the picture
+
+- The Amiga can stop reading its screen for a while, so a test, a benchmark or
+  a demo has the CPU and the chip bus to itself: *Pause the picture* in the
+  remote desktop (1, 5 or 15 minutes, *Resume* ends it), `amiga_pause_screen`
+  for the AI agent, and `PAUSE <seconds>` / `RESUME` on the ARexx port
+  `AMIGENT` for scripts on the Amiga.
+- While paused every frame comes back empty without touching the screen, for
+  every client; the remote desktop keeps its last picture and shows the time
+  left, screenshots and `amiga_wait_change` say the screen is paused. Mouse,
+  keys, commands and files carry on as usual.
+- amigentd 1.2.0, protocol 4: the PAUSE command (19) on the screen connection
+  and on command channels, the seconds left in INFO, SYSINFO (`screen_paused`)
+  and the ARexx STATUS (`paused`). Older clients work unchanged; the pause
+  needs the new amigentd.
+
 ## 1.1.1 (2026-11-03)
 
 The first release of Amigent: complete remote control for a real Amiga from a

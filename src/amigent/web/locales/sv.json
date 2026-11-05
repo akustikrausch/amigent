@@ -125,5 +125,13 @@
  "fleet_running": "Kör {command} …",
  "fleet_details": "Detaljer",
  "fleet_restart": "Starta om",
- "fleet_restart_confirm": "Skriva diskarna och starta om {name}?"
+ "fleet_restart_confirm": "Skriva diskarna och starta om {name}?",
+ "pause_title": "Pausa bilden",
+ "pause_hint": "Amigan slutar läsa sin skärm, så att ett test eller en benchmark får processorn för sig själv. Mus, tangenter och filer fungerar fortfarande.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Bilden är pausad på Amigan, {time} kvar. Mus och tangenter fungerar fortfarande.",
+ "resume": "Fortsätt",
+ "pause_failed": "Pausen misslyckades"
 }

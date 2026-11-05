@@ -125,5 +125,13 @@
  "fleet_running": "{command} läuft …",
  "fleet_details": "Details",
  "fleet_restart": "Neu starten",
- "fleet_restart_confirm": "Platten schreiben und {name} neu starten?"
+ "fleet_restart_confirm": "Platten schreiben und {name} neu starten?",
+ "pause_title": "Bild anhalten",
+ "pause_hint": "Der Amiga liest seinen Bildschirm nicht mehr, damit ein Test oder Benchmark die CPU für sich hat. Maus, Tasten und Dateien gehen weiter.",
+ "pause_1": "1 Min.",
+ "pause_5": "5 Min.",
+ "pause_15": "15 Min.",
+ "paused": "Bild auf dem Amiga angehalten, noch {time}. Maus und Tasten gehen weiter.",
+ "resume": "Fortsetzen",
+ "pause_failed": "Anhalten fehlgeschlagen"
 }

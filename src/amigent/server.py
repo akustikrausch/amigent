@@ -348,6 +348,8 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) ->
     back; ask again right away to get the picture anyway.
     """
     global last_look, _last_shot
+    if paused := _paused_note():
+        return [paused]
     region = (x, y, width, height)
     image = _with_screen(lambda: screen.capture(x, y, width or None, height or None))
     seen, last_look = last_look, time.monotonic()  # after the fetch: what it brought is what was seen
@@ -393,6 +395,8 @@ def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
     use this one for the part you need to read precisely.
     """
     global last_look
+    if paused := _paused_note():
+        return [paused]
     image = _with_screen(lambda: screen.capture_rgb(x, y, width, height))
     last_look = time.monotonic()  # after the fetch: what it brought is what was seen
     return [f"region {width}x{height} at ({x},{y}), full colour",
@@ -410,6 +414,8 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
     on a slow link.
     """
     global last_look
+    if paused := _paused_note():
+        return paused
     # Tiles count whoever fetched them: an open viewer may have taken them first.
     report, changed = watch.wait_change(screen, _with_screen, lookout,
                                         (x, y, width or None, height or None),
@@ -420,6 +426,33 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
 
 
 lookout = watch.Lookout()  # screen polls that a deadline can walk away from
+
+
+@mcp.tool()
+def amiga_pause_screen(seconds: int = 300) -> str:
+    """Stop the Amiga reading its screen for a while, so a test or benchmark has its CPU.
+
+    Until then nothing reads the screen, whoever asks: the viewer keeps its
+    last picture, screenshots and wait_change say the screen is paused.
+    Mouse, keys, commands, jobs and files work as usual. A new call replaces
+    the running pause, 0 ends it, at most 65535 s. Programs on the Amiga can
+    do the same through ARexx: address AMIGENT 'PAUSE 300', then 'RESUME'.
+    """
+    try:
+        left = _with_ctl(lambda: ctl.pause_screen(seconds))
+    except AttributeError:
+        raise AmigaError("pausing the screen needs amigentd's command channel; update amigentd") from None
+    screen.paused_until = time.monotonic() + left if left else 0.0
+    return f"screen paused for {left} s; amiga_pause_screen(0) ends it" if left else "screen pause ended"
+
+
+def _paused_note() -> str:
+    """While the Amiga pauses its screen, the note that stands in for a picture."""
+    left = _with_screen(screen.pause_left)
+    if not left:
+        return ""
+    return (f"the screen is paused on the Amiga for another {left} s, so no picture is read; "
+            "mouse, keys and commands still work. amiga_pause_screen(0) ends the pause")
 
 
 @mcp.tool()

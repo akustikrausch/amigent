@@ -196,6 +196,9 @@ def test_unchanged_screenshot_comes_back_as_a_note(monkeypatch):
         def changed_since(self, since, *region):
             return self.tiles
 
+        def pause_left(self, ask=True):
+            return 0
+
     fake = Screen()
     monkeypatch.setattr(server, "screen", fake)
     monkeypatch.setattr(server, "_last_shot", None)

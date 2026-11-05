@@ -125,5 +125,13 @@
  "fleet_running": "Esecuzione di {command} …",
  "fleet_details": "Dettagli",
  "fleet_restart": "Riavvia",
- "fleet_restart_confirm": "Scrivere i dischi e riavviare {name}?"
+ "fleet_restart_confirm": "Scrivere i dischi e riavviare {name}?",
+ "pause_title": "Metti in pausa l'immagine",
+ "pause_hint": "L'Amiga smette di leggere il suo schermo, così un test o un benchmark ha la CPU tutta per sé. Mouse, tasti e file continuano a funzionare.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Immagine in pausa sull'Amiga, mancano {time}. Mouse e tasti funzionano ancora.",
+ "resume": "Riprendi",
+ "pause_failed": "Pausa non riuscita"
 }

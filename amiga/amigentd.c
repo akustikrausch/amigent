@@ -56,7 +56,7 @@ extern struct Library *CyberGfxBase;
 #define RECTFMT_RGB 0
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
-#define PROTOCOL_VERSION 3
+#define PROTOCOL_VERSION 4
 #define DEFAULT_PORT 6801
 #define TILE 64
 #define RGB_TILES 2  /* tiles read in one go: 24 KB, so a 1 MB A500+ still copes */
@@ -70,6 +70,7 @@ extern struct Library *CyberGfxBase;
 #define MAX_AGE_MS 500
 #define SETTLE_MS 250
 #define IO_SECONDS 30
+#define PAUSE_MAX 65535  /* seconds, about 18 hours: what INFO's u16 can tell */
 #define OUT_SIZE 16384
 #define SEND_BUFFER 16384  /* little queued, so a takeover is not stuck behind it */
 #define SEND_STEP 2048  /* send low water mark: writable means this much room */
@@ -92,12 +93,12 @@ extern struct Library *CyberGfxBase;
 enum {
     CMD_INFO = 1, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING,
     CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END, CMD_SCREENS, CMD_SCREEN_FRONT,
-    CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT,
+    CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT, CMD_PAUSE,
     CMD_CHANNEL = 20, CMD_EXEC, CMD_READ_FILE, CMD_WRITE_FILE, CMD_DIR, CMD_STAT, CMD_DELETE,
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
 };
 
-const char version[] = "$VER: amigentd 1.1.1 (03.11.2026)";
+const char version[] = "$VER: amigentd 1.2.0 (05.11.2026)";
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -443,6 +444,39 @@ static ULONG now_ms(void)
     ReadEClock(&ev);
     ms = (ULONG)((((unsigned long long)ev.ev_hi << 32) | ev.ev_lo) / khz);
     return ms ? ms : 1;  /* 0 means never read */
+}
+
+/* PAUSE: no screen is read until pause_end, so a test or a benchmark has the
+ * CPU and the chip bus to itself. Mouse, keys, command channels and files go
+ * on as usual. Set from the screen client, a command channel or ARexx; one
+ * aligned long, so the channel processes can write it without a lock. */
+static volatile ULONG pause_end;  /* now_ms() at the end, 0 while not paused */
+
+/* Seconds of pause left, rounded up; 0 when there is none. */
+static ULONG pause_left(void)
+{
+    ULONG end = pause_end;
+    LONG left;
+
+    if (!end)
+        return 0;
+    left = (LONG)(end - now_ms());
+    if (left <= 0) {
+        pause_end = 0;
+        return 0;
+    }
+    return ((ULONG)left + 999) / 1000;
+}
+
+/* seconds 0 ends a pause; a new one replaces the old. */
+static void set_pause(ULONG seconds)
+{
+    ULONG end;
+
+    if (seconds > PAUSE_MAX)
+        seconds = PAUSE_MAX;
+    end = now_ms() + seconds * 1000;
+    pause_end = seconds ? (end ? end : 1) : 0;  /* 0 means no pause */
 }
 
 /* Waits for sigs, or ms milliseconds when ms >= 0; returns the signals that came.
@@ -1708,7 +1742,7 @@ static BOOL info(void)
     be16(msg + 2, IntuitionBase->FirstScreen->Height);
     UnlockIBase(lock);
     be16(msg + 4, TILE);
-    be16(msg + 6, 0);
+    be16(msg + 6, pause_left());  /* protocol 4; was always 0 before */
     return put(msg, 8) && flush();
 }
 
@@ -2982,6 +3016,7 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "fast_total", mem_total(MEMF_FAST));
     t_pair(&t, "fast_largest", AvailMem(MEMF_FAST | MEMF_LARGEST));
     t_pair(&t, "total_free", AvailMem(MEMF_ANY));
+    t_pair(&t, "screen_paused", pause_left());  /* seconds left, see PAUSE */
     t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
     t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
     t_version(&t, "bsdsocket", SocketBase->lib_Version, SocketBase->lib_Revision);
@@ -3300,6 +3335,9 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_rename(l, x, y);
     case CMD_SYSINFO:
         return c_sysinfo(l);
+    case CMD_PAUSE:
+        set_pause(x);
+        return c_ok(l);
     case CMD_VOLUMES:
         return c_volumes(l);
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
@@ -3479,9 +3517,16 @@ static BOOL command(const UBYTE *c)
         return refuse();
     if (is_input(c[0]))
         return reply(do_input(c));
+    if ((c[0] == CMD_FRAME || c[0] == CMD_FRAME_RGB) && pause_left()) {
+        x = y = 0x7FFF;  /* paused: off screen, so the answer is empty and nothing is read */
+        w = h = 1;
+    }
     switch (c[0]) {
     case CMD_INFO:
         return info();
+    case CMD_PAUSE:
+        set_pause(x);
+        return reply(0);
     case CMD_FRAME:
         if (c[1] & 2)
             return frame_planar(c[1] & 1, (c[1] & 4) != 0, x, y, w, h);
@@ -4094,6 +4139,7 @@ static void rexx_status(struct text *t)
         if (pend[i].fd >= 0)
             n++;
     t_line(t, "pending", n);
+    t_line(t, "paused", pause_left());
 }
 
 static void rexx_clients(struct text *t)
@@ -4124,6 +4170,31 @@ static BOOL is_word(const UBYTE *s, const char *w)
     return *s == 0 || *s == ' ' || *s == '\t';
 }
 
+/* PAUSE [seconds]: without a number it tells the seconds left; the result is
+ * always the seconds left afterwards. */
+static LONG rexx_pause(const UBYTE *s, struct text *t)
+{
+    ULONG v = 0;
+    BOOL digits = FALSE;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+    while (*s >= '0' && *s <= '9') {
+        if (v <= PAUSE_MAX)
+            v = v * 10 + (*s - '0');
+        digits = TRUE;
+        s++;
+    }
+    while (*s == ' ' || *s == '\t')
+        s++;
+    if (*s)
+        return RC_ERROR;
+    if (digits)
+        set_pause(v);
+    t_num(t, pause_left());
+    return 0;
+}
+
 /* All messages waiting on the port: answer each, a result string if asked. */
 static void rexx_messages(void)
 {
@@ -4144,8 +4215,13 @@ static void rexx_messages(void)
             rexx_clients(&t);
         else if (is_word(s, "VERSION"))
             t_str(&t, (const UBYTE *)version + 6, FALSE);  /* past "$VER: " */
-        else if (is_word(s, "HELP"))
-            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION HELP QUIT", FALSE);
+        else if (is_word(s, "PAUSE"))
+            rc = rexx_pause(s + 5, &t);
+        else if (is_word(s, "RESUME")) {
+            set_pause(0);
+            t_num(&t, 0);
+        } else if (is_word(s, "HELP"))
+            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION PAUSE RESUME HELP QUIT", FALSE);
         else if (is_word(s, "QUIT")) {
             t_str(&t, (const UBYTE *)"bye", FALSE);
             quit = TRUE;  /* the main loop sees it on its next turn */

@@ -22,6 +22,9 @@ ENCODING = "iso-8859-1"
 CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 CHANNEL_PROTOCOL = 3
+PAUSE = 19  # also on the screen connection: x = seconds, 0 ends it
+PAUSE_PROTOCOL = 4
+PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
 PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost only
 PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "
                      "certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) "
@@ -357,6 +360,27 @@ class AmigaChannel(VolumeFlush):
 
     def sysinfo(self) -> dict:
         return dict(line.split("=", 1) for line in self._text(SYSINFO) if "=" in line)
+
+    def pause_screen(self, seconds: int) -> int:
+        """Stop amigentd reading the screen for seconds, 0 to go on; the seconds left after.
+
+        While paused every frame comes back empty and nothing reads the screen,
+        whoever asks: the viewer, screenshots, wait_change. Mouse, keys, commands
+        and files carry on. A new pause replaces the running one.
+        """
+        if not self._sock:
+            self.connect()
+        if self.protocol < PAUSE_PROTOCOL:
+            raise AmigaError(f"amigentd on the Amiga speaks protocol {self.protocol}, pausing the "
+                             f"screen needs {PAUSE_PROTOCOL}: update amigentd (amigent-setup)")
+        self._sock.settimeout(self.timeout)
+        self._header(PAUSE, 0, max(0, min(int(seconds), PAUSE_MAX)))
+        self._status()
+        return self.screen_paused()
+
+    def screen_paused(self) -> int:
+        """Seconds the screen pause still runs, 0 when there is none."""
+        return int(self.sysinfo().get("screen_paused", 0))
 
     def volumes(self) -> list[dict]:
         keys = ("name", "used", "free", "capacity", "blocksize")

@@ -125,5 +125,13 @@
  "fleet_running": "Running {command} …",
  "fleet_details": "Details",
  "fleet_restart": "Restart",
- "fleet_restart_confirm": "Write the disks and restart {name}?"
+ "fleet_restart_confirm": "Write the disks and restart {name}?",
+ "pause_title": "Pause the picture",
+ "pause_hint": "The Amiga stops reading its screen, so a test or benchmark has the CPU to itself. Mouse, keys and files keep working.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Picture paused on the Amiga, {time} left. Mouse and keys still work.",
+ "resume": "Resume",
+ "pause_failed": "Pause failed"
 }

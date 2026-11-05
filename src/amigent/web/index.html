@@ -67,6 +67,10 @@
     </div>
     <div id="drop" class="overlay drop"><p data-i18n="drop_here">Drop to send to the Amiga</p></div>
     <div id="uploads" aria-live="polite"></div>
+    <div id="paused" class="paused" role="status" hidden>
+      <span id="paused-text"></span>
+      <button id="resume" data-i18n="resume">Resume</button>
+    </div>
   </main>
 
   <aside id="panel" aria-label="Amiga keyboard" data-i18n-aria="keyboard_panel">
@@ -141,6 +145,16 @@
         <button id="hold-right" class="led" aria-pressed="false" data-i18n="hold_right">Hold right button</button>
         <button id="middle" data-i18n="middle_click">Middle click</button>
         <button id="rel-mouse" class="led wide-row" aria-pressed="false" data-i18n="rel_mouse" data-i18n-title="rel_mouse_tip">Mouse for games</button>
+      </div>
+    </section>
+
+    <section>
+      <h2 data-i18n="pause_title">Pause the picture</h2>
+      <p class="hint" data-i18n="pause_hint">The Amiga stops reading its screen, so a test or benchmark has the CPU to itself. Mouse, keys and files keep working.</p>
+      <div class="grid three">
+        <button data-pause="60" data-i18n="pause_1">1 min</button>
+        <button data-pause="300" data-i18n="pause_5">5 min</button>
+        <button data-pause="900" data-i18n="pause_15">15 min</button>
       </div>
     </section>
 

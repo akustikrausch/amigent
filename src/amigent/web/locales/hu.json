@@ -125,5 +125,13 @@
  "fleet_running": "{command} fut …",
  "fleet_details": "Részletek",
  "fleet_restart": "Újraindítás",
- "fleet_restart_confirm": "Lemezek kiírása és {name} újraindítása?"
+ "fleet_restart_confirm": "Lemezek kiírása és {name} újraindítása?",
+ "pause_title": "Kép szüneteltetése",
+ "pause_hint": "Az Amiga nem olvassa tovább a képernyőjét, így egy teszt vagy benchmark egyedül használhatja a processzort. Az egér, a billentyűk és a fájlok továbbra is működnek.",
+ "pause_1": "1 perc",
+ "pause_5": "5 perc",
+ "pause_15": "15 perc",
+ "paused": "A kép szünetel az Amigán, még {time}. Az egér és a billentyűk továbbra is működnek.",
+ "resume": "Folytatás",
+ "pause_failed": "A szüneteltetés nem sikerült"
 }

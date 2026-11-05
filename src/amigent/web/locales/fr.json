@@ -125,5 +125,13 @@
  "fleet_running": "{command} en cours …",
  "fleet_details": "Détails",
  "fleet_restart": "Redémarrer",
- "fleet_restart_confirm": "Écrire les disques et redémarrer {name} ?"
+ "fleet_restart_confirm": "Écrire les disques et redémarrer {name} ?",
+ "pause_title": "Mettre l'image en pause",
+ "pause_hint": "L'Amiga cesse de lire son écran, pour qu'un test ou un benchmark ait le processeur pour lui seul. La souris, le clavier et les fichiers continuent de fonctionner.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Image en pause sur l'Amiga, encore {time}. La souris et le clavier fonctionnent toujours.",
+ "resume": "Reprendre",
+ "pause_failed": "Échec de la pause"
 }

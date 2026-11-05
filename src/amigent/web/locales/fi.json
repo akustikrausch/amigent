@@ -125,5 +125,13 @@
  "fleet_running": "Suoritetaan {command} …",
  "fleet_details": "Tiedot",
  "fleet_restart": "Käynnistä uudelleen",
- "fleet_restart_confirm": "Kirjoitetaanko levyt ja käynnistetäänkö {name} uudelleen?"
+ "fleet_restart_confirm": "Kirjoitetaanko levyt ja käynnistetäänkö {name} uudelleen?",
+ "pause_title": "Keskeytä kuva",
+ "pause_hint": "Amiga lakkaa lukemasta näyttöään, jotta testi tai benchmark saa suorittimen itselleen. Hiiri, näppäimet ja tiedostot toimivat edelleen.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Kuva keskeytetty Amigassa, {time} jäljellä. Hiiri ja näppäimet toimivat edelleen.",
+ "resume": "Jatka",
+ "pause_failed": "Keskeytys epäonnistui"
 }

@@ -125,5 +125,13 @@
  "fleet_running": "Ejecutando {command} …",
  "fleet_details": "Detalles",
  "fleet_restart": "Reiniciar",
- "fleet_restart_confirm": "¿Escribir los discos y reiniciar {name}?"
+ "fleet_restart_confirm": "¿Escribir los discos y reiniciar {name}?",
+ "pause_title": "Pausar la imagen",
+ "pause_hint": "El Amiga deja de leer su pantalla, así una prueba o un benchmark tiene la CPU para sí. El ratón, las teclas y los archivos siguen funcionando.",
+ "pause_1": "1 min",
+ "pause_5": "5 min",
+ "pause_15": "15 min",
+ "paused": "Imagen en pausa en el Amiga, quedan {time}. El ratón y las teclas siguen funcionando.",
+ "resume": "Reanudar",
+ "pause_failed": "No se pudo pausar"
 }

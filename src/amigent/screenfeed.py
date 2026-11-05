@@ -16,12 +16,13 @@ import time
 from collections import Counter, deque
 
 from .amigentd import (CMD_BUTTON, CMD_CHAR, CMD_MOVE, CMD_MOVE_REL, CMD_RAWKEY, CMD_SCREEN_FRONT,
-                       QUALIFIERS, RAWKEYS, Pipeline)
+                       PAUSE_PROTOCOL, QUALIFIERS, RAWKEYS, Pipeline)
 
 TILE = 64
 REPEAT = 0x0200  # IEQUALIFIER_REPEAT
 WHEEL_UP, WHEEL_DOWN = 0x7A, 0x7B  # NewMouse convention
 ACTIVE = 2.0  # seconds after input that count as "someone is driving"
+PAUSE_LOOK = 5.0  # s: while the Amiga pauses its screen, an INFO this often sees it end early
 SWEEP_ACTIVE = 0.5  # full screen at most this often while driving: the focus gets the rest
 FOLLOW_UP = 0.3  # a second look at the focus, for programs that take their time
 IDLE_STEPS = (0.1, 0.15, 0.25, 0.35, 0.45)  # pause after quiet sweeps; under amigentd's 0.5 s read-ahead
@@ -452,10 +453,16 @@ class Feed:
                 self.pipe.screens(self.on_screens)
         if self.sweep or now < self.next_sweep or self.pipe.frames:
             return
+        left = self.screen.paused_until - now
+        if left > 0:  # paused on the Amiga: frames come back empty, so don't ask for any
+            self.urgent.clear()
+            self.pipe.info()  # 18 bytes that notice an early end
+            self.next_sweep = now + min(left, PAUSE_LOOK)
+            return
         self.sweeps += 1
         self.next_sweep = float("inf")  # until this sweep is through
-        if self.sweeps % 10 == 1:
-            self.pipe.info()  # another screen may have come to the front
+        if self.sweeps % 10 == 1 or self.screen.protocol >= PAUSE_PROTOCOL:
+            self.pipe.info()  # another screen may have come to the front, or a pause begun
         missing = self.screen.missing_tiles()
         active = self.planner.active(now)
         size = self.planner.piece_tiles(active, self.quiet > 0 and not missing)
@@ -477,6 +484,8 @@ class Feed:
 
     def _feed_frames(self) -> None:
         pipe = self.pipe
+        if self.screen.paused_until > time.monotonic():
+            self.urgent.clear()  # nothing to see: input goes through, pictures wait
         while self.urgent and pipe.frames < FRAMES_IN_FLIGHT + 2:
             x, y, w, h = self.urgent.popleft()
             missing = self.screen.missing_tiles()
