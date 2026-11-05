@@ -62,7 +62,8 @@ start line in S:User-Startup:
 - From the PC or Mac: "pipx upgrade amigent", then "amigent-setup --update".
   That puts the new amigentd on the Amiga by network.
 
-Should the new amigentd not start, the old one starts again.
+Should the new amigentd not start, the old one starts again. New features
+need both sides updated; one side alone keeps working as before.
 
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
 any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
@@ -166,7 +167,8 @@ UPDATING FROM AN EARLIER AMIGENT
 On the Amiga: unpack the archive, double-click Amigent-Update in its drawer.
 From the PC or Mac: pipx upgrade amigent, then amigent-setup --update.
 Key, certificate and the start line in S:User-Startup stay. Should the new
-amigentd not start, the old one starts again.
+amigentd not start, the old one starts again. New features need both sides
+updated; one side alone keeps working as before.
 
 
 REQUIREMENTS
