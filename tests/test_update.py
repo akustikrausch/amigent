@@ -43,7 +43,7 @@ def channel_for(amiga):
             amiga.commands.append(command)
             if command.startswith("CPU CHECK"):
                 return ExecResult(amiga.cpu_rc, "")
-            if command == "Run >NIL: rx T:amigent-update.rexx":
+            if command.startswith("Run >NIL: rx T:amigent-update.rexx"):
                 if amiga.outcome == b"new":
                     amiga.files["C:amigentd"] = amiga.files.pop("C:amigentd.new")
                 amiga.files["T:amigent-update.done"] = amiga.outcome + b"\n"
@@ -58,7 +58,7 @@ def channel_for(amiga):
 def run(monkeypatch):
     monkeypatch.setattr(setup.time, "sleep", lambda s: None)
 
-    def go(amiga, home="SYS:amigent"):
+    def go(amiga, home=None):
         monkeypatch.setattr(setup, "AmigaChannel", channel_for(amiga))
         return setup.update("192.0.2.1", home)
     return go
@@ -68,8 +68,16 @@ def test_the_new_amigentd_replaces_the_old(run, capsys):
     amiga = Amiga()
     assert run(amiga, "Stuff:amigent") == 0
     assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
-    assert "Stuff:amigent/amigentd" in amiga.files["T:amigent-update.rexx"].decode("latin-1")
+    assert "Run >NIL: rx T:amigent-update.rexx Stuff:amigent" in amiga.commands
+    assert 'Echo >ENVARC:amigent-home "Stuff:amigent"' in amiga.commands
     assert "Done: amigentd 1.2.0, protocol 4." in capsys.readouterr().out
+
+
+def test_without_home_the_amiga_remembers_its_own(run):
+    amiga = Amiga()
+    assert run(amiga) == 0
+    assert "Run >NIL: rx T:amigent-update.rexx" in amiga.commands
+    assert not any("ENVARC" in c for c in amiga.commands)
 
 
 def test_a_68000_gets_its_own_build(run):
@@ -89,6 +97,7 @@ def test_nothing_to_do_when_it_is_already_current(run, capsys):
     (b"old", 1, "runs the old one again"),
     (b"busy", 1, "did not stop"),
     (b"reboot", 0, "restart the Amiga"),
+    (b"missing", 1, "did not arrive"),
 ])
 def test_the_amiga_says_how_it_went(run, capsys, outcome, code, words):
     assert run(Amiga(outcome=outcome)) == code

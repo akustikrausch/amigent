@@ -89,6 +89,8 @@ Copy C:amigentd.new C:amigentd QUIET
 Protect C:amigentd rwed
 Delete >NIL: C:amigentd.new QUIET
 Copy C:amigentd {home}/ QUIET
+Echo >ENVARC:amigent-home "{home}"
+Copy >NIL: ENVARC:amigent-home ENV:
 MakeDir >NIL: {home}/repair.d
 MakeDir >NIL: {home}/apps
 Search >NIL: S:User-Startup "C:amigentd" QUIET
@@ -102,60 +104,17 @@ EndIf
     run(link, "Execute T:amigent-setup")
 
 
-# Runs on the Amiga, detached, so it outlives the amigentd it replaces. The start line
-# comes from S:User-Startup, so TLSONLY and friends stay as they were.
-UPDATE_REXX = """/* Amigent: swap amigentd for C:amigentd.new, fall back to the old one */
-line = 'Run >NIL: C:amigentd'
-if open('f', 'S:User-Startup', 'R') then do
-  do until eof('f')
-    l = strip(readln('f'))
-    if l ~= '' & left(l, 1) ~= ';' & pos('C:AMIGENTD', upper(l)) > 0 then line = l
-  end
-  call close('f')
-end
-address command 'Wait 2'
-if ~show('P', 'AMIGENT') then do
-  /* too old for an ARexx port: it cannot be stopped from here, the next boot starts the new one */
-  address command 'Copy C:amigentd C:amigentd.old QUIET'
-  address command 'Copy C:amigentd.new C:amigentd QUIET'
-  address command 'Protect C:amigentd rwed'
-  address command 'Delete >NIL: C:amigentd.new QUIET'
-  outcome = 'reboot'
-end
-else do
-  address AMIGENT 'QUIT'
-  do 15 while show('P', 'AMIGENT'); address command 'Wait 1'; end
-  if show('P', 'AMIGENT') then outcome = 'busy'
-  else do
-    address command 'Copy C:amigentd C:amigentd.old QUIET'
-    address command 'Copy C:amigentd.new C:amigentd QUIET'
-    address command 'Protect C:amigentd rwed'
-    address command line
-    do 15 until show('P', 'AMIGENT'); address command 'Wait 1'; end
-    if show('P', 'AMIGENT') then do
-      address command 'Delete >NIL: C:amigentd.new QUIET'
-      if exists('%HOME%/amigentd') then address command 'Copy C:amigentd %HOME%/ QUIET'
-      outcome = 'new'
-    end
-    else do
-      address command 'Copy C:amigentd.old C:amigentd QUIET'
-      address command line
-      outcome = 'old'
-    end
-  end
-end
-if open('d', 'T:amigent-update.done', 'W') then do; call writeln('d', outcome); call close('d'); end
-"""
 UPDATE_TROUBLE = {
     b"old": "The new amigentd did not start, so the Amiga runs the old one again.",
     b"busy": "The running amigentd did not stop, so nothing was changed.",
     b"reboot": "This amigentd is too old to restart itself. The new one is in C:amigentd now; "
                "restart the Amiga to start it.",
+    b"missing": "C:amigentd.new did not arrive, so nothing was changed.",
 }
 UPDATE_WAIT = 90.0  # seconds for the old amigentd to go and the new one to answer
 
 
-def update(host: str, home: str) -> int:
+def update(host: str, home: str | None) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
     try:
@@ -167,6 +126,8 @@ def update(host: str, home: str) -> int:
             return 1
         build = "amigentd.000" if cpu == 5 else "amigentd"
         new = (AMIGA / "bin" / build).read_bytes()
+        if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
+            channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
         if channel.read_file("C:amigentd") == new:
             print(f"amigentd on {host} is already the one from Amigent {__version__}.")
             channel.close()
@@ -174,9 +135,10 @@ def update(host: str, home: str) -> int:
         print(f"uploading {build} to {host}")
         channel.write_file("C:amigentd.new", new)
         channel.exec("Delete >NIL: T:amigent-update.done QUIET")
-        channel.write_file("T:amigent-update.rexx", UPDATE_REXX.replace("%HOME%", home).encode("iso-8859-1"))
+        # the same script that Amigent-Update runs on the Amiga; detached, so it outlives amigentd
+        channel.write_file("T:amigent-update.rexx", (AMIGA / "amigent-update.rexx").read_bytes())
         channel.exec("Run >NIL: RexxMast >NIL:")  # ARexx is running on most Amigas; this makes sure
-        channel.exec("Run >NIL: rx T:amigent-update.rexx")
+        channel.exec(f"Run >NIL: rx T:amigent-update.rexx {home or ''}".rstrip())
         channel.close()
     except AmigaError as e:
         channel.close()
@@ -212,7 +174,8 @@ def update(host: str, home: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("host", nargs="?")
-    parser.add_argument("--home", default="SYS:amigent", help="folder for the Amigent scripts")
+    parser.add_argument("--home", help="folder for the Amigent scripts (default SYS:amigent; "
+                        "--update takes the one setup used)")
     parser.add_argument("--with-amigactld", action="store_true",
                         help="also install amigactld (automatic for amigentd before protocol 3)")
     parser.add_argument("--allow", help="the PC address amigactld should accept (default: this PC)")
@@ -227,6 +190,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.update:
         return update(machines.address(machines.pick(args.host or "")), args.home)
+    args.home = args.home or "SYS:amigent"
     if args.serve:
         from .serve import serve
         return serve(args.serve)

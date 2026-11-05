@@ -27,6 +27,10 @@ Versions follow [semver](https://semver.org). The number lives in
   one, by network and with nobody at the Amiga. Key, certificate and the start
   line (`TLSONLY` too) stay; if the new amigentd does not start, the Amiga
   starts the old one again.
+- On the Amiga, *Amigent-Update* in the archive's drawer does the same with a
+  double-click. Both run the same script, `amigent-update.rexx`.
+- amigentd started a second time on the same port says at once that one runs
+  already and points to *Amigent-Update*, instead of trying for a minute.
 
 ## 1.1.1 (2026-11-03)
 

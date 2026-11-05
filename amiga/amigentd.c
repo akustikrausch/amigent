@@ -4264,6 +4264,7 @@ static BOOL listen_on(UWORD port)
 {
     struct sockaddr_in addr;
     LONG one = 1, tries;
+    BOOL running;
 
     for (tries = 0; tries < 30 && !broken(); tries++) {
         listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -4280,6 +4281,11 @@ static BOOL listen_on(UWORD port)
             CloseSocket(listener);
             listener = -1;
         }
+        Forbid();
+        running = FindPort("AMIGENT") != NULL;  /* our own port opens later */
+        Permit();
+        if (running)
+            break;  /* another amigentd has the port: no point in waiting for it */
         Delay(100);
     }
     return FALSE;
@@ -4355,6 +4361,7 @@ int main(int argc, char **argv)
     LONG args[5] = {0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
+    BOOL twin;
     int rc = RETURN_FAIL;
     LONG i, n;
 
@@ -4428,8 +4435,12 @@ int main(int argc, char **argv)
         complain("out of memory", 0);
         goto out;
     }
-    if (!listen_on(port)) {
-        complain("cannot listen on port %ld; is amigentd running already?", port);
+    Forbid();
+    twin = port == DEFAULT_PORT && FindPort("AMIGENT");  /* siblings take a PORT of their own */
+    Permit();
+    if (twin || !listen_on(port)) {
+        complain("cannot listen on port %ld.\nIf amigentd runs already, double-click\n"
+                 "Amigent-Update to replace it.", port);
         goto out;
     }
     plain_port = port;

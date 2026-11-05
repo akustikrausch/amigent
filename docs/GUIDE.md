@@ -143,12 +143,17 @@ When a new version brings a new amigentd, bring the Amiga along by network:
 amigent-setup --update
 ```
 
-It needs nobody at the Amiga and keeps key, certificate and the start line in
-`S:User-Startup` (`TLSONLY` included). The new amigentd goes to `C:`, the old
-one stays as `C:amigentd.old`; should the new one not start, the Amiga starts
-the old one again. With several Amigas, give the name: `amigent-setup --update
-A1200`; with a scripts folder other than `SYS:amigent`, add `--home` so the copy
-there that `amigent-repair` uses gets updated too.
+It needs nobody at the Amiga. With several Amigas, give the name:
+`amigent-setup --update A1200`.
+
+At the Amiga it works without the PC: unpack the new archive from Aminet and
+double-click *Amigent-Update* in its drawer. (Double-clicking amigentd itself
+only says that one runs already.)
+
+Either way key, certificate and the start line in `S:User-Startup` (`TLSONLY`
+included) stay, and so does the copy for `amigent-repair` in the scripts folder,
+which gets the new amigentd too. Should the new amigentd not start, the Amiga
+starts the old one again.
 
 ## Tools for the AI agent
 

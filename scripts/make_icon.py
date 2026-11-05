@@ -5,6 +5,7 @@ Usage: make_icon.py repair OUT.info      project icon that runs a script through
        make_icon.py amigentd OUT.info    tool icon for amigentd with its tool types
        make_icon.py drawer OUT.info      drawer icon for the Amigent folder
        make_icon.py status OUT.info      tool icon for the amigent-status window
+       make_icon.py update OUT.info      project icon for Amigent-Update, through IconX
 Layout from the icon.library DiskObject structure and the GlowIcon IFF chunks.
 """
 
@@ -31,6 +32,15 @@ def repair_pixel(x: int, y: int) -> int:
     in_bar = 16 <= x < 24 and 6 <= y < 26
     in_beam = 8 <= x < 32 and 12 <= y < 20
     return 2 if in_bar or in_beam else 3
+
+
+def update_pixel(x: int, y: int) -> int:
+    """Blue box (3) with a black border (1) and a white arrow pointing up."""
+    if x in (0, WIDTH - 1) or y in (0, HEIGHT - 1):
+        return 1
+    head = 5 <= y < 16 and abs(x - 19.5) <= (y - 5) + 0.5
+    shaft = 16 <= y < 27 and 16 <= x < 24
+    return 2 if head or shaft else 3
 
 
 def amigent_pixels() -> list[list[int]]:
@@ -117,10 +127,13 @@ def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types:
 
 
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status", "update"):
         raise SystemExit(__doc__)
     if sys.argv[1] == "repair":
         data = disk_object(WBPROJECT, planes(repair_pixel), b"C:IconX\0", [], 4096)
+    elif sys.argv[1] == "update":
+        data = disk_object(WBPROJECT, planes(update_pixel), b"C:IconX\0",
+                           ["WINDOW=CON:40/40/600/200/Amigent update/CLOSE"], 8192)
     elif sys.argv[1] == "drawer":
         rows = amigent_pixels()
         data = disk_object(WBDRAWER, planes(lambda x, y: rows[y][x]), None, [], 0) + glow_icon()

@@ -4,7 +4,7 @@ Usage: make_release.py HOST
 
 Needs a running amigentd or amigactld on HOST and LhA in its C: (AmiKit has it).
 Writes dist/amigent-<version>.lha with an Amigent drawer: amigentd (68020),
-amigentd.000 (68000) if built, the icon, ReadMe and the licence.
+amigentd.000 (68000) if built, the icon, Amigent-Update, ReadMe and the licence.
 """
 
 from __future__ import annotations
@@ -52,9 +52,14 @@ On the PC or Mac
 
    The full guide is on the project page above.
 
-Updating from an earlier Amigent: on the PC or Mac "pipx upgrade amigent",
-then "amigent-setup --update". That puts the new amigentd on the Amiga by
-network; nothing to do at the Amiga.
+Updating from an earlier Amigent, either way keeps key, certificate and the
+start line in S:User-Startup:
+
+- On the Amiga: copy this drawer over, double-click Amigent-Update.
+- From the PC or Mac: "pipx upgrade amigent", then "amigent-setup --update".
+  That puts the new amigentd on the Amiga by network.
+
+Should the new amigentd not start, the old one starts again.
 
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
 any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
@@ -91,6 +96,9 @@ def main() -> None:
     if (BIN / "amigentd.000").exists():
         files["amigentd.000"] = BIN / "amigentd.000"
         files["amigentd.000.info"] = BIN / "amigentd.info"
+    amiga = ROOT / "src" / "amigent" / "amiga"
+    for name in ("Amigent-Update", "Amigent-Update.info", "amigent-update.rexx"):
+        files[name] = amiga / name
     for name, source in files.items():
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))

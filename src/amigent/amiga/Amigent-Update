@@ -1,0 +1,33 @@
+; Amigent-Update: replaces the running amigentd with the one in this drawer.
+; Key, certificate and the line in S:User-Startup stay as they are.
+FailAt 21
+If NOT EXISTS C:amigentd
+  Echo "amigentd is not installed yet. For a first install,"
+  Echo "double-click amigentd in this drawer and run"
+  Echo "amigent-setup on the PC or Mac."
+  Skip done
+EndIf
+Which >NIL: rx
+If WARN
+  Echo "ARexx (the command rx) is missing, so the"
+  Echo "update cannot run. Nothing was changed."
+  Skip done
+EndIf
+Set build amigentd
+CPU CHECK 68020 >NIL:
+If WARN
+  Set build amigentd.000
+EndIf
+If NOT EXISTS $build
+  Echo "$build is missing in this drawer."
+  Skip done
+EndIf
+Echo "Installing $build from this drawer."
+Copy $build C:amigentd.new QUIET
+Run >NIL: RexxMast >NIL:
+Wait 1
+rx amigent-update.rexx
+UnSet build
+Lab done
+Echo "*NPress Return to close this window."
+Ask ""
