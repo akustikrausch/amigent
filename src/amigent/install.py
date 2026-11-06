@@ -156,27 +156,53 @@ def prune_script(record: Record) -> str:
     return "\n".join(lines) + "\n"
 
 
-def apps_script(record: Record) -> str:
-    """Copies of the new files into the program store, for the repair module."""
+def _kept(record: Record, entries: dict[str, dict]) -> tuple[list[str], list[str]]:
+    """What the repair module keeps: whole folders that came, and single files
+    (new or changed) outside of them."""
+    dirs = sorted(f for f in record.added if entries.get(f, {}).get("type") == "DIR")
+    top = [d for d in dirs if not any(d != o and d.startswith(join(o, "")) for o in dirs)]
+    inside = lambda f: any(f.startswith(join(d, "")) for d in top)
+    singles = [f for f in record.added + record.changed
+               if entries.get(f, {}).get("type") == "FILE" and not inside(f)]
+    return top, singles
+
+
+def apps_script(record: Record, entries: dict[str, dict]) -> str:
+    """Copies of what came and changed into the program store, for the repair module."""
     lines = ["FailAt 21", f'MakeDir >NIL: "{join(record.home, "apps")}"']
     base = join(join(record.home, "apps"), record.name)
     lines.append(f'MakeDir >NIL: "{base}"')
-    for full in record.added:
+    top, singles = _kept(record, entries)
+    for full in top:
+        lines.append(f'Copy "{full}" "{join(base, safe(full))}" ALL CLONE QUIET')
+    for full in singles:
         lines.append(f'Copy "{full}" "{join(base, safe(full))}" CLONE QUIET')
     return "\n".join(lines) + "\n"
 
 
-def repair_module(record: Record, files: dict[str, str]) -> str:
-    """A repair module that puts each added file back when it is missing."""
+def repair_module(record: Record, entries: dict[str, dict]) -> str:
+    """A repair module: folders that came are put back when missing, files when
+    missing or of another size (an older version came back, say)."""
     base = join(join(record.home, "apps"), record.name)
+    top, singles = _kept(record, entries)
     lines = [f"; {record.name}: written by Amigent on {time.strftime('%Y-%m-%d')} after the "
-             "installation, from what it added", ""]
-    for full, kind in files.items():
-        if kind != "FILE":
-            continue
+             "installation: what it added and changed", ""]
+    for full in top:
         lines += [f'If NOT EXISTS "{full}"',
+                  f'  Copy "{join(base, safe(full))}" "{full}" ALL CLONE QUIET',
+                  "EndIf"]
+    for full in singles:
+        size = entries[full].get("size", 0)
+        # A variable name ends at a hyphen in AmigaDOS: "amigentsize", not "amigent-size".
+        lines += ["SetEnv amigentsize 0",
+                  f'If EXISTS "{full}"',
+                  f'  List >ENV:amigentsize "{full}" LFORMAT "%L" NOHEAD',
+                  "EndIf",
+                  f"If NOT $amigentsize EQ {size} VAL",
                   f'  Copy "{join(base, safe(full))}" "{full}" CLONE QUIET',
                   "EndIf"]
+    if singles:
+        lines += ["UnSetEnv amigentsize"]
     return "\n".join(lines) + "\n"
 
 

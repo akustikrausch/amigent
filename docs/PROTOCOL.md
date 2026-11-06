@@ -468,13 +468,18 @@ separated by tabs.
   command gets Ctrl-C and the reply is status `2`, text `timeout`; the command
   may keep running if it ignores the break, and its output is lost.
 - READ sends the size first. If the file can't be read to the end after that,
-  the channel is closed.
+  the channel is closed. The first block is read before the size goes out, so
+  a file that opens but can't be read (read protected on some handlers) gets
+  an error reply instead.
 - WRITE takes all the data before it answers, even after an error. A new file
   (arg 0) is written under a temporary name in the same directory and only
   renamed when everything is there, so a broken transfer never leaves half a
   file; a file of the same name is replaced and its protection bits with it.
   Append (arg 1) creates the file if needed. A directory of that name is never
-  touched.
+  touched. When the old file can't be replaced (a program keeps a lock on it,
+  or a handler puts it right back), the new content is written into it in
+  place, keeping its protection bits; if that fails as well, the error says
+  why the old file could not go.
 - DIR lists the directory, one line per entry:
   `FILE` or `DIR`, name, size (`0` for directories), protection as 8 hex
   digits, date as `YYYY-MM-DD HH:MM:SS`. Soft links count as files. STAT is
@@ -546,7 +551,10 @@ WAIT holds the channel until something happens on the Amiga, which looks
 ten times a second; the line stays quiet meanwhile. arg:
 
 - `1`: a window whose title matches the pattern is open (any screen); with
-  `+8` only one that was not open when the wait began. The answer is its
+  `+8` only one that was not open when the wait began. With `+16` as well,
+  `y` window addresses (`u32` each) follow the pattern and stand in for
+  "open when the wait began": a client that started a program passes the
+  windows it saw before, so a window that opened in between still counts. The answer is its
   `W` line, flag `h` when it is on a screen behind the front one.
 - `2`: no window matches any more. Empty answer.
 - `3`: a row of the front screen's text contains the text, any case. The

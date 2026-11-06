@@ -300,6 +300,7 @@ def test_notes_are_kept_per_topic(tmp_path):
 def test_start_shows_the_notes(monkeypatch):
     monkeypatch.setattr(server, "_clear_hold", lambda: "")
     monkeypatch.setattr(server, "_with_ctl", lambda fn: None)
+    monkeypatch.setattr(server, "_window_ids", lambda: [])
     notes.for_amiga(server._amiga()).add("clock", "opens on Workbench")
     said = server.amiga_start("SYS:Utilities/Clock")
     assert "opens on Workbench" in said
@@ -331,8 +332,17 @@ def test_scripts_name_the_right_paths():
     undo = install.undo_script(r, [])
     assert 'Delete >NIL: "C:Foo" QUIET' in undo
     assert 'Copy "Stuff:amigent/undo/demo/C/Dir" "C:Dir" CLONE QUIET' in undo
-    module = install.repair_module(r, {"C:Foo": "FILE", "SYS:WBStartup/Bar": "FILE"})
-    assert 'If NOT EXISTS "C:Foo"' in module and "apps/demo/C_Foo" in module
+    entries = {"C:Foo": entry("FILE", size=12), "SYS:WBStartup/Bar": entry("FILE", size=3),
+               "C:Dir": entry("FILE", size=99)}
+    module = install.repair_module(r, entries)
+    assert 'If NOT $amigentsize EQ 12 VAL' in module and "apps/demo/C_Foo" in module
+    assert '"Stuff:amigent/apps/demo/C_Dir" "C:Dir"' in module  # a changed file comes back too
+    r.added += ["SYS:Games/New", "SYS:Games/New/a", "SYS:Games/New/sub", "SYS:Games/New/sub/b"]
+    entries.update({"SYS:Games/New": entry("DIR"), "SYS:Games/New/a": entry("FILE"),
+                    "SYS:Games/New/sub": entry("DIR"), "SYS:Games/New/sub/b": entry("FILE")})
+    module = install.repair_module(r, entries)
+    assert module.count("SYS_Games_New") == 1 and "ALL CLONE" in module  # one block, the folder
+    assert "SYS:Games/New/a" not in module
     with pytest.raises(AmigaError):
         install.name_ok("bad:name")
 
@@ -455,7 +465,7 @@ def test_steps_need_a_known_action():
 
 def test_wait_reports(monkeypatch):
     class C:
-        def wait_for(self, kind, what, timeout):
+        def wait_for(self, kind, what, timeout, known=None):
             if what == "slow":
                 raise AmigaError("timeout", 2)
             return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
@@ -488,3 +498,25 @@ def test_link_report_names_the_mode(monkeypatch):
     monkeypatch.setattr(server, "_with_ctl", lambda fn: None)
     report = json.loads(server.amiga_link("best"))
     assert report["mode"] == "best"
+
+
+def test_new_window_after_a_start_excludes_those_open_before(monkeypatch):
+    seen = {}
+
+    class C:
+        def exec(self, line, cd=None, timeout=None):
+            return None
+
+        def wait_for(self, kind, what, timeout, known=None):
+            seen["kind"], seen["known"] = kind, known
+            return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
+
+    monkeypatch.setattr(server, "ctl", C())
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
+    monkeypatch.setattr(server, "_clear_hold", lambda: "")
+    monkeypatch.setattr(server, "_window_ids", lambda: [0x1000, 0x2000])
+    server.amiga_start("SYS:Utilities/Clock")
+    server.amiga_wait_window("Clock", new=True)
+    assert seen["known"] == [0x1000, 0x2000] and seen["kind"] & 8
+    server.amiga_wait_window("Clock")
+    assert seen["known"] is None

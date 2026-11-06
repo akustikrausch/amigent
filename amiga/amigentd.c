@@ -2977,8 +2977,16 @@ static BOOL c_read(struct link *l, UWORD len)
             err = ERROR_NO_FREE_STORE;
         else if (!(fh = Open(path, MODE_OLDFILE)) || !ExamineFH(fh, fib))
             err = IoErr();
-        else
+        else {
             size = fib->fib_Size;
+            /* Some handlers open a read protected file and only refuse the
+             * Read: try one before the size goes out, so that is an error
+             * reply and not a dropped link. */
+            if (size && Read(fh, buf, size > CHUNK ? CHUNK : size) <= 0)
+                err = IoErr() ? IoErr() : ERROR_READ_PROTECTED;
+            else
+                Seek(fh, 0, OFFSET_BEGINNING);
+        }
         if (err)
             alive = c_fault(l, err);
         else {
@@ -3020,6 +3028,29 @@ static BOOL is_dir(const char *path)
 static struct zin *zi_new(void);
 static void zi_free(struct zin *z);
 static BOOL zi_into(struct link *l, ULONG size, BPTR fh, LONG *err);
+
+/* The content of from into the existing file to, in place: for a file that
+ * can't be deleted because someone holds a lock on it. */
+static BOOL copy_over(const char *from, const char *to, UBYTE *buf)
+{
+    BPTR in = Open((STRPTR)from, MODE_OLDFILE), out = in ? Open((STRPTR)to, MODE_READWRITE) : 0;
+    LONG n, total = 0;
+    BOOL ok = in && out;
+
+    while (ok && (n = Read(in, buf, CHUNK)) > 0) {
+        ok = Write(out, buf, n) == n;
+        total += n;
+    }
+    if (ok && n < 0)
+        ok = FALSE;
+    if (ok)
+        ok = SetFileSize(out, total, OFFSET_BEGINNING) >= 0;
+    if (out)
+        Close(out);
+    if (in)
+        Close(in);
+    return ok;
+}
 
 /* A new file is written under a temporary name next to it and renamed at the
  * end, so a broken transfer never leaves half a file. packed: the data are a
@@ -3072,9 +3103,20 @@ static BOOL c_write(struct link *l, BOOL append, BOOL packed, UWORD len, ULONG s
         err = IoErr();
     if (fh && tmp) {
         if (alive && !err) {
-            DeleteFile(path);  /* Rename doesn't replace */
-            if (!Rename(tmp, path))
+            LONG gone = DeleteFile(path) ? 0 : IoErr();  /* Rename doesn't replace */
+            if (!Rename(tmp, path)) {
                 err = IoErr();
+                /* The old file can't go (someone keeps a lock on it), or comes
+                 * right back (a handler or program that watches it): write the
+                 * new content into it instead, and say why if that fails too. */
+                if ((gone && gone != ERROR_OBJECT_NOT_FOUND) || err == ERROR_OBJECT_EXISTS) {
+                    if (copy_over(tmp, path, buf)) {
+                        err = 0;
+                        DeleteFile(tmp);
+                    } else if (gone && gone != ERROR_OBJECT_NOT_FOUND)
+                        err = gone;
+                }
+            }
         }
         if (!alive || err)
             DeleteFile(tmp);
@@ -5016,7 +5058,10 @@ static BOOL c_screen_text(struct link *l)
 /* ---- WAIT: until a window or a text turns up, or goes ----------------------- */
 
 /* arg: 1 window appears, 2 window gone, 3 text appears, 4 text gone; +8 for 1:
- * only a window that was not there yet. w = timeout in seconds (at most 3600). */
+ * only a window that was not there yet; +16 with 8: not there yet means not
+ * among the y window addresses (u32 each) that follow the pattern, as the
+ * client saw them before it started a program. w = timeout in seconds (at
+ * most 3600). */
 #define WAIT_SEEN 32
 
 static struct Window *find_window(const UBYTE *pat, struct Window **seen, LONG nseen, struct text *t)
@@ -5089,7 +5134,7 @@ static UBYTE *title_pattern(const UBYTE *arg)
     return pat;
 }
 
-static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD secs)
+static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD known, UWORD secs)
 {
     struct Window *seen[WAIT_SEEN];
     struct text t = {0};
@@ -5101,6 +5146,19 @@ static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD secs)
 
     if (!alive)
         return FALSE;
+    if (how & 16) {  /* the windows the client knew: they don't count as new */
+        LONG k;
+        for (k = 0; k < known; k++) {
+            UBYTE b[4];
+            if (!l_recv(l, b, 4, IO_SECONDS)) {
+                FreeVec(arg);
+                return FALSE;
+            }
+            if (nseen < WAIT_SEEN)
+                seen[nseen++] = (struct Window *)((ULONG)b[0] << 24 | (ULONG)b[1] << 16 |
+                                                  (ULONG)b[2] << 8 | b[3]);
+        }
+    }
     if (!arg)
         return c_fault(l, ERROR_NO_FREE_STORE);
     if (secs > 3600)
@@ -5119,7 +5177,7 @@ static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD secs)
         FreeVec(arg);
         return c_fail(l, 1, "bad pattern");
     }
-    if (kind == 1 && (how & 8)) {  /* only new ones: remember those already there */
+    if (kind == 1 && (how & 8) && !(how & 16)) {  /* only new ones: remember those there */
         struct Screen *scr;
         struct Window *win;
         ULONG lock = LockIBase(0);
@@ -5389,7 +5447,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_TEXT:
         return c_screen_text(l);
     case CMD_WAIT:
-        return c_wait(l, c[1], x, w);
+        return c_wait(l, c[1], x, y, w);
     case CMD_COMPRESS:
         return c_compress(l, c[1]);
     case CMD_TREE:

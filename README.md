@@ -97,6 +97,8 @@ updated; one side alone keeps working as before.
     "Install the game from my Downloads folder and add it to the Games menu."
     "Copy the demo to the Amiga and start it."
     "Open the remote desktop."
+    "Install the newest HippoPlayer from Aminet, so I can take it back if it doesn't work."
+    "Build my program, run it on the Amiga and show me its debug output."
 
 ## Made for slow machines and slow wires
 
@@ -113,6 +115,13 @@ feel quick, for the AI agent and for you at the mouse:
   and costs the Amiga only a few percent of its CPU.
 - **Files go in one go.** Whole folders travel in a single stream, and files
   that are already there stay where they are.
+- **Text where text is enough.** The AI agent reads what programs write on
+  the screen as text, a few hundred bytes, and takes a picture only of the
+  part where it needs one. It waits on the Amiga itself for a window or a
+  line of text instead of looking again and again.
+- **Packed when the Amiga is fast.** With an accelerator behind a slow
+  network, replies, files and screen tiles travel packed; a slow CPU on a
+  fast network stays unpacked. Amigent measures both and decides.
 
 Measured with a 640×256 Workbench screen:
 

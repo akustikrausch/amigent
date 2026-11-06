@@ -14,7 +14,7 @@ from . import aminet, files, install, inventory, locks, machines, notes, pack, p
 from . import secret, uptime, watch
 from .client import join_path
 from .errors import AmigaError
-from .amigentd import Amigentd
+from .amigentd import Amigentd, AmigentdError
 from .channel import Commands, Request, perform
 from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot, wait_gone
 from .power import available as power_available
@@ -195,6 +195,8 @@ def amiga_exec(command: str, cd: str = "", timeout: float = 30) -> str:
 
 
 last_started = ""
+windows_at_start: tuple[float, list[int]] = (0.0, [])  # before the last amiga_start
+START_WINDOWS = 30.0  # s: wait_window(new) counts windows opened since a start this recent
 
 
 @mcp.tool()
@@ -203,8 +205,9 @@ def amiga_start(command: str) -> str:
 
     Shows what amiga_note recorded about the program earlier, if anything.
     """
-    global last_started
+    global last_started, windows_at_start
     before = _clear_hold()
+    windows_at_start = (time.monotonic(), _window_ids())
     _with_ctl(lambda: ctl.exec(f"Run >NIL: {command}"))
     last_started = command
     known = notes.for_amiga(_amiga()).get(notes.topic_of(command))
@@ -928,10 +931,21 @@ def amiga_click_text(text: str, window: str = "", button: str = "left", double: 
 WAIT_KINDS = {"window": 1, "window_gone": 2, "text": 3, "text_gone": 4}
 
 
+def _window_ids() -> list[int]:
+    try:
+        return [int(w["id"], 16) for w in _with_screen(screen.ui_tree) if w["kind"] == "window"]
+    except (AmigaError, AmigentdError, OSError, ValueError, KeyError, AttributeError):
+        return []
+
+
 def _wait(kind: str, what: str, timeout: float, new: bool = False) -> str:
     code = WAIT_KINDS[kind] | (8 if new else 0)
+    # Right after amiga_start, a window may already be open by the time the wait
+    # begins: then "new" means not open before the start.
+    since, ids = windows_at_start
+    known = ids if new and since and time.monotonic() - since < START_WINDOWS else None
     try:
-        lines = _with_ctl(lambda: ctl.wait_for(code, what, timeout))
+        lines = _with_ctl(lambda: ctl.wait_for(code, what, timeout, known))
     except AttributeError:
         raise AmigaError("waiting on the Amiga needs amigentd 1.3.0; run amigent-setup --update") from None
     except AmigaError as e:
@@ -955,7 +969,8 @@ def amiga_wait_window(title: str, timeout: float = 30, new: bool = False, gone: 
     """Wait on the Amiga itself until a window with this title opens (or closes, gone=True).
 
     title is part of the title, or an AmigaDOS pattern. With new=True only a
-    window that was not open yet counts, e.g. a second requester. The Amiga
+    window that was not open yet counts, e.g. a second requester; right after
+    amiga_start, one that was not open before the start. The Amiga
     looks ten times a second and the line stays quiet meanwhile, so this is
     the cheap way to wait for a program, a requester or the end of a dialog.
     """
@@ -1350,23 +1365,24 @@ def amiga_install_end(name: str) -> str:
     record = install.load(_amiga(), name)
     if record.done:
         return f"{name!r} was finished already; amiga_install_undo({name!r}) takes it back"
-    kinds: dict[str, str] = {}
+    kinds: dict[str, dict] = {}  # full path -> entry as it is after the installation
     for path in record.paths:
         after = _with_ctl(lambda: install.snapshot(ctl, path))
         added, changed, removed = install.compare(record.before.get(path), after)
-        for rel in added:
-            kinds[install.join(path, rel)] = (after or {})[rel]["type"]
+        for rel in added + changed:
+            kinds[install.join(path, rel)] = (after or {})[rel]
         record.added += [install.join(path, r) for r in added]
         record.changed += [install.join(path, r) for r in changed]
         record.removed += [install.join(path, r) for r in removed]
+    keeps = record.added or record.changed
     for script, name_ in ((install.prune_script(record), "prune"),
-                          (install.apps_script(record) if record.added else "", "apps")):
+                          (install.apps_script(record, kinds) if keeps else "", "apps")):
         if not script:
             continue
         _with_ctl(lambda: ctl.write_file(f"RAM:amigent-install-{name_}.script", script.encode("iso-8859-1")))
         _with_ctl(lambda: ctl.exec(f"Execute RAM:amigent-install-{name_}.script", timeout=3600))
     notes_ = []
-    if record.added:
+    if keeps:
         module = install.repair_module(record, kinds)
         target = install.join(install.join(record.home, "repair.d"), f"{record.name}.repair")
         _with_ctl(lambda: files.makedirs(ctl, install.join(record.home, "repair.d")))

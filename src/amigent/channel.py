@@ -26,7 +26,7 @@ EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUME
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 CHANNEL_PROTOCOL = 3
 PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
-WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW = 1, 2, 3, 4, 8
+WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW, WAIT_KNOWN = 1, 2, 3, 4, 8, 16
 PACK_WRITE_MIN = 512  # bytes; below this packing a WRITE is not worth the bother
 PAUSE = 19  # also on the screen connection: x = seconds, 0 ends it
 PAUSE_PROTOCOL = 4
@@ -503,13 +503,20 @@ class AmigaChannel(VolumeFlush):
         self._need5("reading the screen's text")
         return self._text(TEXT)
 
-    def wait_for(self, kind: int, pattern: str, timeout: float) -> list[str]:
+    def wait_for(self, kind: int, pattern: str, timeout: float,
+                 known: list[int] | None = None) -> list[str]:
         """Until a window or text turns up (or goes); the line that matched. A
-        timeout is an AmigaError with code 2."""
+        timeout is an AmigaError with code 2. known: window addresses that do
+        not count as new (with WAIT_NEW), as seen before a program started."""
         self._need5("waiting on the Amiga")
         seconds = max(1, min(int(timeout + 0.999), 3600))
-        return self._one(Request(WAIT, pattern, kind, 0, seconds, 0, read=_read_text,
-                                 wait=seconds + 15))
+        ids = b""
+        if known is not None and kind & WAIT_NEW:
+            known = known[:32]
+            kind |= WAIT_KNOWN
+            ids = b"".join(struct.pack(">I", k & 0xFFFFFFFF) for k in known)
+        return self._one(Request(WAIT, pattern, kind, len(ids) // 4, seconds, 0, ids,
+                                 read=_read_text, wait=seconds + 15))
 
     def tree(self, path: str, crc: bool = False, most: int = 0) -> list[dict]:
         self._need5("listing a whole tree at once")

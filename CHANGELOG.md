@@ -91,6 +91,14 @@ Versions follow [semver](https://semver.org). The number lives in
   someone at the Amiga and held up the command until then.
 - `amiga_wait_change` said the link was slow when its time ran out on a quiet
   screen over a fast link; now it says there was no change.
+- Writing a file that a program watches or keeps locked, such as
+  `ENV:Sys/ahi.prefs` while AHI runs, failed with "object already exists";
+  now the new content goes into the file in place.
+- Reading a file that opens but can't be read gives an error instead of
+  dropping the connection.
+- Repair modules written after an installation also put back files it
+  changed (when they are missing or of another size), and restore new folders
+  as a whole.
 - 256-colour graphics card screens, as games open them, come through in their
   real colours. They came out as a few shades of blue or black: some RTG
   drivers convert such screens through a palette other than the one on
