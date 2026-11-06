@@ -1,4 +1,4 @@
-.KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K
+.KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K,DEFS/K
 .DEF SOURCE amigentd.c
 .DEF TO amigentd
 .DEF CPU 68020
@@ -15,4 +15,4 @@ Assign vlibos3: VBCC:targets/m68k-amigaos/lib
 Assign AGNET: "<DEVPACK>/SDK/RoadShow SDK 1.5/netinclude"
 Assign AGP96: "<DEVPACK>/SDK/P96/P96 SDK"
 Path VBCC:bin ADD
-VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=<CPU> -IAGNET: -o <TO> <SOURCE> -lamiga
+VBCC:bin/vc +VBCC:config/aos68k -c99 -O2 -cpu=<CPU> <DEFS> -IAGNET: -o <TO> <SOURCE> -lamiga

@@ -7,7 +7,7 @@ keyboard; up to four more run commands and move files, see
 
 ## starting
 
-    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
+    amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
 
 Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 
@@ -15,11 +15,12 @@ Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
 included. `TLSONLY` closes the plain port to other machines while the TLS port is
-open, see [TLS](#tls). The service runs at priority 2, waits at boot until
+open, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
+programs draw and their debug output, see [hooks](#hooks). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
 Started from Workbench, the same come from the icon's tool types: `PORT=<n>`,
-`SETUP`, `KEY=<file>`, `QUIET`, `TLSONLY`. Tool types in brackets, like `(SETUP)`, are
+`SETUP`, `KEY=<file>`, `QUIET`, `TLSONLY`, `NOTEXT`, `NODEBUG`. Tool types in brackets, like `(SETUP)`, are
 off. When it can't start (no OS 2.04, port taken, out of memory) it says so in a
 requester, unless `QUIET` is set. A port that is taken is tried for a minute
 first, as at boot.
@@ -73,7 +74,7 @@ with it: the hello waits behind the frame data already queued.
 ## hello
 
 Service to client, 8 bytes: `AMGT`, `u16 version`, `u16 flags`. The version is
-the protocol version, currently `4`. Flags, added up: `1` when a key is required
+the protocol version, currently `5`. Flags, added up: `1` when a key is required
 (see [key](#key)), `2` when AmiSSL is open, so [TLS](#tls) works as soon as a
 certificate is there, `4` when the plain port is closed to other machines
 (`TLSONLY`): a plain connection from another machine is closed right after the
@@ -103,7 +104,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | nr | command | arg | fields | reply |
 |---|---|---|---|---|
 | 1 | INFO | | | info |
-| 2 | FRAME | 1 = everything, 2 = planar welcome, 4 = more methods | region | frame, or [planar](#planar) with 2 |
+| 2 | FRAME | 1 = everything, 2 = planar welcome, 4 = more methods, 8/16 = deflate (protocol 5) | region | frame, or [planar](#planar) with 2 |
 | 3 | MOVE | | x, y | ok |
 | 4 | BUTTON | mask: 1 left, 2 right, 4 middle | | ok |
 | 5 | RAWKEY | 1 = press | x = rawkey, y = qualifier | ok |
@@ -122,7 +123,7 @@ Always 10 bytes: `u8 command`, `u8 arg`, `u16 x`, `u16 y`, `u16 w`, `u16 h`.
 | 18 | CLIENT | | x = id high word, y = id low word | ok |
 | 19 | PAUSE | | x = seconds, 0 ends the pause | ok |
 | 20 | CHANNEL | | | ok |
-| 21-31 | | | | see [command channels](#command-channels) |
+| 21-36 | | | | see [command channels](#command-channels) |
 
 ok is a single byte, `0` for success and `1` for failure. Unknown commands get a
 `1` as well. PUT sends the path and then the data right after the command, RUN
@@ -254,6 +255,13 @@ The method bits are the same, a row being `w` bytes, plus:
   `1` bit a pixel for up to 2 colours, `2` for up to 4, `4` for up to 16, the
   leftmost pixel in the top bits, each row starting on a new byte. Bits 0-1 and
   `4` apply to these index rows: unpack, undo the row XOR, then look up.
+
+From protocol 5, arg bit `8` (fast) or `16` (thorough) with bit `4` lets the
+service send a tile deflated when that comes out shorter: method bit `32`. The
+data are then a raw deflate stream (RFC 1951) of exactly what the other method
+bits describe; inflate it first, then go on as usual. Planar and chunky alike.
+Worth it only when the Amiga packs much faster than the line carries; SYSINFO
+tells how fast it packs.
 
 Format `2` shares its picture with the classic frame (CLIENT and arg 1 work the
 same way), and like that one reads ahead in the background. A desktop tile has
@@ -429,6 +437,11 @@ everything else.
 | 19 | PAUSE | | x = seconds, 0 ends it | | |
 | 30 | SYSINFO | | | | text |
 | 31 | VOLUMES | | | | text |
+| 32 | TEXT | | | | text, see [screen text](#screen-text) |
+| 33 | WAIT | what, see [wait](#wait) | x = pattern length, w = timeout in seconds | pattern | text |
+| 34 | COMPRESS | 0 off, 1 fast, 2 best | | | |
+| 35 | TREE | 1 = with CRC-32 | x = path length, w = most entries (0: 50000) | path | text |
+| 36 | DEBUGLOG | | w/h = count to start from, high/low | | `u32 count`, `u32 length`, bytes |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -483,6 +496,81 @@ separated by tabs.
   restart of the Amiga or of amigentd from a network fault.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
+- From protocol 5 SYSINFO also has `deflate_fast`, `deflate_best` and
+  `inflate`, how many KB a second this Amiga packs (levels 1 and 2) and
+  unpacks, measured once on text-like data at the first SYSINFO; `text` and
+  `debug`, `1` while amigentd records screen text and debug output.
+- TREE lists a folder and everything below it in one answer, lines as DIR has
+  them with the path below the folder as name (`sub/file`), parents before
+  children; with arg 1 a CRC-32 in 8 hex digits follows each file (`-` when
+  it can't be read). A folder that can't be listed gives `ERR`, its path and
+  the error number; more than the most entries end with a line `MORE`.
+- WRITE with arg bit `2` takes a raw deflate stream (RFC 1951, any block
+  type) of `w/h` bytes and writes what it unpacks to; bad data are refused
+  with the text `bad compressed data`, the stream is taken in full anyway.
+
+### packed replies
+
+After COMPRESS with level 1 or 2, the bulk of these replies comes packed: the
+data of READ, the output of EXEC and every text reply (DIR, STAT, SYSINFO,
+VOLUMES, TEXT, WAIT, TREE). The length field before them still gives the
+unpacked length; what follows is one raw deflate stream in frames, `u32
+length` and that many bytes, ended by a frame of length `0`. Status, error
+texts, CHECKSUM and DEBUGLOG never come packed. COMPRESS 0 goes back to plain
+replies; the setting belongs to the channel.
+
+### screen text
+
+TEXT answers lines for the front screen:
+
+    I  seconds_recorded  evicted  used  size
+    W  window  x  y  w  h  flags  title
+    L  window  x  y  w  h  text
+
+`I` tells for how long amigentd records (`-1`: not at all), how many older
+runs it dropped to make room, and its store. `W` lines come front to back as
+in UITREE, flags `a` active, `b` backdrop, `o` open before recording started
+(its text may be missing until it redraws). `L` lines are the rows of text
+of the window above them, in screen pixels, top to bottom: runs on one line
+close together are joined, ones further apart than twice the font height
+stay separate rows with boxes of their own. Rows of a window behind another
+are listed too; the client can tell from the `W` boxes which are covered.
+
+Only what goes through graphics.library's Text() is seen: not text drawn as
+pictures (many buttons, icons, games), not text a program renders into a
+bitmap of its own and copies over, and not windows on other screens.
+
+### wait
+
+WAIT holds the channel until something happens on the Amiga, which looks
+ten times a second; the line stays quiet meanwhile. arg:
+
+- `1`: a window whose title matches the pattern is open (any screen); with
+  `+8` only one that was not open when the wait began. The answer is its
+  `W` line, flag `h` when it is on a screen behind the front one.
+- `2`: no window matches any more. Empty answer.
+- `3`: a row of the front screen's text contains the text, any case. The
+  answer is its `L` line.
+- `4`: no row contains it any more. Empty answer.
+
+The pattern is an AmigaDOS pattern (`*` works as `#?`), or plain text that
+may appear anywhere in the title, as for ACTIVATEWINDOW. At most 3600
+seconds; when they run out the status is `2` with the text `timeout`.
+
+### hooks
+
+To see text and debug output amigentd patches graphics.library Text,
+RectFill, EraseRect, SetRast, ScrollRaster and ScrollRasterBF,
+layers.library DeleteLayer and exec's RawPutChar (as Sashimi does). Each
+patch is a small stub in memory of its own: it saves all registers, calls
+amigentd while it runs and goes on to the original. When amigentd quits it
+puts the vectors back; if a program patched the same function later, the
+stub stays in the chain and passes calls through. Stubs are never freed and
+the next amigentd takes them over (a semaphore named `amigent hooks 1`).
+Only one amigentd at a time records; a second one on another port takes
+over once the first is gone. RawPutChar output still reaches the serial
+port; DEBUGLOG keeps the last 64 KB. `NOTEXT` and `NODEBUG` leave the
+patches out.
 
 ## tls
 

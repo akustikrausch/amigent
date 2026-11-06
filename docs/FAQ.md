@@ -86,6 +86,26 @@ not answered two minutes after a restart.
 Section, name, program, and optionally the stack size. It goes in sorted by name.
 Don't use the AmiStart ARexx `SAVE` command for this: it rewrites the whole file.
 
+**Does the AI agent need a screenshot for everything?**
+No. From 1.3.0 amigentd records the text programs draw, and the agent reads
+it with `amiga_screen_text`: a Shell's output or a requester's message costs a
+few hundred bytes instead of a picture. It takes a screenshot for layout and
+graphics, and when the text says something is missing. Start amigentd with
+`NOTEXT` to leave the recording out.
+
+**Is the network faster with packing?**
+When the Amiga packs much faster than its network carries, yes: with a
+PiStorm accelerator behind a plipbox, command output came 11 times as fast and a
+whole 1920x1080 screen 2.4 times. A plain 68000 stays unpacked, it would
+only slow things down. Amigent measures both sides and decides by itself;
+`amiga_link` shows the numbers, `AMIGENT_COMPRESS=off` (or `fast`, `best`)
+decides it by hand.
+
+**Can an installation be taken back?**
+Ask the agent to make it undoable: `amiga_install_begin` records the system
+folders and copies them aside on the Amiga, `amiga_install_end` lists what
+came and changed, `amiga_install_undo` puts it all back.
+
 **Screenshots of a graphics-card screen look a bit rough.**
 They're 256 colours on purpose. It's plenty for reading a screen and keeps the
 link free. Chipset screens come in their exact colours, and

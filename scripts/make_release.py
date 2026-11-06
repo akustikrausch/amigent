@@ -141,6 +141,13 @@ NEW IN THIS VERSION
 - An open menu or a popup left open on the desktop, which holds back every
   new window, is noticed; the AI agent closes the popup before it starts a
   program.
+- The AI agent reads the text on the screen instead of taking a picture
+  where text is enough, and waits on the Amiga for a window or a text.
+- Data travel packed when the Amiga packs faster than its network carries,
+  such as a PiStorm behind a plipbox: several times as fast.
+- Installations can be taken back; Aminet archives install from the PC.
+- kprintf and Enforcer output reach the AI agent (start amigentd with
+  NOTEXT or NODEBUG to leave the recording out).
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS

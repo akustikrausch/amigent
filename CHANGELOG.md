@@ -5,6 +5,59 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ## 1.3.0 (not released yet)
 
+### Text instead of pictures
+
+- amigentd records what programs draw as text, window by window, and
+  `amiga_screen_text` hands it to the AI agent with positions: Shell output,
+  requester messages, lists, status lines. A few hundred bytes instead of a
+  screenshot. Rows behind other windows are left out, and it says plainly
+  when the text is not enough (buttons drawn as pictures, games, windows
+  open before amigentd started), so the agent takes a picture of just that
+  part. `amiga_screenshot(text=True)` gives both. The remote desktop stays
+  a picture.
+- `amiga_click_text` clicks on visible text, such as a button label that
+  `amiga_ui_tree` can't name.
+- `amiga_wait_window` and `amiga_wait_text` wait on the Amiga itself until a
+  window opens or closes, or a text shows up or goes; the Amiga looks ten
+  times a second and the line stays quiet.
+- `amiga_screenshot(changed=True)` shows only the parts of the screen that
+  changed since the last look, each with its place.
+- `amiga_do` carries out several steps in one call (clicks, keys, typing,
+  menus, waits, commands) and ends with one look: text, the changed parts or
+  a screenshot. Saves a round trip per step.
+
+### Faster on slow networks
+
+- Replies, file transfers, command output and screen tiles travel packed
+  (deflate) when the Amiga packs clearly faster than its network carries,
+  such as a PiStorm or a 68080 behind a plipbox. amigentd measures its own
+  speed once, the PC measures the line, and a slow CPU on a fast network
+  stays unpacked. With a PiStorm accelerator behind a plipbox: command
+  output 11 times as fast, writing 4.6 times, a whole 1920x1080 screen 2.4
+  times. `amiga_link` shows the numbers and sets it by hand (auto, off, fast,
+  best), as does `AMIGENT_COMPRESS` or `"compress"` in amigas.json.
+
+### Installing and developing
+
+- `amiga_install_begin`, `amiga_install_end` and `amiga_install_undo` make
+  an installation undoable: the system folders (and the program's own) are
+  recorded and copied aside on the Amiga, what came, changed and went is
+  listed afterwards, and undo puts everything back. A repair module and a
+  copy of the new files are written for the program store.
+- `amiga_aminet_search`, `amiga_aminet_readme` and `amiga_aminet_install`
+  fetch from Aminet on the PC; the archive travels packed and the Amiga's own
+  LhA, UnLZX or UnZip unpacks it (the PC does it for .lha and .zip when the
+  Amiga lacks the tool).
+- `amiga_debug_log` shows what went through exec's RawPutChar: kprintf
+  output and Enforcer or MuForce hits, as Sashimi catches them.
+- `amiga_run` uploads a program if it is local, runs it and reports return
+  code, output, its debug output, requesters that came up and, if the Amiga
+  dropped off, whether it restarted or left a guru.
+- `amiga_clipboard` reads and sets the Amiga's clipboard for the AI agent.
+- `amiga_note` and `amiga_notes` keep what the agent learned about a program
+  on this Amiga (the stack it needs, the requester that comes up) for the
+  next session; `amiga_start` shows them when it starts that program.
+
 ### Scripts on the Amiga
 
 - amigentd's ARexx port brings windows to the front and types into them:
@@ -50,6 +103,14 @@ Versions follow [semver](https://semver.org). The number lives in
   emulator before a release and prints PASS, FAIL or SKIP per check;
   `scripts/pointer_test.py` waits for slow Amigas and skips screen modes the
   chipset doesn't have.
+- Protocol 5: command channels get TEXT, WAIT, COMPRESS, TREE (a whole
+  folder in one answer, with CRCs) and DEBUGLOG; FRAME may deflate tiles;
+  SYSINFO tells the packing speeds. amigentd patches Text, RectFill,
+  EraseRect, SetRast, ScrollRaster(BF), DeleteLayer and RawPutChar through
+  small stubs that stay valid after it quits; `NOTEXT` and `NODEBUG` leave
+  them out. See docs/PROTOCOL.md.
+- `tests/test_deflate_c.py` builds amigentd's deflate and inflate with gcc
+  and checks them against zlib both ways.
 
 ## 1.2.0 (2026-11-05)
 

@@ -1,4 +1,4 @@
-"""Just enough LHA to rip one file out of an archive: -lh0- and -lh5-, the Aminet staples."""
+"""Just enough LHA to unpack Aminet archives: -lh0- and -lh5- to -lh7-."""
 
 from __future__ import annotations
 
@@ -93,7 +93,12 @@ def _read_c(bits: Bits, pt: tuple[int, dict], pt_single: int | None) -> tuple[li
     return lengths, None
 
 
-def lh5_decode(data: bytes, size: int) -> bytes:
+DICT_BITS = {b"-lh5-": 13, b"-lh6-": 15, b"-lh7-": 16}
+
+
+def lh5_decode(data: bytes, size: int, dict_bits: int = 13) -> bytes:
+    """-lh5- by default; -lh6- and -lh7- differ only in window and position codes."""
+    np, pbit = dict_bits + 1, 4 if dict_bits <= 13 else 5
     bits = Bits(data)
     out = bytearray()
     while len(out) < size:
@@ -101,7 +106,7 @@ def lh5_decode(data: bytes, size: int) -> bytes:
         lengths, single = _read_lengths(bits, NT, 5, 3)
         c_lengths, c_single = _read_c(bits, _table(lengths), single)
         c_table = _table(c_lengths) if c_single is None else None
-        p_lengths, p_single = _read_lengths(bits, NP, 4, -1)
+        p_lengths, p_single = _read_lengths(bits, np, pbit, -1)
         p_table = _table(p_lengths) if p_single is None else None
         for _ in range(block):
             symbol = c_single if c_table is None else _symbol(bits, c_table)
@@ -163,13 +168,23 @@ def entries(archive: bytes):
         pos += head + packed
 
 
+def unpack(method: bytes, body: bytes, size: int) -> bytes:
+    if method in (b"-lh0-", b"-lhd-"):
+        return body
+    if method in DICT_BITS:
+        return lh5_decode(body, size, DICT_BITS[method])
+    raise ValueError(f"cannot unpack {method!r}")
+
+
 def extract(archive: bytes, suffix: str) -> bytes:
     """The first member whose name ends with suffix, unpacked."""
     for name, method, body, size in entries(archive):
         if name.lower().endswith(suffix.lower()):
-            if method == b"-lh0-":
-                return body
-            if method == b"-lh5-":
-                return lh5_decode(body, size)
-            raise ValueError(f"cannot unpack {method!r}")
+            return unpack(method, body, size)
     raise KeyError(suffix)
+
+
+def extract_all(archive: bytes) -> dict[str, bytes]:
+    """Every file member by its path in the archive; directories (-lhd-) left out."""
+    return {name: unpack(method, body, size) for name, method, body, size in entries(archive)
+            if method != b"-lhd-" and not name.endswith("/")}

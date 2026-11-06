@@ -163,9 +163,13 @@ starts the old one again.
 | `amiga_list`, `amiga_read_text`, `amiga_write_text` | read directories and files |
 | `amiga_put`, `amiga_get` | copy files and directory trees in both directions |
 | `amiga_mkdir`, `amiga_move`, `amiga_delete` | manage files |
-| `amiga_screenshot` | look at the screen or a part of it, 256 colours |
+| `amiga_screen_text` | the text on the screen, window by window, with positions; far cheaper than a picture |
+| `amiga_click_text` | click on visible text, such as a button label |
+| `amiga_screenshot` | look at the screen or a part of it, 256 colours; or only what changed |
 | `amiga_screenshot_color` | a region in full colour, for small text and exact colours |
 | `amiga_wait_change` | wait until something on the screen changes, without sending pictures |
+| `amiga_wait_window`, `amiga_wait_text` | wait on the Amiga until a window or a text appears or goes |
+| `amiga_do` | several clicks, keys, waits and commands in one call, then one look |
 | `amiga_pause_screen` | stop all screen reading for a while, so a test or benchmark has the CPU |
 | `amiga_screens`, `amiga_screen_front` | list all screens, bring one to the front |
 | `amiga_ui_tree`, `amiga_ui_click` | windows and gadgets as text, click a gadget by its label or number |
@@ -176,13 +180,30 @@ starts the old one again.
 | `amiga_arexx`, `amiga_rexx_ports` | ARexx commands to any program with an ARexx port |
 | `amiga_break` | Ctrl-C (or D, E, F) for a running command |
 | `amiga_status`, `amiga_inventory` | memory, volumes, installed programs and versions |
+| `amiga_link` | whether data travel packed, the measured speeds, and setting it by hand |
+| `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
+| `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
+| `amiga_run`, `amiga_debug_log` | run a program under test, with its kprintf and Enforcer output |
+| `amiga_clipboard` | read or set the Amiga's clipboard |
+| `amiga_notes`, `amiga_note` | what the agent learned about programs on this Amiga, for next time |
 | `amiga_viewer` | open the remote desktop |
 | `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up |
 | `amiga_find` | find the Amiga again after its address changed, or set its address |
 
 Gadgets without a readable label, such as GadTools buttons or MUI gadgets, come
 with a small picture of each one and a number, so the agent can still click the
-right one. For large files, `python -m amigent.transfer` can resume an
+right one.
+
+Text or picture: for information (a Shell's output, a requester's message, a
+list) the agent reads the text amigentd records, a few hundred bytes. For
+layout, graphics, icons and games, or when the text says something is missing,
+it takes a picture, best of just that part. The remote desktop always shows
+the picture.
+
+Packing: when the Amiga packs much faster than its network carries (a PiStorm
+or a 68080 behind a plipbox, say), replies, files and screen tiles travel
+packed. Amigent measures both and decides; `amiga_link("off")` or
+`AMIGENT_COMPRESS=off` switches it off, `fast` or `best` on. For large files, `python -m amigent.transfer` can resume an
 interrupted copy.
 
 ## Remote desktop

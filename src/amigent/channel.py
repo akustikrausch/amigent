@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import socket
 import struct
+import time
+import zlib
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import tls
+from . import pack, tls
 from .amigactl import AmigaCtl
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
@@ -21,7 +23,11 @@ from .secret import load_key
 ENCODING = "iso-8859-1"
 CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
+TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
 CHANNEL_PROTOCOL = 3
+PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
+WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW = 1, 2, 3, 4, 8
+PACK_WRITE_MIN = 512  # bytes; below this packing a WRITE is not worth the bother
 PAUSE = 19  # also on the screen connection: x = seconds, 0 ends it
 PAUSE_PROTOCOL = 4
 PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
@@ -46,12 +52,37 @@ def parse_entry(line: str) -> dict:
 
 
 def _read_text(ch) -> list[str]:
-    size = struct.unpack(">I", ch._exact(4))[0]
-    return ch._exact(size).decode(ENCODING).splitlines()
+    return _read_blob(ch).decode(ENCODING).splitlines()
 
 
 def _read_blob(ch) -> bytes:
-    return ch._exact(struct.unpack(">I", ch._exact(4))[0])
+    """u32 length, then the bytes: as they are, or packed frames after COMPRESS."""
+    size = struct.unpack(">I", ch._exact(4))[0]
+    return ch._body(size)
+
+
+def unpack_frames(read, size: int) -> tuple[bytes, int]:
+    """Frames (u32 length, data) of one raw deflate stream, ended by a 0: the bytes
+    and how many came over the wire. read(n) returns exactly n bytes."""
+    inflater = zlib.decompressobj(-15)
+    out, wire = [], 0
+    while True:
+        n = struct.unpack(">I", read(4))[0]
+        wire += 4
+        if not n:
+            break
+        out.append(inflater.decompress(read(n)))
+        wire += n
+    out.append(inflater.flush())
+    data = b"".join(out)
+    if len(data) != size:
+        raise AmigaError(f"packed reply came to {len(data)} bytes instead of {size}")
+    return data, wire
+
+
+def _read_debug(ch) -> tuple[int, bytes]:
+    total, size = struct.unpack(">II", ch._exact(8))
+    return total, ch._exact(size)
 
 
 def _read_crc(ch) -> int:
@@ -101,11 +132,36 @@ class Request:
         return cls(MAKEDIR, path)
 
     @classmethod
+    def tree(cls, path: str, crc: bool = False, most: int = 0, wait: float = 600.0) -> "Request":
+        return cls(TREE, path, int(crc), 0, min(most, 0xFFFF), 0,
+                   read=lambda ch: parse_tree(_read_text(ch)), wait=wait)
+
+    @classmethod
     def exec(cls, command: str, cd: str | None = None, timeout: float | None = None) -> "Request":
         where = (cd or "").encode(ENCODING)
         seconds = min(int(timeout), 0xFFFF) if timeout else 0
         return cls(EXEC, command, 0, len(where), seconds, 0, where, read=_read_exec,
                    wait=(timeout + 10) if timeout else 0.0)
+
+
+def parse_tree(lines: list[str]) -> list[dict]:
+    """TREE lines: entries as DIR has them with the path as name, crc when asked;
+    'ERR path code' for folders that could not be read, 'MORE' when cut short."""
+    out = []
+    for line in lines:
+        parts = line.split("\t")
+        if parts[0] in ("FILE", "DIR") and len(parts) >= 5:
+            entry = {"type": parts[0], "name": parts[1], "size": int(parts[2]),
+                     "protection": parts[3], "date": parts[4]}
+            if len(parts) > 5:
+                entry["crc"] = None if parts[5] == "-" else int(parts[5], 16)
+            out.append(entry)
+        elif parts[0] == "ERR":
+            out.append({"type": "ERR", "name": parts[1] if len(parts) > 1 else "",
+                        "error": parts[2] if len(parts) > 2 else ""})
+        elif parts[0] == "MORE":
+            out.append({"type": "MORE"})
+    return out
 
 
 def _read_exec(ch) -> ExecResult:
@@ -152,6 +208,8 @@ class AmigaChannel(VolumeFlush):
         self._sock: socket.socket | None = None
         self.banner = ""
         self.protocol = 0
+        self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
+        self.zlevel = 0  # what COMPRESS last set on this connection
 
     # link
 
@@ -182,6 +240,12 @@ class AmigaChannel(VolumeFlush):
             if self._exact(1) != b"\0":
                 raise AmigaError("amigentd refused a command channel")
             self.banner = f"amigentd protocol {self.protocol}"
+            self.zlevel = 0
+            if self.protocol >= PACK_PROTOCOL:
+                if self.policy is None:
+                    self.policy = pack.policy_for(self.host)
+                if not self.policy.known:
+                    self.policy.learn(self.sysinfo())
         except OSError as e:
             self.close()
             raise AmigaError(f"cannot reach amigentd at {self.host}:{self.port}: {e}") from e
@@ -220,8 +284,43 @@ class AmigaChannel(VolumeFlush):
     def _put(self, req: Request) -> None:
         """Fire one request at the Amiga without waiting for its answer."""
         raw = req.path.encode(ENCODING)
-        head = struct.pack(">BBHHHH", req.cmd, req.arg, len(raw), req.y, req.w, req.h)
-        self._send(head + raw + req.payload)  # one segment, not three: plip pays per packet
+        arg, w, h, payload = req.arg, req.w, req.h, req.payload
+        if (req.cmd == WRITE and len(payload) >= PACK_WRITE_MIN and self.policy
+                and self.protocol >= PACK_PROTOCOL and self.policy.upload()):
+            packer = zlib.compressobj(6, zlib.DEFLATED, -15)
+            packed = packer.compress(payload) + packer.flush()
+            if len(packed) < len(payload) * 0.9:
+                arg, w, h, payload = arg | 2, len(packed) >> 16, len(packed) & 0xFFFF, packed
+        head = struct.pack(">BBHHHH", req.cmd, arg, len(raw), req.y, w, h)
+        self._send(head + raw + payload)  # one segment, not three: plip pays per packet
+
+    def _body(self, size: int) -> bytes:
+        """size bytes of a reply body, unpacked if packing is on; the line is measured."""
+        start = time.monotonic()
+        if self.zlevel:
+            data, wire = unpack_frames(self._exact, size)
+        else:
+            data, wire = self._exact(size), size
+        if self.policy and not self.zlevel:  # packed, the Amiga's CPU may be what is measured
+            self.policy.note(wire, time.monotonic() - start)
+        return data
+
+    def _sync_packing(self) -> None:
+        """Tell amigentd the packing level the policy wants, when it changed."""
+        if self.protocol < PACK_PROTOCOL or not self.policy:
+            return
+        level = self.policy.level()
+        if level == self.zlevel:
+            return
+        self._sock.settimeout(self.timeout)
+        self._header(COMPRESS, level)
+        try:
+            self._status()
+            self.zlevel = level
+        except AmigaError as e:
+            if e.code is None:
+                raise
+            self.policy.mode = "off"  # no memory for it on the Amiga: leave it
 
     def _status(self) -> None:
         """First byte of every answer; a refusal carries its text and nothing else."""
@@ -235,6 +334,7 @@ class AmigaChannel(VolumeFlush):
         """Send a request; raise AmigaError with code for a refusal."""
         if not self._sock:
             self.connect()
+        self._sync_packing()
         self._sock.settimeout(timeout if timeout is not None else self.timeout)
         self._put(Request(cmd, path, arg, y, w, h, payload))
         self._status()
@@ -258,6 +358,7 @@ class AmigaChannel(VolumeFlush):
         results: list = [None] * len(requests)
         sent = got = 0
         try:
+            self._sync_packing()
             while got < len(requests):
                 while sent < len(requests) and sent - got < window:
                     self._sock.settimeout(self.timeout)
@@ -331,6 +432,7 @@ class AmigaChannel(VolumeFlush):
         if not self._sock:
             self.connect()
         try:
+            self._sync_packing()
             self._sock.settimeout(self.timeout)
             self._put(req)
             self._sock.settimeout(max(req.wait, self.timeout))
@@ -386,6 +488,38 @@ class AmigaChannel(VolumeFlush):
         keys = ("name", "used", "free", "capacity", "blocksize")
         return [{k: (v if k == "name" else int(v)) for k, v in zip(keys, line.split("\t"))}
                 for line in self._text(VOLUMES)]
+
+    # protocol 5
+
+    def _need5(self, what: str) -> None:
+        if not self._sock:
+            self.connect()
+        if self.protocol < PACK_PROTOCOL:
+            raise AmigaError(f"{what} needs amigentd 1.3.0 or newer (protocol {PACK_PROTOCOL}); "
+                             "run amigent-setup --update")
+
+    def screen_text(self) -> list[str]:
+        """The front screen's text as amigentd recorded it: I, W and L lines."""
+        self._need5("reading the screen's text")
+        return self._text(TEXT)
+
+    def wait_for(self, kind: int, pattern: str, timeout: float) -> list[str]:
+        """Until a window or text turns up (or goes); the line that matched. A
+        timeout is an AmigaError with code 2."""
+        self._need5("waiting on the Amiga")
+        seconds = max(1, min(int(timeout + 0.999), 3600))
+        return self._one(Request(WAIT, pattern, kind, 0, seconds, 0, read=_read_text,
+                                 wait=seconds + 15))
+
+    def tree(self, path: str, crc: bool = False, most: int = 0) -> list[dict]:
+        self._need5("listing a whole tree at once")
+        return self._one(Request.tree(path, crc, most))
+
+    def debug_log(self, since: int = 0) -> tuple[int, bytes]:
+        """What went through RawPutChar since the count since: (count now, bytes)."""
+        self._need5("reading debug output")
+        return self._one(Request(DEBUGLOG, "", 0, 0, (since >> 16) & 0xFFFF, since & 0xFFFF,
+                                 read=_read_debug))
 
 
 class Commands:

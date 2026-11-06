@@ -1,7 +1,7 @@
 """Regression test of a real Amiga (or an emulator) through the MCP tools, before a release.
 
 Usage: regress.py HOST [--port 6801] [--rexx AMIGENT] [--report FILE] [--only NAMES]
-                       [--pointer RAM:pointer-test]
+                       [--pointer RAM:pointer-test] [--kprintf PATH] [--aminet PATH]
 
 Runs every tool an AI agent uses against the Amiga at HOST and prints PASS,
 FAIL or SKIP per check, with the time it took. Leaves nothing behind but
@@ -16,6 +16,9 @@ meanwhile.
 --only      comma separated check names, e.g. files,typing
 --pointer   also run scripts/pointer_test.py with this test program
             (amiga/pointer-test.c, built on the Amiga)
+--kprintf   a program that writes through RawPutChar (amiga/kprintf-test.c,
+            built for the Amiga), here or on the Amiga, for the debug check
+--aminet    a small Aminet archive to install into RAM:amigent-regress
 
 Exit code 0 when nothing failed. What it learned over earlier releases:
 - long commands go through amiga_job, never amiga_exec; nothing lists a
@@ -23,7 +26,10 @@ Exit code 0 when nothing failed. What it learned over earlier releases:
 - a short right click on a Directory Opus desktop leaves a popup that holds
   every new window back: the hold check uses a held right button instead;
 - typing ahead of a busy Shell is fine, it waits in the type-ahead;
-- after a crash amiga_status tells the restart; run it again after a power cycle.
+- after a crash amiga_status tells the restart; run it again after a power cycle;
+- from 1.3.0: text first, pictures when the text says it is not enough; packing
+  pays only when the Amiga packs faster than its line carries, so it is
+  forced both ways here and must give the same bytes.
 """
 
 from __future__ import annotations
@@ -298,6 +304,158 @@ class Run:
         raise AssertionError("the Shell window is still open: " +
                              repr([w["title"] for w in tree if w["kind"] == "window"]))
 
+    # ---- 1.3.0 part two -------------------------------------------------
+
+    def _new(self):
+        info = self.s.ctl.sysinfo()
+        return "text" in info
+
+    def screen_text(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        self._shell_active()
+        word = f"regress{random.randint(1000, 9999)}"
+        self.s.amiga_type(f"Echo {word}-out\n", settle=0)
+        waited = self.s.amiga_wait_text(f"{word}-out", timeout=15)
+        assert waited.startswith("text"), waited
+        text = self.s.amiga_screen_text(window=TITLE)
+        assert f"{word}-out" in text, text[-400:]
+        found = self.s.amiga_screen_text(find=word)
+        assert TITLE in found, found
+        clicked = self.s.amiga_click_text(f"{word}-out", window=TITLE)
+        return f"{len(text.splitlines())} lines from our Shell; {clicked}"
+
+    def wait(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        start = time.monotonic()
+        got = self.s.amiga_wait_window(TITLE, timeout=5)
+        assert got.startswith("window") and TITLE in got, got
+        quick = time.monotonic() - start
+        start = time.monotonic()
+        none = self.s.amiga_wait_window("no such window title here", timeout=3)
+        took = time.monotonic() - start
+        assert none.startswith("timeout") and 2.5 < took < 12, (none, took)
+        gone = self.s.amiga_wait_text("no such text anywhere 4711", timeout=2, gone=True)
+        assert "gone" in gone, gone
+        return f"window found in {quick:.1f} s, timeout after {took:.1f} s"
+
+    def steps(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        self._shell_active()
+        out = self.s.amiga_do([{"type": f"Echo steps-done >{DIR}/steps.txt\n", "settle": 0},
+                               {"wait": 1},
+                               {"exec": f"Type {DIR}/steps.txt"}], look="text")
+        assert "step" not in out[0] or "failed" not in out[0], out[0]
+        assert "steps-done" in out[0], out[0]
+        changed = self.s.amiga_screenshot(changed=True)
+        assert changed[0].startswith(("changed", "no change")), changed[0]
+        return f"3 steps, look=text {len(out[1].splitlines())} lines; {changed[0][:60]}"
+
+    def packing(self):
+        from amigent import pack
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        policy = pack.policy_for(self.s.HOST)
+        before = policy.chosen
+        data = random.Random(3).randbytes(20_000) + b"Workbench text that packs " * 2000
+        results = {}
+        try:
+            for mode in ("off", "fast", "best"):
+                policy.mode = mode
+                start = time.monotonic()
+                self.s.ctl.write_file(f"{DIR}/pack-{mode}.bin", data)
+                back = self.s.ctl.read_file(f"{DIR}/pack-{mode}.bin")
+                out = self.s.amiga_exec(f"List {DIR}")
+                results[mode] = time.monotonic() - start
+                assert back == data, f"{mode}: the file came back different"
+                assert f"pack-{mode}.bin" in out, out
+        finally:
+            policy.mode = before or "auto"
+        auto = policy.describe()
+        return (", ".join(f"{m} {t:.1f} s" for m, t in results.items()) +
+                f"; auto picks {auto['from_amiga']} (Amiga packs {auto['amiga_packs_kbs']} KB/s, "
+                f"line {auto['line_kbs']} KB/s)")
+
+    def tree(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        self.s.amiga_mkdir(f"{DIR}/tree/sub")
+        self.s.amiga_write_text(f"{DIR}/tree/sub/a.txt", "abc")
+        entries = self.s.ctl.tree(f"{DIR}/tree", crc=True)
+        names = {e["name"]: e for e in entries}
+        import zlib
+        assert names["sub/a.txt"]["crc"] == zlib.crc32(b"abc"), names
+        assert names["sub"]["type"] == "DIR"
+        return f"{len(entries)} entries with CRC in one answer"
+
+    def install_undo(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        base = f"{DIR}/inst"
+        self.s.amiga_mkdir(base)
+        self.s.amiga_write_text(f"{base}/keep.txt", "same")
+        self.s.amiga_write_text(f"{base}/change.txt", "old")
+        self.s.amiga_write_text(f"{base}/gone.txt", "bye")
+        name = f"regress{random.randint(100, 999)}"
+        home = self.s.AMIGA_DIR
+        self.s.AMIGA_DIR = f"{DIR}/home"
+        try:
+            self.s.amiga_install_begin(name, folders=base, system=False)
+            self.s.amiga_write_text(f"{base}/new.txt", "new")
+            self.s.amiga_write_text(f"{base}/change.txt", "changed!")
+            self.s.amiga_delete(f"{base}/gone.txt")
+            ended = self.s.amiga_install_end(name)
+            assert "1 added, 1 changed, 1 removed" in ended, ended
+            undone = self.s.amiga_install_undo(name)
+            assert "taken back" in undone and "except" not in undone, undone
+        finally:
+            self.s.AMIGA_DIR = home
+        assert self.s.amiga_read_text(f"{base}/change.txt") == "old"
+        assert self.s.amiga_read_text(f"{base}/gone.txt") == "bye"
+        assert "new.txt" not in self.s.amiga_list(base)
+        return f"added, changed and removed, then all taken back ({name})"
+
+    def debug(self):
+        if not self._new():
+            return "skip: amigentd before protocol 5"
+        self.s.amiga_debug_log()  # what is old
+        if not self.args.kprintf:
+            said = self.s.amiga_debug_log()
+            return f"skip: no --kprintf program; debug log answers ({said[:40]!r})"
+        report = self.s.amiga_run(self.args.kprintf)
+        assert "rc=0" in report and "hello from kprintf" in report, report
+        return "amiga_run: rc and kprintf output reported"
+
+    def clipboard(self):
+        old = self.s.amiga_clipboard()
+        try:
+            self.s.amiga_clipboard("Grüße aus der Regression")
+            assert self.s.amiga_clipboard() == "Grüße aus der Regression"
+        finally:
+            if old and not old.startswith(("the clipboard is empty", "the clipboard holds")):
+                self.s.amiga_clipboard(old)
+        return "set and read back, then restored"
+
+    def notes(self):
+        topic = "amigent-regress"
+        self.s.amiga_note(topic, "a note for the regression")
+        assert "a note for the regression" in self.s.amiga_notes(topic)
+        assert "amigent-regress" in self.s.amiga_notes(search="regression")
+        self.s.amiga_note(topic, remove="*")
+        assert "no notes" in self.s.amiga_notes(topic)
+        return "written, found, removed"
+
+    def aminet(self):
+        found = self.s.amiga_aminet_search("lha", limit=5)
+        assert "/" in found, found
+        if not self.args.aminet:
+            return f"search: {found.splitlines()[0][:70]}; skip install (no --aminet)"
+        said = self.s.amiga_aminet_install(self.args.aminet, f"{DIR}/aminet")
+        assert "into" in said, said
+        return said[:140]
+
     def pointer(self):
         if not self.args.pointer:
             return "skip: no --pointer test program given"
@@ -310,7 +468,9 @@ class Run:
 
 
 ORDER = ["status", "version", "exec", "missing_volume", "job", "files", "screen", "open_shell",
-         "typing", "ui", "hold", "arexx", "pause", "takeover", "pointer", "close_shell"]
+         "typing", "ui", "hold", "arexx", "screen_text", "wait", "steps", "packing", "tree",
+         "install_undo", "debug", "clipboard", "notes", "aminet", "pause", "takeover", "pointer",
+         "close_shell"]
 
 
 def main() -> int:
@@ -321,6 +481,8 @@ def main() -> int:
     p.add_argument("--report")
     p.add_argument("--only", type=lambda v: set(v.split(",")))
     p.add_argument("--pointer", default="")
+    p.add_argument("--kprintf", default="")
+    p.add_argument("--aminet", default="")
     args = p.parse_args()
     run = Run(setup(args), args)
     print(f"Amigent regression against {args.host}:{args.port}, {time.strftime('%Y-%m-%d %H:%M')}")

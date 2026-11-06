@@ -10,7 +10,8 @@ from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import files, inventory, locks, machines, pictures, secret, uptime, watch
+from . import aminet, files, install, inventory, locks, machines, notes, pack, pictures, screentext
+from . import secret, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd
@@ -35,7 +36,23 @@ def inventory_folder() -> Path:
     return secret.FOLDER / "inventory" / secret.safe(machines.name_of(HOST) or "Amiga")
 
 
-mcp = FastMCP("amigent")
+INSTRUCTIONS = """Amigent operates a real Amiga.
+- After the Amiga was away, amiga_status first: it tells a restart or a guru.
+- To find something out, read amiga_screen_text before taking a screenshot; take
+  a picture (best of just the part you need) for layout, graphics and games, or
+  when the text says something is missing. After a click, amiga_screenshot
+  (changed=True) shows only what changed.
+- Wait with amiga_wait_window, amiga_wait_text or amiga_wait_change instead of
+  screenshots in a loop; put known sequences into one amiga_do call.
+- Long commands go through amiga_job, never through amiga_exec.
+- Before using a program again, amiga_notes(topic); afterwards amiga_note what
+  would save time next time.
+- Before installing software, amiga_install_begin, afterwards amiga_install_end,
+  so the user can take it back with amiga_install_undo."""
+
+mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
+# One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
+pack.policy_for(HOST, mode=(machines.find(HOST) or {}).get("compress") if HOST else None)
 ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld on older installs
 screen = Amigentd(HOST, SCREEN_PORT)
 
@@ -104,6 +121,10 @@ def amiga_status() -> str:
     if said:
         report["notes"] = said
     report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
+    if "text" in info:
+        report["recording"] = {"screen_text": info.get("text") == "1",
+                               "debug_output": info.get("debug") == "1"}
+        report["packing"] = pack.policy_for(HOST).describe()
     return json.dumps(report, indent=1)
 
 
@@ -178,12 +199,17 @@ last_started = ""
 
 @mcp.tool()
 def amiga_start(command: str) -> str:
-    """Start a program in the background, without capturing output."""
+    """Start a program in the background, without capturing output.
+
+    Shows what amiga_note recorded about the program earlier, if anything.
+    """
     global last_started
     before = _clear_hold()
     _with_ctl(lambda: ctl.exec(f"Run >NIL: {command}"))
     last_started = command
-    return f"{before}started: {command}"
+    known = notes.for_amiga(_amiga()).get(notes.topic_of(command))
+    hints = ("\nnotes on it from earlier:\n" + "\n".join(f"- {n}" for n in known)) if known else ""
+    return f"{before}started: {command}{hints}"
 
 
 @mcp.tool()
@@ -381,16 +407,23 @@ def amiga_inventory(max_wait: float = 1800) -> str:
 
 
 @mcp.tool()
-def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) -> list:
+def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
+                     changed: bool = False, text: bool = False) -> list:
     """Capture the Amiga screen, or a region of it to read small text.
 
     Transfers only what changed since the last call, so repeated shots are
     quick. Colours are reduced to 256. All coordinates for the pointer tools
     are screen pixels; use the scale in the reply for reduced images. If the
     same region has not changed since your last shot of it, only a note comes
-    back; ask again right away to get the picture anyway.
+    back; ask again right away to get the picture anyway. changed=True shows
+    only the part that changed since your last look (after a click, say), with
+    its place on the screen. text=True adds the recorded text of the region,
+    see amiga_screen_text; for information alone that one is far cheaper.
     """
     global last_look, _last_shot
+    if changed:
+        out = changed_shot()
+        return out + ([amiga_screen_text()] if text else [])
     if paused := _paused_note():
         return [paused]
     region = (x, y, width, height)
@@ -407,7 +440,13 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0) ->
         f"screen_x = {x} + image_x * {scale:.3f}, "
         f"screen_y = {y} + image_y * {scale:.3f}"
     )
-    return [note, McpImage(data=pictures.png(image), format="png")]
+    out = [note, McpImage(data=pictures.png(image), format="png")]
+    if text:
+        try:
+            out.append(amiga_screen_text(x=x, y=y, width=width, height=height))
+        except AmigaError as e:
+            out.append(f"no text: {e}")
+    return out
 
 
 _last_shot: tuple | None = None  # (region, when, answered without a picture)
@@ -830,6 +869,657 @@ def amiga_power(action: str) -> str:
         return f"Amiga is back after {attempts} power cycle(s)"
     set_power(action == "on")
     return f"power {action}"
+
+
+# ---- 1.3.0: text instead of pictures, steps in one call, waiting on the Amiga
+
+def _amiga() -> str:
+    return machines.name_of(HOST) or machines.address(HOST) or "Amiga"
+
+
+def _screen_text() -> screentext.ScreenText:
+    try:
+        lines = _with_ctl(ctl.screen_text)
+    except AttributeError:
+        raise AmigaError("reading the screen's text needs amigentd 1.3.0; run amigent-setup "
+                         "--update") from None
+    return screentext.parse(lines)
+
+
+@mcp.tool()
+def amiga_screen_text(window: str = "", find: str = "", x: int = 0, y: int = 0, width: int = 0,
+                      height: int = 0, hidden: bool = False) -> str:
+    """The text on the front screen, window by window, with positions: cheap, no picture.
+
+    Use it first when you need information: Shell output, a requester's
+    message, a list, a status line, whether something finished. It costs a
+    few hundred bytes where a screenshot costs kilobytes. Take amiga_screenshot
+    instead (or afterwards) for layout, graphics, icons, colours, games, and
+    whenever this reports no text or a note says text is missing: buttons drawn
+    as pictures, windows that were open before amigentd started, or programs
+    that draw text their own way. window picks a window by part of its title
+    or its id; find keeps rows containing that text; x/y/width/height keep rows
+    in that region. Rows covered by a window in front are left out unless
+    hidden=True. Positions are screen pixels, ready for amiga_click.
+    """
+    region = (x, y, width, height) if (x or y or width or height) else None
+    return screentext.render(_screen_text(), window, find, region, hidden)
+
+
+@mcp.tool()
+def amiga_click_text(text: str, window: str = "", button: str = "left", double: bool = False) -> str:
+    """Click on visible text, such as a button label or a list entry, found via the screen text.
+
+    Works for buttons amiga_ui_tree can't name (MUI, ReAction, requesters)
+    as long as their label is drawn as text. Exact matches win over rows that
+    merely contain the text.
+    """
+    st = _screen_text()
+    hit = screentext.find_row(st, text, window)
+    if not hit:
+        raise AmigaError(f"{text!r} is not in the visible text; amiga_screen_text shows what is, "
+                         "amiga_screenshot what is drawn as pictures")
+    win, row = hit
+    px, py = screentext.point_of(row, text)
+    _with_screen(lambda: screen.click(px, py, button, double))
+    return f"clicked {text!r} in {win.title!r} at ({px},{py})"
+
+
+WAIT_KINDS = {"window": 1, "window_gone": 2, "text": 3, "text_gone": 4}
+
+
+def _wait(kind: str, what: str, timeout: float, new: bool = False) -> str:
+    code = WAIT_KINDS[kind] | (8 if new else 0)
+    try:
+        lines = _with_ctl(lambda: ctl.wait_for(code, what, timeout))
+    except AttributeError:
+        raise AmigaError("waiting on the Amiga needs amigentd 1.3.0; run amigent-setup --update") from None
+    except AmigaError as e:
+        if e.code == 2:
+            return f"timeout: {'no ' if not kind.endswith('gone') else ''}{kind.split('_')[0]} " \
+                   f"{what!r} {'still there ' if kind.endswith('gone') else ''}after {timeout:g} s"
+        raise
+    if kind.endswith("gone"):
+        return f"{kind.split('_')[0]} {what!r} is gone"
+    f = lines[0].split("\t") if lines else []
+    if kind == "window" and len(f) >= 8:
+        return (f"window {f[7]!r} {f[1]} ({f[2]},{f[3]} {f[4]}x{f[5]})"
+                f"{' active' if 'a' in f[6] else ''}{' on a screen behind' if 'h' in f[6] else ''}")
+    if kind == "text" and len(f) >= 7:
+        return f"text {f[6]!r} at ({f[2]},{f[3]} {f[4]}x{f[5]}) in window {f[1]}"
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def amiga_wait_window(title: str, timeout: float = 30, new: bool = False, gone: bool = False) -> str:
+    """Wait on the Amiga itself until a window with this title opens (or closes, gone=True).
+
+    title is part of the title, or an AmigaDOS pattern. With new=True only a
+    window that was not open yet counts, e.g. a second requester. The Amiga
+    looks ten times a second and the line stays quiet meanwhile, so this is
+    the cheap way to wait for a program, a requester or the end of a dialog.
+    """
+    return _wait("window_gone" if gone else "window", title, timeout, new)
+
+
+@mcp.tool()
+def amiga_wait_text(text: str, timeout: float = 30, gone: bool = False) -> str:
+    """Wait on the Amiga until this text shows up on the front screen (or is gone).
+
+    For "done", a prompt coming back, a progress line. Any case; it looks at
+    the text amigentd records, see amiga_screen_text.
+    """
+    return _wait("text_gone" if gone else "text", text, timeout)
+
+
+def _changed_boxes(since: float, most: int = 4) -> list[tuple[int, int, int, int]]:
+    """The areas of tiles that came in after since: neighbouring tiles form one box,
+    separate places stay separate, largest first."""
+    tiles = {(tx, ty): (tw, th) for t, tx, ty, tw, th in list(screen.changes) if t > since}
+    boxes, seen = [], set()
+    for start in tiles:
+        if start in seen:
+            continue
+        group, todo = [], [start]
+        seen.add(start)
+        while todo:  # tiles touching (also corner to corner) belong together
+            x, y = todo.pop()
+            group.append((x, y))
+            for dx in (-64, 0, 64):
+                for dy in (-64, 0, 64):
+                    n = (x + dx, y + dy)
+                    if n in tiles and n not in seen:
+                        seen.add(n)
+                        todo.append(n)
+        x0 = min(x for x, _ in group)
+        y0 = min(y for _, y in group)
+        x1 = max(x + tiles[(x, y)][0] for x, y in group)
+        y1 = max(y + tiles[(x, y)][1] for x, y in group)
+        boxes.append((x0, y0, x1 - x0, y1 - y0))
+    boxes.sort(key=lambda b: -b[2] * b[3])
+    return boxes[:most]
+
+
+def _changed_box(since: float) -> tuple[int, int, int, int] | None:
+    tiles = [(tx, ty, tw, th) for t, tx, ty, tw, th in list(screen.changes) if t > since]
+    if not tiles:
+        return None
+    x0 = min(t[0] for t in tiles)
+    y0 = min(t[1] for t in tiles)
+    x1 = max(t[0] + t[2] for t in tiles)
+    y1 = max(t[1] + t[3] for t in tiles)
+    return x0, y0, x1 - x0, y1 - y0
+
+
+def changed_shot() -> list:
+    """Only the parts of the screen that changed since the last look, with their place."""
+    global last_look
+    if paused := _paused_note():
+        return [paused]
+    since = last_look
+    _with_screen(lambda: screen.capture())  # brings in every changed tile
+    last_look = time.monotonic()
+    every = [(0, 0, screen.width, screen.height)]
+    boxes = (_changed_boxes(since) if since else every) or []
+    if not boxes:
+        return ["no change on the screen since your last look"]
+    total = len(_changed_boxes(since, 1000)) if since else 1
+    out = []
+    for x, y, w, h in boxes:
+        image = _with_screen(lambda: screen.capture(x, y, w, h))
+        image, scale = pictures.fit(image)
+        out.append(f"changed: {w}x{h} at ({x},{y}) of {screen.width}x{screen.height}; "
+                   f"screen_x = {x} + image_x * {scale:.3f}, screen_y = {y} + image_y * {scale:.3f}")
+        out.append(McpImage(data=pictures.png(image), format="png"))
+    if total > len(boxes):
+        out.append(f"note: {total - len(boxes)} smaller changed places left out")
+    return out
+
+
+STEP_KEYS = ("click", "click_text", "ui_click", "menu", "key", "type", "move", "drag", "wait",
+             "wait_change", "wait_window", "wait_text", "start", "exec", "screen_front")
+
+
+def _step(step: dict) -> str:
+    kind = next((k for k in STEP_KEYS if k in step), None)
+    if not kind:
+        raise AmigaError(f"a step needs one of {', '.join(STEP_KEYS)}")
+    v = step[kind]
+    timeout = float(step.get("timeout", 10))
+    if kind == "click":
+        return amiga_click(int(v[0]), int(v[1]), step.get("button", "left"), bool(step.get("double")))
+    if kind == "click_text":
+        return amiga_click_text(str(v), step.get("window", ""), step.get("button", "left"),
+                                bool(step.get("double")))
+    if kind == "ui_click":
+        return amiga_ui_click(str(v) if not isinstance(v, int) else "", step.get("window", ""),
+                              v if isinstance(v, int) else int(step.get("number", -1)),
+                              step.get("button", "left"), bool(step.get("double")))
+    if kind == "menu":
+        return amiga_menu_select(str(v))
+    if kind == "key":
+        return amiga_key(str(v))
+    if kind == "type":
+        return amiga_type(str(v), float(step.get("settle", 10)))
+    if kind == "move":
+        return amiga_mouse_move(int(v[0]), int(v[1]))
+    if kind == "drag":
+        return amiga_drag(*(int(n) for n in v[:4]), step.get("button", "left"))
+    if kind == "wait":
+        time.sleep(min(float(v), 60))
+        return f"waited {float(v):g} s"
+    if kind == "wait_change":
+        box = list(v) + [0] * (4 - len(v)) if isinstance(v, list) else [0, 0, 0, 0]
+        return amiga_wait_change(*box[:4], timeout=timeout)
+    if kind == "wait_window":
+        return amiga_wait_window(str(v), timeout, bool(step.get("new")), bool(step.get("gone")))
+    if kind == "wait_text":
+        return amiga_wait_text(str(v), timeout, bool(step.get("gone")))
+    if kind == "start":
+        return amiga_start(str(v))
+    if kind == "exec":
+        return amiga_exec(str(v), step.get("cd", ""), float(step.get("timeout", 30)))
+    return amiga_screen_front(str(v))
+
+
+@mcp.tool()
+def amiga_do(steps: list[dict], look: str = "none") -> list:
+    """Several actions in one call, then one look: saves a round trip per action.
+
+    steps is a list of objects with one action each, carried out in order:
+    {"click": [x, y]} (with "button", "double"), {"click_text": "OK"} (with
+    "window"), {"ui_click": "Save"} or {"ui_click": 3, "window": "Prefs"},
+    {"menu": "Project/Quit"}, {"key": "return"}, {"type": "dir\\n"},
+    {"move": [x, y]}, {"drag": [x1, y1, x2, y2]}, {"wait": 1.5},
+    {"wait_change": [x, y, w, h], "timeout": 10}, {"wait_window": "Title",
+    "timeout": 10, "new": true}, {"wait_text": "done", "timeout": 20},
+    {"start": "SYS:Utilities/Clock"}, {"exec": "Info"}, {"screen_front": "Workbench"}.
+    It stops at the first step that fails and says which. look is what comes
+    back at the end: none, text (amiga_screen_text), changed (only the part of
+    the screen that changed) or screen (a screenshot).
+    """
+    if not isinstance(steps, list) or not steps:
+        raise AmigaError("steps is a list of actions, e.g. [{\"click\": [10, 20]}]")
+    if len(steps) > 50:
+        raise AmigaError("at most 50 steps in one call")
+    log = []
+    for i, step in enumerate(steps, 1):
+        try:
+            result = _step(step if isinstance(step, dict) else {})
+        except (AmigaError, OSError, ValueError, TypeError, IndexError) as e:
+            log.append(f"step {i} failed: {e}")
+            left = len(steps) - i
+            log.append("stopped" if not left else f"stopped; step {i + 1} not done" if left == 1
+                       else f"stopped; steps {i + 1} to {len(steps)} not done")
+            break
+        text = result if isinstance(result, str) else " ".join(r for r in result if isinstance(r, str))
+        log.append(f"{i}. {text}")
+    out: list = ["\n".join(log)]
+    look = look.strip().lower()
+    if look == "text":
+        out.append(amiga_screen_text())
+    elif look == "changed":
+        out += changed_shot()
+    elif look in ("screen", "screenshot"):
+        out += amiga_screenshot()
+    elif look not in ("", "none"):
+        out.append(f"note: look {look!r} unknown; none, text, changed or screen")
+    return out
+
+
+# ---- packing
+
+@mcp.tool()
+def amiga_link(compress: str = "") -> str:
+    """How data travel to and from the Amiga, and whether they are packed.
+
+    Packing pays when the Amiga packs much faster than its network carries,
+    e.g. a PiStorm or 68080 behind a plipbox; a slow CPU on a fast network
+    stays unpacked. compress sets it for this Amiga from now on: auto (decides
+    by measurement, the default), off, fast or best.
+    """
+    policy = pack.policy_for(HOST)
+    if compress:
+        try:
+            policy.set_mode(compress)
+        except ValueError as e:
+            raise AmigaError(str(e)) from None
+    if not policy.known:
+        try:
+            _with_ctl(ctl.sysinfo)  # a channel learns the Amiga's rates on connect
+        except AmigaError:
+            pass
+    return json.dumps(policy.describe(), indent=1)
+
+
+# ---- developers
+
+debug_seen = 0  # RawPutChar count at the last look
+
+
+@mcp.tool()
+def amiga_debug_log(everything: bool = False) -> str:
+    """Debug output on the Amiga since the last call: kprintf, Enforcer and MuForce hits.
+
+    amigentd catches what goes through exec's RawPutChar (as Sashimi does);
+    the serial port still gets it as well. everything=True shows the whole
+    ring (64 KB) instead of what is new.
+    """
+    global debug_seen
+    try:
+        total, data = _with_ctl(lambda: ctl.debug_log(0 if everything else debug_seen))
+    except AttributeError:
+        raise AmigaError("debug output needs amigentd 1.3.0; run amigent-setup --update") from None
+    debug_seen = total
+    text = data.decode("iso-8859-1").replace("\r\n", "\n").replace("\r", "\n")
+    return text if text else "no new debug output"
+
+
+RUN_DIR = "RAM:amigent-run"
+CRASH_TITLES = ("software failure", "softwarefehler", "program failed", "programm fehlgeschlagen",
+                "guru", "systemanforderung", "system request")
+
+
+@mcp.tool()
+def amiga_run(program: str, args: str = "", timeout: float = 60, cd: str = "") -> str:
+    """Develop and test: copy a program over if it is local, run it, and report everything.
+
+    program is a path on this PC (uploaded to RAM:amigent-run first, only when
+    it changed) or on the Amiga. Reports return code and output, the debug
+    output it produced (kprintf, Enforcer hits), requesters that came up
+    meanwhile (such as Software Failure) and, if the Amiga dropped off, what
+    amiga_status finds after it came back: a restart or a guru code.
+    """
+    global debug_seen
+    local = Path(program).expanduser()
+    if local.is_file():
+        _with_ctl(lambda: files.makedirs(ctl, RUN_DIR))
+        target = _join(RUN_DIR, local.name)
+        _with_ctl(lambda: files.put(ctl, local, target))
+        _with_ctl(lambda: ctl.exec(f'Protect "{target}" +rwed'))
+        command = f'"{target}" {args}'.strip()
+    else:
+        command = f"{program} {args}".strip()
+    try:
+        seen_before, _ = _with_ctl(lambda: ctl.debug_log(0xFFFFFFFF))
+    except (AttributeError, AmigaError):
+        seen_before = None
+    windows_before = _window_titles()
+    report = []
+    try:
+        result = _with_ctl(lambda: ctl.exec(command, cd or None, timeout))
+        report.append(f"rc={result.rc}")
+        if result.output.strip():
+            report.append(f"output:\n{result.output.rstrip()}")
+    except AmigaError as e:
+        report.append(f"did not finish: {e}")
+        if e.code is None:  # the link is gone: a crash?
+            time.sleep(5)
+            try:
+                report.append(f"after reconnecting:\n{amiga_status()}")
+            except AmigaError as down:
+                report.append(f"the Amiga does not answer ({down}); amiga_status once it is back")
+            return "\n".join(report)
+    if seen_before is not None:
+        try:
+            total, data = _with_ctl(lambda: ctl.debug_log(seen_before))
+            debug_seen = total
+            if data:
+                report.append("debug output:\n" + data.decode("iso-8859-1").rstrip())
+        except AmigaError:
+            pass
+    new = [t for t in _window_titles() if t not in windows_before]
+    if new:
+        report.append("new windows: " + ", ".join(repr(t) for t in new))
+        if any(any(c in t.lower() for c in CRASH_TITLES) for t in new):
+            report.append("one looks like a crash requester: amiga_screen_text or a screenshot "
+                          "shows it; answer it before running again")
+    return "\n".join(report)
+
+
+def _window_titles() -> list[str]:
+    try:
+        return [w["title"] for w in _with_screen(screen.ui_tree) if w["kind"] == "window"]
+    except (AmigaError, OSError):
+        return []
+
+
+# ---- clipboard
+
+@mcp.tool()
+def amiga_clipboard(text: str | None = None) -> str:
+    """Read the Amiga's clipboard, or set it to text (then RAmiga+V pastes it there)."""
+    from .viewer import CLIPBOARD, MAX_CLIP, ftxt, ftxt_text
+    if text is not None:
+        _with_ctl(lambda: ctl.write_file(CLIPBOARD, ftxt(text)))
+        return f"clipboard set ({len(text)} characters)"
+    try:
+        size = int(_with_ctl(lambda: ctl.stat(CLIPBOARD)).get("size", 0) or 0)
+    except AmigaError as e:
+        if e.code is None:
+            raise
+        return "the clipboard is empty"
+    if size > MAX_CLIP:
+        return "the clipboard holds more than text (a picture, say)"
+    return ftxt_text(_with_ctl(lambda: ctl.read_file(CLIPBOARD))) or "the clipboard holds no text"
+
+
+# ---- notes
+
+@mcp.tool()
+def amiga_notes(topic: str = "", search: str = "") -> str:
+    """What was learned earlier about programs on this Amiga: read before using one again.
+
+    Without arguments the topics; with topic its notes; search looks through
+    all of them. amiga_start shows the notes of the program it starts.
+    """
+    book = notes.for_amiga(_amiga())
+    if topic:
+        found = book.get(topic)
+        return "\n".join(f"- {n}" for n in found) if found else f"no notes on {topic!r}"
+    if search:
+        hits = book.search(search)
+        return "\n".join(f"{t}:\n" + "\n".join(f"- {n}" for n in v) for t, v in hits.items()) \
+            or f"no notes mention {search!r}"
+    topics = book.topics()
+    return "\n".join(f"{t} ({n})" for t, n in topics.items()) or "no notes yet"
+
+
+@mcp.tool()
+def amiga_note(topic: str, text: str = "", remove: str = "") -> str:
+    """Remember something for next time, for a program or task on this Amiga.
+
+    Write notes that save time later: the stack a game needs, where a button
+    sits, which requester comes up and what to answer, a working command line.
+    topic is the program's name (e.g. 'settlers2'). remove drops the topic's
+    notes containing that text ('*' for all of them).
+    """
+    book = notes.for_amiga(_amiga())
+    if remove:
+        gone = book.remove(topic, "" if remove == "*" else remove)
+        return f"removed {gone} note(s) from {topic!r}"
+    try:
+        count = book.add(topic, text)
+    except ValueError as e:
+        raise AmigaError(str(e)) from None
+    return f"noted; {topic!r} has {count} note(s)"
+
+
+# ---- installations that can be undone
+
+def _home() -> str:
+    return AMIGA_DIR
+
+
+@mcp.tool()
+def amiga_install_begin(name: str, folders: str = "", system: bool = True) -> str:
+    """Before installing something: take stock so it can be undone, and copy the system aside.
+
+    Records C:, LIBS:, DEVS:, S:, L:, ENVARC:, SYS:WBStartup and SYS:Classes,
+    plus folders (comma separated, e.g. the program's target folder), and copies
+    the existing ones aside on the Amiga. system=False watches only folders,
+    for a game that stays in its own drawer. Then install as usual and call
+    amiga_install_end(name).
+    """
+    name = install.name_ok(name)
+    extra = [f.strip() for f in folders.split(",") if f.strip()]
+    base = list(install.SYSTEM) if system else []
+    if not base and not extra:
+        raise AmigaError("with system=False, name the folders to watch")
+    record = install.Record(name, _home(), base + [f for f in extra if f not in base],
+                            started=time.strftime("%Y-%m-%d %H:%M:%S"))
+    for path in record.paths:
+        snap = _with_ctl(lambda: install.snapshot(ctl, path))
+        if snap is None:
+            record.missing.append(path)
+        record.before[path] = snap or {}
+    script = install.begin_script(record)
+    _with_ctl(lambda: ctl.write_file("RAM:amigent-install.script", script.encode("iso-8859-1")))
+    result = _with_ctl(lambda: ctl.exec("Execute RAM:amigent-install.script", timeout=3600))
+    if result.rc:
+        raise AmigaError(f"copying the system aside failed (rc={result.rc}): {result.output[-500:]}")
+    path = install.save(_amiga(), record)
+    files_count = sum(len(v) for v in record.before.values())
+    return (f"ready: {files_count} entries in {len(record.paths)} folders recorded and copied to "
+            f"{record.store}; install now, then amiga_install_end({name!r}). Record: {path}")
+
+
+@mcp.tool()
+def amiga_install_end(name: str) -> str:
+    """After installing: what came, changed and went; keeps what undo needs, writes a repair module."""
+    record = install.load(_amiga(), name)
+    if record.done:
+        return f"{name!r} was finished already; amiga_install_undo({name!r}) takes it back"
+    kinds: dict[str, str] = {}
+    for path in record.paths:
+        after = _with_ctl(lambda: install.snapshot(ctl, path))
+        added, changed, removed = install.compare(record.before.get(path), after)
+        for rel in added:
+            kinds[install.join(path, rel)] = (after or {})[rel]["type"]
+        record.added += [install.join(path, r) for r in added]
+        record.changed += [install.join(path, r) for r in changed]
+        record.removed += [install.join(path, r) for r in removed]
+    for script, name_ in ((install.prune_script(record), "prune"),
+                          (install.apps_script(record) if record.added else "", "apps")):
+        if not script:
+            continue
+        _with_ctl(lambda: ctl.write_file(f"RAM:amigent-install-{name_}.script", script.encode("iso-8859-1")))
+        _with_ctl(lambda: ctl.exec(f"Execute RAM:amigent-install-{name_}.script", timeout=3600))
+    notes_ = []
+    if record.added:
+        module = install.repair_module(record, kinds)
+        target = install.join(install.join(record.home, "repair.d"), f"{record.name}.repair")
+        _with_ctl(lambda: files.makedirs(ctl, install.join(record.home, "repair.d")))
+        _with_ctl(lambda: ctl.write_file(target, module.encode("iso-8859-1")))
+        notes_.append(f"repair module {target}")
+    record.done = True
+    path = install.save(_amiga(), record)
+    _with_ctl(lambda: ctl.write_file(install.join(record.store, "record.json"),
+                                     record.to_json().encode("utf-8", "replace")))
+
+    def some(items):
+        return ", ".join(items[:12]) + (f" and {len(items) - 12} more" if len(items) > 12 else "")
+    lines = [f"{name!r}: {len(record.added)} added, {len(record.changed)} changed, "
+             f"{len(record.removed)} removed"]
+    for label, items in (("added", record.added), ("changed", record.changed), ("removed", record.removed)):
+        if items:
+            lines.append(f"{label}: {some(items)}")
+    lines += notes_ + [f"amiga_install_undo({name!r}) takes it back. Record: {path}"]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def amiga_install_undo(name: str) -> str:
+    """Take an installation back: remove what it added, restore what it changed or removed."""
+    record = install.load(_amiga(), name)
+    if not record.done:
+        raise AmigaError(f"{name!r} was not finished: call amiga_install_end({name!r}) first")
+    if record.undone:
+        return f"{name!r} was taken back already"
+    dirs = []
+    for path in record.paths:
+        before = record.before.get(path, {})
+        for full in record.added:
+            prefix = install.join(path, "")
+            if full.startswith(prefix):
+                rel = full[len(prefix):]
+                if rel not in before:
+                    snap_type = None
+                    try:
+                        snap_type = _with_ctl(lambda: ctl.stat(full)).get("type")
+                    except AmigaError:
+                        pass
+                    if snap_type == "dir":
+                        dirs.append(full)
+    script = install.undo_script(record, dirs)
+    _with_ctl(lambda: ctl.write_file("RAM:amigent-undo.script", script.encode("iso-8859-1")))
+    result = _with_ctl(lambda: ctl.exec("Execute RAM:amigent-undo.script", timeout=3600))
+    left = []
+    for path in record.paths:
+        after = _with_ctl(lambda: install.snapshot(ctl, path))
+        added, changed, removed = install.compare(record.before.get(path), after)
+        left += [install.join(path, r) for r in added + changed + removed]
+    module = install.join(install.join(record.home, "repair.d"), f"{record.name}.repair")
+    try:
+        _with_ctl(lambda: ctl.delete(module))
+    except AmigaError:
+        pass
+    record.undone = not left
+    install.save(_amiga(), record)
+    if left:
+        return (f"{name!r} taken back except {len(left)} entries (rc={result.rc}): "
+                + ", ".join(left[:12]))
+    return f"{name!r} taken back: the recorded folders are as before the installation"
+
+
+@mcp.tool()
+def amiga_installs() -> str:
+    """Installations recorded on this Amiga and whether they can still be undone."""
+    rows = []
+    for r in install.listing(_amiga()):
+        state = "undone" if r.undone else "finished" if r.done else "begun, not finished"
+        rows.append(f"{r.name}: {state}, {len(r.added)} added, {len(r.changed)} changed, "
+                    f"{len(r.removed)} removed, since {r.started}")
+    return "\n".join(rows) or "no installations recorded"
+
+
+# ---- Aminet
+
+@mcp.tool()
+def amiga_aminet_search(query: str, limit: int = 15) -> str:
+    """Search Aminet from the PC: archive path, size, date, downloads, architecture, description."""
+    try:
+        found = aminet.search(query, max(1, min(limit, 50)))
+    except OSError as e:
+        raise AmigaError(f"Aminet does not answer: {e}") from e
+    if not found:
+        return f"nothing on Aminet for {query!r}"
+    return "\n".join(f"{p.path}  {p.size}  {p.date}  {p.downloads} dl  {p.arch}  {p.description}"
+                     for p in found)
+
+
+@mcp.tool()
+def amiga_aminet_readme(path: str) -> str:
+    """The readme of an Aminet archive, e.g. 'util/arc/lha.run': requirements, version, notes."""
+    try:
+        return aminet.readme(path)
+    except (OSError, ValueError) as e:
+        raise AmigaError(str(e)) from e
+
+
+@mcp.tool()
+def amiga_aminet_install(path: str, target: str) -> str:
+    """Fetch an Aminet archive on the PC and unpack it on the Amiga into target.
+
+    path as amiga_aminet_search shows it, e.g. 'game/strat/foo.lha'; target a
+    folder such as 'SYS:Games'. The archive travels packed and the Amiga's own
+    lha, unlzx or unzip unpacks it; without one, the PC unpacks .lha and .zip
+    and sends the files. Use amiga_install_begin first to make it undoable,
+    and read the readme for an installer to run afterwards.
+    """
+    import io
+    import tempfile
+    import zipfile
+    from . import lzh
+
+    try:
+        data = aminet.download(path)
+    except (OSError, ValueError) as e:
+        raise AmigaError(f"download failed: {e}") from e
+    name = PurePosixPath(aminet.check_path(path)).name
+    tool = aminet.tool_for(name)
+    _with_ctl(lambda: files.makedirs(ctl, target))
+    has_tool = False
+    if tool:
+        found = _with_ctl(lambda: ctl.exec(f"Which {tool}", timeout=15))
+        has_tool = found.rc == 0
+    if has_tool:
+        archive = _join("T:", name)
+        _with_ctl(lambda: ctl.write_file(archive, data))
+        result = _with_ctl(lambda: ctl.exec(aminet.unpack_line(tool, archive, target), timeout=900))
+        _with_ctl(lambda: ctl.delete(archive))
+        if result.rc >= 10:
+            raise AmigaError(f"{tool} failed (rc={result.rc}): {result.output[-800:]}")
+        how = f"unpacked on the Amiga with {tool}"
+    else:
+        if name.lower().endswith((".lha", ".lzh")):
+            members = lzh.extract_all(data)
+        elif name.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                members = {i.filename: z.read(i) for i in z.infolist() if not i.is_dir()}
+        else:
+            raise AmigaError(f"the Amiga has no {tool or 'unpacker'} for {name}, and the PC can't "
+                             "unpack it either; install that tool first")
+        with tempfile.TemporaryDirectory() as tmp:
+            for member, body in members.items():
+                local = Path(tmp, *[p for p in member.split("/") if p not in ("", ".", "..")])
+                local.parent.mkdir(parents=True, exist_ok=True)
+                local.write_bytes(body)
+            _with_ctl(lambda: files.put(ctl, Path(tmp), target))
+        how = f"unpacked on the PC ({len(members)} files) and sent"
+    top = _with_ctl(lambda: ctl.list_dir(target))
+    return (f"{name} ({len(data) // 1024} KB) {how} into {target}. {target} now holds: "
+            + ", ".join(e["name"] + ("/" if e["type"] == "DIR" else "") for e in top[:30]))
 
 
 def main() -> None:

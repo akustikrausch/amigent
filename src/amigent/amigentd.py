@@ -9,11 +9,12 @@ import socket
 import ssl
 import struct
 import time
+import zlib
 from collections import deque
 
 from PIL import Image
 
-from . import tls
+from . import pack, tls
 from .planar import HAM, HAS_PALETTE, Chunky, Planes, PlanarError
 from .planar import header as planar_header
 from .secret import load_key
@@ -25,6 +26,9 @@ CMD_AUTH, CMD_CLIENT, CMD_PAUSE = 17, 18, 19
 PAUSE_PROTOCOL = 4  # INFO tells the seconds of screen pause left, PAUSE sets them
 RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
 FRAME_PLANAR = 2 | 4  # FRAME arg bits: planes or chunky tiles, all methods; PROTOCOL.md "planar"
+FRAME_DEFLATE = {1: 8, 2: 16}  # FRAME arg bits, protocol 5: tiles may come deflated (fast, best)
+DEFLATED = 32  # tile method bit: the data are a raw deflate stream of what the other bits say
+PACK_PROTOCOL = 5
 
 RAWKEYS = {
     "space": 0x40, "backspace": 0x41, "tab": 0x42, "enter": 0x43, "return": 0x44,
@@ -119,6 +123,7 @@ class Amigentd:
         self._buttons = 0
         self._last_used = 0.0
         self.protocol = 0
+        self.policy: pack.Policy | None = None
         self.flags = 0
         self.paused_until = 0.0  # monotonic end of the screen pause, as INFO last told
         self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
@@ -327,9 +332,17 @@ class Amigentd:
         start = time.perf_counter()
         count = struct.unpack(">I", (yield 4))[0]
         size += 4
+        deflated = False
         for _ in range(count):
             x, y, w, h, method, n = struct.unpack(">HHHHBI", (yield 13))
             data = yield n
+            deflated = deflated or bool(method & DEFLATED)
+            if method & DEFLATED:
+                try:
+                    data = zlib.decompress(data, -15)
+                except zlib.error as e:
+                    raise AmigentdError(f"tile at {x},{y}: bad packed data ({e})") from e
+                method &= ~DEFLATED
             try:
                 surface.apply(x, y, w, h, method, data)
             except PlanarError as e:
@@ -337,7 +350,10 @@ class Amigentd:
             size += 13 + n
             take((x, y, w, h, surface.tile(x, y, w, h) if isinstance(surface, Chunky) else data))
         self.received += size
-        return count, size, time.perf_counter() - start
+        elapsed = time.perf_counter() - start
+        if not deflated and self.policy:  # the line itself, not the Amiga's packing
+            self.policy.note(size, elapsed)
+        return count, size, elapsed
 
     def _planar_reply(self, take):
         """Format 1: the planes, maybe a palette, then tiles."""
@@ -506,7 +522,16 @@ class Amigentd:
         return self._retry(call)
 
     def frame_arg(self, force: bool) -> int:
-        return int(force) | (FRAME_PLANAR if self.planar else 0)
+        arg = int(force) | (FRAME_PLANAR if self.planar else 0)
+        if self.planar and self.protocol >= PACK_PROTOCOL:
+            arg |= FRAME_DEFLATE.get(self.packing().level(), 0)
+        return arg
+
+    def packing(self) -> pack.Policy:
+        """The Amiga's packing policy, shared with the command channel that learns its rates."""
+        if self.policy is None:
+            self.policy = pack.policy_for(self.host)
+        return self.policy
 
     def capture(self, x: int = 0, y: int = 0, w: int | None = None,
                 h: int | None = None) -> Image.Image:

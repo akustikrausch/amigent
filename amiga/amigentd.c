@@ -3,10 +3,11 @@
  * channels for command lines and files, over TCP; with AmiSSL also over TLS.
  * The wire format is in docs/PROTOCOL.md. MIT licence, see LICENSE.
  *
- *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY]
+ *   amigentd [PORT <n>] [SETUP] [KEY <file>] [QUIET] [TLSONLY] [NOTEXT] [NODEBUG]
  *
  * SETUP also accepts files (PUT) and command lines (RUN) until SETUP_END.
  * TLSONLY: once the TLS port is up, the plain one talks to localhost only.
+ * NOTEXT, NODEBUG: don't record the text programs draw, or their debug output.
  * From Workbench the same come as tool types: PORT=<n>, SETUP, KEY=<file>, QUIET,
  * TLSONLY.
  */
@@ -30,6 +31,9 @@
 #include <graphics/modeid.h>
 #include <graphics/clip.h>
 #include <graphics/layers.h>
+#include <graphics/rastport.h>
+#include <graphics/text.h>
+#include <stdlib.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
 #include <proto/exec.h>
@@ -57,7 +61,7 @@ extern struct Library *CyberGfxBase;
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
-#define PROTOCOL_VERSION 4
+#define PROTOCOL_VERSION 5
 #define DEFAULT_PORT 6801
 #define TILE 64
 #define RGB_TILES 2  /* tiles read in one go: 24 KB, so a 1 MB A500+ still copes */
@@ -96,7 +100,8 @@ enum {
     CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END, CMD_SCREENS, CMD_SCREEN_FRONT,
     CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT, CMD_PAUSE,
     CMD_CHANNEL = 20, CMD_EXEC, CMD_READ_FILE, CMD_WRITE_FILE, CMD_DIR, CMD_STAT, CMD_DELETE,
-    CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
+    CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
+    CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG  /* protocol 5 */
 };
 
 const char version[] = "$VER: amigentd 1.3.0 (06.11.2026)";
@@ -1382,6 +1387,36 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h);
 
 /* FRAME with arg 2: planar tiles for chipset screens, else the classic ones.
  * See "planar" in docs/PROTOCOL.md. */
+/* FRAME arg 8 or 16: tiles may come deflated as well (method bit 32), when that
+ * is shorter. Level 1 or 2, as the client asked for this frame. */
+static LONG frame_level;
+static struct zpack *frame_z;
+static struct zpack *z_new(LONG level, LONG osize);
+static void z_free(struct zpack *z);
+static LONG z_pack(struct zpack *z, const UBYTE *data, LONG n);
+static UBYTE *zpack_out(struct zpack *z);
+static LONG zpack_level(struct zpack *z);
+
+static UBYTE *pack_tile(UBYTE *data, LONG *len, LONG *method)
+{
+    LONG n;
+
+    if (!frame_level || *len < 64)
+        return data;
+    if (frame_z && zpack_level(frame_z) != frame_level) {
+        z_free(frame_z);
+        frame_z = NULL;
+    }
+    if (!frame_z && !(frame_z = z_new(frame_level, TILE * TILE + TILE * TILE / 8 + 256)))
+        return data;
+    n = z_pack(frame_z, data, *len);
+    if (n + 8 >= *len)
+        return data;
+    *len = n;
+    *method |= 32;
+    return zpack_out(frame_z);
+}
+
 static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
 {
     struct Screen *scr;
@@ -1475,6 +1510,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         LONG tw = px + TILE < pw ? TILE : pw - px, th = py + TILE < ph ? TILE : ph - py;
         LONG bw = (tw + 7) >> 3;
         BOOL had = !force && (pvalid[t] & 1);
+        UBYTE *data;
 
         /* Every way we know, the shortest wins; penc(b) holds it. */
         raw = tile_bytes(pcur, ttx, tty, bw, th, ptile);
@@ -1509,6 +1545,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
             memcpy(penc(b), ptile, raw);
             best = raw, method = 0;
         }
+        data = ext ? pack_tile(penc(b), &best, &method) : penc(b);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
         be16(tile_buf + 4, tw);
@@ -1517,7 +1554,7 @@ static BOOL frame_planar(BOOL force, BOOL ext, LONG x, LONG y, LONG w, LONG h)
         be32(tile_buf + 9, best);
         /* Out the door as soon as there is a packet's worth, and a look for
          * input between tiles: the pointer must not wait for the picture. */
-        if (!put(tile_buf, 13) || !put(penc(b), best) ||
+        if (!put(tile_buf, 13) || !put(data, best) ||
             (out_len >= SEND_EARLY && !flush()) ||
             !sneak_input()) {
             /* Half a frame out: no telling what the client holds. Start over. */
@@ -1691,6 +1728,7 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
         LONG tw = px + TILE < sw ? TILE : sw - px, th = py + TILE < sh ? TILE : sh - py;
         LONG raw, best, size, method, k, b = 0, ihead, irows;
         BOOL had = !force && (valid[t] & 1);
+        UBYTE *data;
 
         raw = chunky_bytes(cur, px, py, tw, th, ptile);
         if ((irows = index_tile(ptile, tw, th, pold, &ihead))) {
@@ -1747,13 +1785,14 @@ static BOOL frame_chunky(BOOL force, LONG x, LONG y, LONG w, LONG h)
             memcpy(penc(b), ptile, raw);
             best = raw, method = 0;
         }
+        data = pack_tile(penc(b), &best, &method);
         be16(tile_buf, px);
         be16(tile_buf + 2, py);
         be16(tile_buf + 4, tw);
         be16(tile_buf + 6, th);
         tile_buf[8] = method;
         be32(tile_buf + 9, best);
-        if (!put(tile_buf, 13) || !put(penc(b), best) ||
+        if (!put(tile_buf, 13) || !put(data, best) ||
             (out_len >= SEND_EARLY && !flush()) || !sneak_input())
             goto fail;
     }
@@ -2507,10 +2546,16 @@ static BOOL auth(UWORD len)
 
 /* ---- links: small blocking transfers on any socket, from any process ---- */
 
+struct zpack;
+
 struct link {
     struct Library *base;  /* each process has its own bsdsocket.library */
     LONG fd;
+    struct zpack *zp;  /* after COMPRESS: bulk replies go out packed */
 };
+
+static BOOL z_send(struct link *l, const UBYTE *data, ULONG len);
+static BOOL z_send_file(struct link *l, BPTR fh, ULONG size, UBYTE *buf);
 
 /* secs 0 waits for ever. A Ctrl-C ends the wait and stays set for the caller. */
 static BOOL l_wait(struct link *l, BOOL writing, LONG secs)
@@ -2775,7 +2820,8 @@ static BOOL c_text(struct link *l, struct text *t)
     }
     head[0] = 0;
     be32(head + 1, t->len);
-    ok = l_send(l, head, 5, IO_SECONDS) && l_send(l, t->buf, t->len, IO_SECONDS);
+    ok = l_send(l, head, 5, IO_SECONDS) &&
+         (l->zp ? z_send(l, t->buf, t->len) : l_send(l, t->buf, t->len, IO_SECONDS));
     FreeVec(t->buf);
     return ok;
 }
@@ -2939,6 +2985,8 @@ static BOOL c_read(struct link *l, UWORD len)
             head[0] = 0;
             be32(head + 1, size);
             alive = l_send(l, head, 5, IO_SECONDS);
+            if (alive && l->zp)
+                alive = z_send_file(l, fh, size, buf), size = 0;
             /* The size is out, so a read error can only end the link. */
             while (alive && size > 0) {
                 n = Read(fh, buf, size > CHUNK ? CHUNK : size);
@@ -2969,9 +3017,14 @@ static BOOL is_dir(const char *path)
     return dir;
 }
 
+static struct zin *zi_new(void);
+static void zi_free(struct zin *z);
+static BOOL zi_into(struct link *l, ULONG size, BPTR fh, LONG *err);
+
 /* A new file is written under a temporary name next to it and renamed at the
- * end, so a broken transfer never leaves half a file. */
-static BOOL c_write(struct link *l, BOOL append, UWORD len, ULONG size)
+ * end, so a broken transfer never leaves half a file. packed: the data are a
+ * raw deflate stream of size bytes. */
+static BOOL c_write(struct link *l, BOOL append, BOOL packed, UWORD len, ULONG size)
 {
     UBYTE *buf = AllocVec(CHUNK, MEMF_ANY);
     char *tmp = NULL, name[24];
@@ -3003,6 +3056,10 @@ static BOOL c_write(struct link *l, BOOL append, UWORD len, ULONG size)
     }
     if (!err && !fh)
         err = IoErr();
+    if (packed) {
+        alive = zi_into(l, size, err ? 0 : fh, &err);
+        size = 0;
+    }
     while (size > 0) {  /* takes all the data even after an error */
         n = size > CHUNK ? CHUNK : size;
         if (!(alive = l_recv(l, buf, n, IO_SECONDS)))
@@ -3027,6 +3084,8 @@ static BOOL c_write(struct link *l, BOOL append, UWORD len, ULONG size)
     FreeVec(buf);
     if (!alive)
         return FALSE;
+    if (err == -1)
+        return c_fail(l, 1, "bad compressed data");
     return err ? c_fault(l, err) : c_ok(l);
 }
 
@@ -3148,10 +3207,17 @@ static ULONG mem_total(ULONG kind)
     return n;
 }
 
+static ULONG pack_rate[3];
+static volatile LONG pack_measured;  /* 1 while a channel measures, 2 done */
+static BOOL text_on, debug_on;
+static void measure_pack(void);
+static void hooks_again(void);
+
 static BOOL c_sysinfo(struct link *l)
 {
     struct Library *SocketBase = l->base;
     struct text t = {0};
+    LONG i;
 
     t_pair(&t, "chip_free", AvailMem(MEMF_CHIP));
     t_pair(&t, "chip_total", mem_total(MEMF_CHIP));
@@ -3185,6 +3251,25 @@ static BOOL c_sysinfo(struct link *l)
                           f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
         t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
     }
+    /* From protocol 5: how fast this Amiga packs, in KB/s, so the PC can tell
+     * whether packing beats the line; and what amigentd records. */
+    Forbid();
+    i = pack_measured;
+    if (!i)
+        pack_measured = 1;
+    Permit();
+    if (!i) {
+        measure_pack();
+        pack_measured = 2;
+    }
+    while (pack_measured != 2)
+        Delay(5);
+    t_pair(&t, "deflate_fast", pack_rate[0]);
+    t_pair(&t, "deflate_best", pack_rate[1]);
+    t_pair(&t, "inflate", pack_rate[2]);
+    hooks_again();
+    t_pair(&t, "text", text_on);
+    t_pair(&t, "debug", debug_on);
     return c_text(l, &t);
 }
 
@@ -3377,6 +3462,8 @@ static BOOL send_output(struct link *l, struct run *r)
         be32(head + 1, r->rc);
         be32(head + 5, size);
         alive = l_send(l, head, 9, IO_SECONDS);
+        if (alive && l->zp)
+            alive = z_send_file(l, fh, size, buf), size = 0;
         while (alive && size > 0) {
             n = Read(fh, buf, size > CHUNK ? CHUNK : size);
             alive = n > 0 && l_send(l, buf, n, IO_SECONDS);
@@ -3467,6 +3554,1807 @@ static BOOL c_exec(struct link *l, UWORD len, UWORD dir_len, UWORD secs)
     return alive;
 }
 
+/* ---- deflate (RFC 1951) ------------------------------------------------- */
+
+/* Packing with the fixed Huffman codes: a block that would not get shorter
+ * goes out stored. Level 1 takes the one candidate the hash remembers, level 2
+ * walks a chain and looks one byte ahead. Positions count from the start of
+ * the context, so a new stream only moves the floor: nothing to clear. */
+#define Z_WIN 32768L
+#define Z_BUF (2 * Z_WIN)
+#define Z_HASH 32768L
+#define Z_CHAIN 32
+#define Z_NICE 128
+
+struct zpack {
+    UBYTE *buf;     /* the last Z_WIN bytes and what is being packed */
+    LONG have;      /* bytes in buf */
+    ULONG base;     /* position of buf[0] */
+    ULONG floor;    /* this stream starts here; nothing before it may match */
+    ULONG *head;    /* per hash the last position + 1 */
+    ULONG *prev;    /* per position & (Z_WIN - 1) the one before, level 2 */
+    ULONG bits;
+    LONG nbits, level, stored;  /* stored: blocks in a row that did not pack */
+    UBYTE *out;
+    LONG olen;
+};
+
+static UWORD z_lcode[288];
+static UBYTE z_llen[288], z_lsym[259], z_dcode[30];
+static const UWORD z_lbase[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+                                  35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+static const UBYTE z_lextra[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+                                   3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+static const UWORD z_dbase[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+                                  257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+                                  8193, 12289, 16385, 24577};
+static const UBYTE z_dextra[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+                                   7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+static BOOL z_ready;
+
+static UWORD z_rev(UWORD code, LONG len)
+{
+    UWORD r = 0;
+
+    while (len-- > 0) {
+        r = r << 1 | (code & 1);
+        code >>= 1;
+    }
+    return r;
+}
+
+/* The fixed codes, bit reversed: the stream is filled from the low bit up. */
+static void z_tables(void)
+{
+    LONG i, l;
+
+    Forbid();
+    if (!z_ready) {
+        for (i = 0; i < 288; i++) {
+            if (i < 144) z_lcode[i] = z_rev(0x30 + i, 8), z_llen[i] = 8;
+            else if (i < 256) z_lcode[i] = z_rev(0x190 + i - 144, 9), z_llen[i] = 9;
+            else if (i < 280) z_lcode[i] = z_rev(i - 256, 7), z_llen[i] = 7;
+            else z_lcode[i] = z_rev(0xC0 + i - 280, 8), z_llen[i] = 8;
+        }
+        for (i = 0; i < 30; i++)
+            z_dcode[i] = z_rev(i, 5);
+        for (l = 3, i = 0; l <= 258; l++) {
+            while (i < 28 && l >= z_lbase[i + 1])
+                i++;
+            z_lsym[l] = i;
+        }
+        z_ready = TRUE;
+    }
+    Permit();
+}
+
+static void z_free(struct zpack *z)
+{
+    if (!z)
+        return;
+    FreeVec(z->buf);
+    FreeVec(z->head);
+    FreeVec(z->prev);
+    FreeVec(z->out);
+    FreeVec(z);
+}
+
+/* out holds osize bytes; a block of n bytes needs n + n / 8 + 64. */
+static struct zpack *z_new(LONG level, LONG osize)
+{
+    struct zpack *z = AllocVec(sizeof(*z), MEMF_CLEAR);
+
+    z_tables();
+    if (!z)
+        return NULL;
+    z->level = level;
+    z->buf = AllocVec(Z_BUF, MEMF_ANY);
+    z->head = AllocVec(Z_HASH * 4, MEMF_CLEAR);
+    z->out = AllocVec(osize, MEMF_ANY);
+    if (level > 1)
+        z->prev = AllocVec(Z_WIN * 4, MEMF_CLEAR);
+    if (!z->buf || !z->head || !z->out || (level > 1 && !z->prev)) {
+        z_free(z);
+        return NULL;
+    }
+    return z;
+}
+
+/* A new stream: what came before is out of reach for matches. */
+static void z_start(struct zpack *z)
+{
+    z->floor = z->base + z->have;
+    z->bits = 0;
+    z->nbits = 0;
+    z->olen = 0;
+}
+
+static void z_put(struct zpack *z, ULONG v, LONG n)
+{
+    z->bits |= v << z->nbits;
+    z->nbits += n;
+    while (z->nbits >= 8) {
+        z->out[z->olen++] = (UBYTE)z->bits;
+        z->bits >>= 8;
+        z->nbits -= 8;
+    }
+}
+
+static void z_byte_align(struct zpack *z)
+{
+    if (z->nbits > 0)
+        z_put(z, 0, 8 - z->nbits);
+}
+
+#define Z_HASH_OF(p) ((((ULONG)(p)[0] << 10) ^ ((ULONG)(p)[1] << 5) ^ (p)[2]) & (Z_HASH - 1))
+
+static void z_insert(struct zpack *z, LONG i)
+{
+    ULONG h = Z_HASH_OF(z->buf + i), pos = z->base + i;
+
+    if (z->prev)
+        z->prev[pos & (Z_WIN - 1)] = z->head[h];
+    z->head[h] = pos + 1;
+}
+
+/* The longest match for buf[i] among earlier positions; *dist gets its distance. */
+static LONG z_match(struct zpack *z, LONG i, LONG end, LONG *dist)
+{
+    ULONG pos = z->base + i, cand = z->head[Z_HASH_OF(z->buf + i)];
+    ULONG lowest = pos > (ULONG)Z_WIN ? pos - Z_WIN : 0;
+    LONG best = 0, chain = z->prev ? Z_CHAIN : 1, max = end - i, n;
+    const UBYTE *a = z->buf + i, *b;
+
+    if (lowest < z->floor) lowest = z->floor;
+    if (lowest < z->base) lowest = z->base;
+    if (max > 258) max = 258;
+    while (cand && chain-- > 0) {
+        ULONG c = cand - 1;
+        if (c < lowest || c >= pos)
+            break;
+        b = z->buf + (c - z->base);
+        if (b[best] == a[best] && b[0] == a[0]) {
+            for (n = 0; n < max && a[n] == b[n]; n++)
+                ;
+            if (n > best) {
+                best = n;
+                *dist = pos - c;
+                if (n >= max || n >= Z_NICE)
+                    break;
+            }
+        }
+        if (!z->prev)
+            break;
+        cand = z->prev[c & (Z_WIN - 1)];
+    }
+    return best >= 3 ? best : 0;
+}
+
+static void z_literal(struct zpack *z, LONG c)
+{
+    z_put(z, z_lcode[c], z_llen[c]);
+}
+
+static void z_copy(struct zpack *z, LONG len, LONG dist)
+{
+    LONG s = z_lsym[len], d = 0;
+
+    z_put(z, z_lcode[257 + s], z_llen[257 + s]);
+    if (z_lextra[s])
+        z_put(z, len - z_lbase[s], z_lextra[s]);
+    while (d < 29 && dist >= z_dbase[d + 1])
+        d++;
+    z_put(z, z_dcode[d], 5);
+    if (z_dextra[d])
+        z_put(z, dist - z_dbase[d], z_dextra[d]);
+}
+
+/* n bytes (at most Z_WIN) as one block onto out; last closes the stream. */
+static void z_block(struct zpack *z, const UBYTE *data, LONG n, BOOL last)
+{
+    LONG i, start, end, olen = z->olen, nbits = z->nbits, len, dist, len2, dist2;
+    ULONG bits = z->bits;
+    BOOL try = z->stored < 2 || (z->stored & 7) == 0;
+
+    if (z->have + n > Z_BUF) {  /* keep the last window, drop the rest */
+        LONG keep = z->have > Z_WIN ? Z_WIN : z->have;
+        memmove(z->buf, z->buf + z->have - keep, keep);
+        z->base += z->have - keep;
+        z->have = keep;
+    }
+    start = z->have;
+    if (n)
+        CopyMem((APTR)data, z->buf + start, n);
+    z->have += n;
+    end = start + n;
+    if (try) {
+        z_put(z, last ? 1 : 0, 1);
+        z_put(z, 1, 2);  /* fixed codes */
+        for (i = start; i < end;) {
+            len = i + 2 < end ? z_match(z, i, end, &dist) : 0;
+            if (len && z->level > 1 && len < Z_NICE && i + 3 < end) {
+                z_insert(z, i);
+                len2 = z_match(z, i + 1, end, &dist2);
+                if (len2 > len) {  /* one later is better: a literal first */
+                    z_literal(z, z->buf[i]);
+                    i++;
+                    len = len2, dist = dist2;
+                }
+            } else if (i + 2 < end)
+                z_insert(z, i);
+            if (len) {
+                LONG k, stop = i + len;
+                z_copy(z, len, dist);
+                for (k = i + 1; k < stop && k + 2 < end; k++)
+                    if (z->level > 1 || len <= 16)
+                        z_insert(z, k);
+                i = stop;
+            } else {
+                z_literal(z, z->buf[i]);
+                i++;
+            }
+        }
+        z_literal(z, 256);
+    }
+    /* Stored costs n + 4 bytes plus the header; take it when it is shorter. */
+    if (!try || (z->olen - olen) * 8 + z->nbits - nbits > (n + 5) * 8 + 8) {
+        z->olen = olen;
+        z->bits = bits;
+        z->nbits = nbits;
+        z->stored++;
+        if (!try)
+            for (i = start; i + 2 < end; i += 4)  /* keep some of it findable */
+                z_insert(z, i);
+        z_put(z, last ? 1 : 0, 1);
+        z_put(z, 0, 2);
+        z_byte_align(z);
+        z->out[z->olen++] = (UBYTE)n;
+        z->out[z->olen++] = (UBYTE)(n >> 8);
+        z->out[z->olen++] = (UBYTE)~n;
+        z->out[z->olen++] = (UBYTE)(~n >> 8);
+        CopyMem(z->buf + start, z->out + z->olen, n);
+        z->olen += n;
+    } else
+        z->stored = 0;
+    if (last)
+        z_byte_align(z);
+}
+
+static UBYTE *zpack_out(struct zpack *z)
+{
+    return z->out;
+}
+
+static LONG zpack_level(struct zpack *z)
+{
+    return z->level;
+}
+
+/* One whole stream from data into z->out: for a tile. Returns its length. */
+static LONG z_pack(struct zpack *z, const UBYTE *data, LONG n)
+{
+    z_start(z);
+    z_block(z, data, n, TRUE);
+    return z->olen;
+}
+
+/* ---- inflate ------------------------------------------------------------ */
+
+/* Unpacks a raw deflate stream that comes from a socket (or memory, for the
+ * speed test) into a file. Decoding goes code length by code length, as the
+ * RFC lays out canonical codes. */
+struct huff {
+    UWORD count[16];
+    UWORD symbol[320];
+};
+
+struct zin {
+    struct link *l;     /* source, or mem */
+    const UBYTE *mem;
+    ULONG left;         /* compressed bytes still to come */
+    UBYTE *ibuf;
+    LONG ipos, ilen;
+    ULONG bits;
+    LONG nbits;
+    BOOL bad, dead;     /* bad data; dead link */
+    UBYTE *win;         /* 64 KB ring, written out by halves */
+    ULONG wpos, flushed;
+    BPTR fh;            /* 0: thrown away */
+    LONG err;
+    struct huff lit, dist;
+};
+
+#define ZIN_BUF 4096
+
+static LONG zi_byte(struct zin *z)
+{
+    if (z->mem) {
+        if (!z->left) {
+            z->bad = TRUE;
+            return 0;
+        }
+        z->left--;
+        return *z->mem++;
+    }
+    if (z->ipos == z->ilen) {
+        LONG n = z->left > ZIN_BUF ? ZIN_BUF : z->left;
+        if (!n || z->dead) {
+            z->bad = TRUE;
+            return 0;
+        }
+        if (!l_recv(z->l, z->ibuf, n, IO_SECONDS)) {
+            z->dead = z->bad = TRUE;
+            return 0;
+        }
+        z->left -= n;
+        z->ipos = 0;
+        z->ilen = n;
+    }
+    return z->ibuf[z->ipos++];
+}
+
+static ULONG zi_bits(struct zin *z, LONG n)
+{
+    ULONG v;
+
+    while (z->nbits < n) {
+        z->bits |= (ULONG)zi_byte(z) << z->nbits;
+        z->nbits += 8;
+    }
+    v = z->bits & ((1UL << n) - 1);
+    z->bits >>= n;
+    z->nbits -= n;
+    return v;
+}
+
+static void zi_flush(struct zin *z, ULONG upto)
+{
+    while (z->flushed < upto) {
+        ULONG at = z->flushed & 0xFFFF, n = upto - z->flushed;
+        if (n > 0x10000 - at)
+            n = 0x10000 - at;
+        if (z->fh && !z->err && Write(z->fh, z->win + at, n) != (LONG)n)
+            z->err = IoErr() ? IoErr() : ERROR_DISK_FULL;
+        z->flushed += n;
+    }
+}
+
+static void zi_out(struct zin *z, UBYTE c)
+{
+    z->win[z->wpos & 0xFFFF] = c;
+    if ((++z->wpos & 0x7FFF) == 0)
+        zi_flush(z, z->wpos);
+}
+
+/* Canonical code from lengths; FALSE for a set that can't be a code. */
+static BOOL zi_build(struct huff *h, const UBYTE *len, LONG n)
+{
+    UWORD offs[16];
+    LONG i, left = 1;
+
+    memset(h->count, 0, sizeof(h->count));
+    for (i = 0; i < n; i++)
+        h->count[len[i]]++;
+    h->count[0] = 0;
+    for (i = 1; i < 16; i++) {
+        left = (left << 1) - h->count[i];
+        if (left < 0)
+            return FALSE;
+    }
+    offs[1] = 0;
+    for (i = 1; i < 15; i++)
+        offs[i + 1] = offs[i] + h->count[i];
+    for (i = 0; i < n; i++)
+        if (len[i])
+            h->symbol[offs[len[i]]++] = i;
+    return TRUE;
+}
+
+static LONG zi_decode(struct zin *z, struct huff *h)
+{
+    LONG code = 0, first = 0, index = 0, len, count;
+
+    for (len = 1; len < 16; len++) {
+        code |= zi_bits(z, 1);
+        count = h->count[len];
+        if (code - first < count)
+            return h->symbol[index + code - first];
+        index += count;
+        first = (first + count) << 1;
+        code <<= 1;
+        if (z->bad)
+            break;
+    }
+    z->bad = TRUE;
+    return 256;
+}
+
+static void zi_codes(struct zin *z)
+{
+    LONG sym, len, dist;
+
+    while (!z->bad) {
+        sym = zi_decode(z, &z->lit);
+        if (sym < 256)
+            zi_out(z, sym);
+        else if (sym == 256)
+            return;
+        else {
+            sym -= 257;
+            if (sym >= 29) {
+                z->bad = TRUE;
+                return;
+            }
+            len = z_lbase[sym] + zi_bits(z, z_lextra[sym]);
+            sym = zi_decode(z, &z->dist);
+            if (sym >= 30) {
+                z->bad = TRUE;
+                return;
+            }
+            dist = z_dbase[sym] + zi_bits(z, z_dextra[sym]);
+            if ((ULONG)dist > z->wpos || dist > Z_WIN) {
+                z->bad = TRUE;
+                return;
+            }
+            while (len-- > 0)
+                zi_out(z, z->win[(z->wpos - dist) & 0xFFFF]);
+        }
+    }
+}
+
+static void zi_fixed(struct zin *z)
+{
+    UBYTE len[320];
+    LONG i;
+
+    for (i = 0; i < 288; i++)
+        len[i] = i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8;
+    zi_build(&z->lit, len, 288);
+    for (i = 0; i < 30; i++)
+        len[i] = 5;
+    zi_build(&z->dist, len, 30);
+}
+
+static void zi_dynamic(struct zin *z)
+{
+    static const UBYTE order[19] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+    UBYTE len[320];
+    LONG nlen = zi_bits(z, 5) + 257, ndist = zi_bits(z, 5) + 1, ncode = zi_bits(z, 4) + 4, i, sym, rep;
+
+    if (nlen > 286 || ndist > 30) {
+        z->bad = TRUE;
+        return;
+    }
+    memset(len, 0, 19);
+    for (i = 0; i < ncode; i++)
+        len[order[i]] = zi_bits(z, 3);
+    if (!zi_build(&z->lit, len, 19)) {
+        z->bad = TRUE;
+        return;
+    }
+    for (i = 0; i < nlen + ndist && !z->bad;) {
+        sym = zi_decode(z, &z->lit);
+        if (sym < 16)
+            len[i++] = sym;
+        else {
+            UBYTE v = 0;
+            if (sym == 16) {
+                if (!i) {
+                    z->bad = TRUE;
+                    return;
+                }
+                v = len[i - 1];
+                rep = 3 + zi_bits(z, 2);
+            } else if (sym == 17)
+                rep = 3 + zi_bits(z, 3);
+            else
+                rep = 11 + zi_bits(z, 7);
+            if (i + rep > nlen + ndist) {
+                z->bad = TRUE;
+                return;
+            }
+            while (rep-- > 0)
+                len[i++] = v;
+        }
+    }
+    if (z->bad || !zi_build(&z->lit, len, nlen) || !zi_build(&z->dist, len + nlen, ndist))
+        z->bad = TRUE;
+}
+
+/* The whole stream of size bytes. All of it is taken from the link, also after
+ * an error, so the next request lines up. FALSE when the link broke. */
+static BOOL zi_run(struct zin *z)
+{
+    LONG last, type, n;
+
+    do {
+        last = zi_bits(z, 1);
+        type = zi_bits(z, 2);
+        if (type == 0) {  /* stored */
+            z->bits = 0;
+            z->nbits = 0;
+            n = zi_byte(z);
+            n |= zi_byte(z) << 8;
+            zi_byte(z);
+            zi_byte(z);
+            while (n-- > 0 && !z->bad)
+                zi_out(z, zi_byte(z));
+        } else if (type == 1) {
+            zi_fixed(z);
+            zi_codes(z);
+        } else if (type == 2) {
+            zi_dynamic(z);
+            zi_codes(z);
+        } else
+            z->bad = TRUE;
+    } while (!last && !z->bad);
+    zi_flush(z, z->wpos);
+    if (!z->mem && !z->dead && z->left)
+        z->dead = !l_skip(z->l, z->left, IO_SECONDS);
+    return !z->dead;
+}
+
+static struct zin *zi_new(void)
+{
+    struct zin *z = AllocVec(sizeof(*z), MEMF_CLEAR);
+
+    if (z && (!(z->win = AllocVec(0x10000, MEMF_ANY)) || !(z->ibuf = AllocVec(ZIN_BUF, MEMF_ANY)))) {
+        FreeVec(z->win);
+        FreeVec(z);
+        z = NULL;
+    }
+    return z;
+}
+
+static void zi_free(struct zin *z)
+{
+    if (z) {
+        FreeVec(z->win);
+        FreeVec(z->ibuf);
+        FreeVec(z);
+    }
+}
+
+/* WRITE with packed data: inflate size bytes from the link into fh (0: only
+ * take them). *err gets -1 for bad data, or the DOS error. */
+static BOOL zi_into(struct link *l, ULONG size, BPTR fh, LONG *err)
+{
+    struct zin *z = zi_new();
+    BOOL alive;
+
+    if (!z) {
+        *err = ERROR_NO_FREE_STORE;
+        return l_skip(l, size, IO_SECONDS);
+    }
+    z->l = l;
+    z->left = size;
+    z->fh = fh;
+    alive = zi_run(z);
+    if (alive && !*err)
+        *err = z->bad ? -1 : z->err;
+    zi_free(z);
+    return alive;
+}
+
+/* ---- how fast this Amiga packs ------------------------------------------ */
+
+/* KB/s for deflate level 1, level 2 and inflate (pack_rate), measured once on
+ * text-like data: the PC packs only when that beats the line. */
+
+static ULONG eclock_us(struct EClockVal *a)
+{
+    struct EClockVal b;
+    ULONG hz = ReadEClock(&b);
+    unsigned long long t = (((unsigned long long)b.ev_hi << 32) | b.ev_lo) -
+                           (((unsigned long long)a->ev_hi << 32) | a->ev_lo);
+    return hz ? (ULONG)(t * 1000000ULL / hz) : 0;
+}
+
+static void measure_pack(void)
+{
+    static const char *const words[] = {"Workbench", "  ", "Copy", "ALL", "QUIET", "SYS:", "Libs/",
+                                        "\n", "amigent", "1994", "dir", " ", "the", "and", "Disk",
+                                        ".info", "0", "12", "LIBS:", "devs", "  ", "\t", "rwed"};
+    UBYTE *sample = AllocVec(8192, MEMF_ANY);
+    struct zpack *z = NULL;
+    struct zin *zi = NULL;
+    struct EClockVal start;
+    ULONG seed = 12345, us, reps, done, packed = 0;
+    LONG i, n, level;
+
+    if (!sample)
+        return;
+    for (n = 0; n < 8192;) {
+        const char *w;
+        seed = seed * 1103515245UL + 12345;
+        w = words[(seed >> 16) % (sizeof(words) / sizeof(words[0]))];
+        for (; *w && n < 8192; w++)
+            sample[n++] = *w;
+    }
+    for (level = 1; level <= 2; level++) {
+        if (!(z = z_new(level, 8192 + 2048)))
+            break;
+        reps = 1;
+        do {  /* until it took long enough to tell */
+            ReadEClock(&start);
+            for (i = 0; i < reps; i++)
+                z_pack(z, sample, 8192);
+            us = eclock_us(&start);
+            done = reps;
+            reps *= 4;
+        } while (us < 50000 && reps < 4096);
+        pack_rate[level - 1] = us ? (ULONG)((unsigned long long)done * 8 * 1000000ULL / us) : 999999;
+        if (level == 2 && (zi = zi_new())) {
+            packed = z->olen;
+            reps = 1;
+            do {
+                ReadEClock(&start);
+                for (i = 0; i < reps; i++) {
+                    zi->mem = z->out;
+                    zi->left = packed;
+                    zi->ipos = zi->ilen = zi->nbits = 0;
+                    zi->bits = zi->wpos = zi->flushed = 0;
+                    zi->bad = FALSE;
+                    zi_run(zi);
+                }
+                us = eclock_us(&start);
+                done = reps;
+                reps *= 4;
+            } while (us < 50000 && reps < 4096);
+            pack_rate[2] = !zi->bad && us ? (ULONG)((unsigned long long)done * 8 * 1000000ULL / us) : 0;
+            zi_free(zi);
+        }
+        z_free(z);
+    }
+    FreeVec(sample);
+}
+
+/* ---- packed replies on a command channel --------------------------------- */
+
+/* After COMPRESS, bulk replies come as frames of one deflate stream: u32
+ * length and data, ended by a frame of length 0. */
+static BOOL z_frame(struct link *l, struct zpack *z, const UBYTE *data, LONG n, BOOL last)
+{
+    UBYTE head[4];
+
+    z_block(z, data, n, last);
+    if (!z->olen)
+        return TRUE;
+    be32(head, z->olen);
+    if (!l_send(l, head, 4, IO_SECONDS) || !l_send(l, z->out, z->olen, IO_SECONDS))
+        return FALSE;
+    z->olen = 0;
+    return last ? l_send(l, "\0\0\0\0", 4, IO_SECONDS) : TRUE;
+}
+
+/* A buffer as packed frames. */
+static BOOL z_send(struct link *l, const UBYTE *data, ULONG len)
+{
+    struct zpack *z = l->zp;
+    ULONG n;
+
+    z_start(z);
+    do {
+        n = len > (ULONG)CHUNK ? CHUNK : len;
+        if (!z_frame(l, z, data, n, n == len))
+            return FALSE;
+        data += n;
+        len -= n;
+    } while (len > 0);
+    return TRUE;
+}
+
+/* size bytes of an open file as packed frames; FALSE when the link broke. */
+static BOOL z_send_file(struct link *l, BPTR fh, ULONG size, UBYTE *buf)
+{
+    struct zpack *z = l->zp;
+    LONG n;
+
+    z_start(z);
+    do {
+        n = size > (ULONG)CHUNK ? CHUNK : size;
+        if (n && Read(fh, buf, n) != n)
+            return FALSE;  /* the size is out already: only a broken link tells */
+        if (!z_frame(l, z, buf, n, (ULONG)n == size))
+            return FALSE;
+        size -= n;
+    } while (size > 0);
+    return TRUE;
+}
+
+/* COMPRESS: 0 off, 1 fast, 2 best. */
+static BOOL c_compress(struct link *l, LONG level)
+{
+    if (l->zp && (level == 0 || l->zp->level != level)) {
+        z_free(l->zp);
+        l->zp = NULL;
+    }
+    if (level > 2)
+        level = 2;
+    if (level && !l->zp && !(l->zp = z_new(level, CHUNK + CHUNK / 8 + 1024)))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    return c_ok(l);
+}
+
+/* ---- hooks: what programs draw, and their debug output -------------------- */
+
+/* Each patched function gets a stub of its own in front, from amiga/hookstub.s:
+ * it counts itself busy, calls our hook while one is set, and goes on to the
+ * original with all registers as they came. Stubs are never freed, since a task
+ * may have just stepped into one when the vector goes back; when a later patch
+ * sits on top, the vector can't go back at all and the stub stays in the chain,
+ * passing calls through. Either way the next amigentd finds them by name. */
+static const UBYTE stub_code[60] = {
+    0x48, 0xe7, 0xff, 0xfe, 0x4b, 0xfa, 0x00, 0x26, 0x52, 0xad, 0x00, 0x04, 0x2e, 0x15, 0x67, 0x0c,
+    0x28, 0x47, 0x2f, 0x0f, 0x4e, 0x94, 0x58, 0x8f, 0x4b, 0xfa, 0x00, 0x12, 0x53, 0xad, 0x00, 0x04,
+    0x4c, 0xdf, 0x7f, 0xff, 0x2f, 0x3a, 0x00, 0x0e, 0x4e, 0x75, 0x4e, 0x71, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0x41, 0x4d, 0x48, 0x54};
+#define STUB_HOOK 44
+#define STUB_BUSY 48
+#define STUB_ORIG 52
+#define STUB_SIZE 64
+
+enum { H_TEXT, H_RECTFILL, H_ERASE, H_SETRAST, H_SCROLL, H_SCROLLBF, H_DELLAYER, H_RAWPUT, HOOKS };
+#define HOOKS_NAME "amigent hooks 1"
+
+struct hookset {
+    struct SignalSemaphore sem;  /* whoever holds it owns the hooks */
+    UBYTE *stub[HOOKS];
+    UBYTE in_chain[HOOKS];
+    char name[20];
+};
+
+static struct hookset *hooks;
+static BOOL hooks_owned, no_text, no_debug;
+static struct Library *LayersBase;
+
+static struct Library *hook_lib(LONG i)
+{
+    return i == H_RAWPUT ? (struct Library *)SysBase : i == H_DELLAYER ? LayersBase : (struct Library *)GfxBase;
+}
+
+static LONG hook_lvo(LONG i)
+{
+    static const WORD lvo[HOOKS] = {-60, -306, -810, -234, -396, -1002, -90, -516};
+    return lvo[i];
+}
+
+static void set_hook(LONG i, void (*fn)(ULONG *))
+{
+    struct Library *lib = hook_lib(i);
+    UBYTE *s;
+
+    if (!lib || (i == H_SCROLLBF && lib->lib_Version < 39))
+        return;
+    if (!(s = hooks->stub[i])) {
+        if (!(s = AllocMem(STUB_SIZE, MEMF_PUBLIC)))
+            return;
+        CopyMem((APTR)stub_code, s, sizeof(stub_code));
+        hooks->stub[i] = s;
+        CacheClearU();
+    }
+    Disable();  /* RawPutChar is called from interrupts: no call may see half of it */
+    *(ULONG *)(s + STUB_HOOK) = (ULONG)fn;
+    if (!hooks->in_chain[i]) {
+        /* The jump table holds JMP abs.l: the original is the address after it. */
+        *(ULONG *)(s + STUB_ORIG) = *(ULONG *)((UBYTE *)lib + hook_lvo(i) + 2);
+        SetFunction(lib, hook_lvo(i), (APTR)s);
+        hooks->in_chain[i] = 1;
+    }
+    CacheClearU();
+    Enable();
+}
+
+static void unhook_all(void)
+{
+    LONG i, k;
+    BOOL busy;
+
+    if (!hooks_owned)
+        return;
+    Disable();
+    for (i = 0; i < HOOKS; i++) {
+        UBYTE *s = hooks->stub[i];
+        if (!s)
+            continue;
+        *(ULONG *)(s + STUB_HOOK) = 0;
+        if (hooks->in_chain[i]) {
+            struct Library *lib = hook_lib(i);
+            APTR now = SetFunction(lib, hook_lvo(i), *(APTR *)(s + STUB_ORIG));
+            if (now == (APTR)s)
+                hooks->in_chain[i] = 0;
+            else
+                SetFunction(lib, hook_lvo(i), now);  /* someone patched on top: stay */
+        }
+    }
+    CacheClearU();
+    Enable();
+    for (k = 0; k < 250; k++) {  /* nobody may be in our code when it goes */
+        busy = FALSE;
+        for (i = 0; i < HOOKS; i++)
+            if (hooks->stub[i] && *(volatile ULONG *)(hooks->stub[i] + STUB_BUSY))
+                busy = TRUE;
+        if (!busy)
+            break;
+        Delay(1);
+    }
+    ReleaseSemaphore(&hooks->sem);
+    hooks_owned = FALSE;
+}
+
+/* ---- text on the screen -------------------------------------------------- */
+
+/* What Text() drew, per layer, in layer coordinates; RectFill and EraseRect
+ * wipe it, ScrollRaster moves it, SetRast and DeleteLayer clear the layer.
+ * Fixed width runs are kept to the character, so a Shell typing letter by
+ * letter or deleting one comes out as one line. Only layers of windows count:
+ * clocks and docks drawing into layers of their own would fill the store. */
+#define TX_LEN 40
+#define TX_BUCKETS 64
+#define TX_OLD 64
+
+struct tx {
+    struct tx *next;
+    struct Layer *layer;
+    WORD x, y, w, h;  /* box in the layer; y is the top, not the baseline */
+    UWORD cw;         /* character width of a fixed width font, 0 otherwise */
+    UBYTE len, pad;
+    UBYTE s[TX_LEN];
+};
+
+static struct tx *tx_pool, *tx_free, *tx_head[TX_BUCKETS];
+static LONG tx_size;
+static ULONG tx_used, tx_evicted, tx_since, tx_gen;
+static struct Window *tx_old[TX_OLD];  /* open before recording started */
+
+#define TX_BUCKET(l) ((((ULONG)(l)) >> 6) & (TX_BUCKETS - 1))
+
+static void tx_drop(struct tx **at)
+{
+    struct tx *e = *at;
+
+    *at = e->next;
+    e->next = tx_free;
+    tx_free = e;
+    tx_used--;
+}
+
+static void tx_remove(struct tx *e)
+{
+    struct tx **at = &tx_head[TX_BUCKET(e->layer)];
+
+    while (*at && *at != e)
+        at = &(*at)->next;
+    if (*at)
+        tx_drop(at);
+}
+
+/* A free entry at the end of the layer's bucket; full, the oldest goes if
+ * evict is set (not while a caller walks a bucket). */
+static struct tx *tx_new(struct Layer *ly, BOOL evict)
+{
+    struct tx **at, *e;
+    LONG b = TX_BUCKET(ly), k;
+
+    if (!tx_free) {
+        if (!evict)
+            return NULL;
+        for (k = 0; k < TX_BUCKETS && !tx_head[(b + k) & (TX_BUCKETS - 1)]; k++)
+            ;
+        if (k == TX_BUCKETS)
+            return NULL;
+        tx_drop(&tx_head[(b + k) & (TX_BUCKETS - 1)]);
+        tx_evicted++;
+    }
+    e = tx_free;
+    tx_free = e->next;
+    tx_used++;
+    e->next = NULL;
+    e->layer = ly;
+    for (at = &tx_head[b]; *at; at = &(*at)->next)
+        ;
+    *at = e;
+    return e;
+}
+
+static BOOL tx_blank(const struct tx *e)
+{
+    LONG i;
+
+    for (i = 0; i < e->len; i++)
+        if (e->s[i] != ' ')
+            return FALSE;
+    return TRUE;
+}
+
+/* The fixed width run e loses characters from..to-1; what is right of them
+ * becomes an entry of its own, unless it is blank. The caller drops e when
+ * nothing is left of it. */
+static void tx_cut(struct tx *e, LONG from, LONG to)
+{
+    struct tx *r;
+    LONG i;
+
+    for (i = to; i < e->len && e->s[i] == ' '; i++)
+        ;
+    if (i < e->len && (r = tx_new(e->layer, FALSE))) {
+        r->cw = e->cw;
+        r->y = e->y;
+        r->h = e->h;
+        r->x = e->x + to * e->cw;
+        r->len = e->len - to;
+        r->w = r->len * e->cw;
+        CopyMem(e->s + to, r->s, r->len);
+    }
+    e->len = from;
+    e->w = from * e->cw;
+}
+
+/* Text within x0..x1, y0..y1 (inclusive, layer coordinates) is gone. A box
+ * that covers less than half of a run's height leaves it: an underline. */
+static void tx_clear(struct Layer *ly, LONG x0, LONG y0, LONG x1, LONG y1)
+{
+    struct tx **at = &tx_head[TX_BUCKET(ly)], *e;
+
+    while ((e = *at)) {
+        LONG top, bottom;
+
+        if (e->layer != ly) {
+            at = &e->next;
+            continue;
+        }
+        if (!e->len) {
+            tx_drop(at);
+            continue;
+        }
+        top = y0 > e->y ? y0 : e->y;
+        bottom = y1 < e->y + e->h - 1 ? y1 : e->y + e->h - 1;
+        if (x1 < e->x || x0 >= e->x + e->w || (bottom - top + 1) * 2 < e->h) {
+            at = &e->next;
+            continue;
+        }
+        if (e->cw) {  /* the characters whose middle lies inside go */
+            LONG half = e->cw / 2, a = x0 - e->x - half + e->cw - 1, b = x1 - e->x - half;
+            a = a < 0 ? 0 : a / e->cw;
+            b = b < 0 ? -1 : b / e->cw;
+            if (b >= e->len)
+                b = e->len - 1;
+            if (a <= b)
+                tx_cut(e, a, b + 1);
+            if (e->len && !tx_blank(e)) {
+                at = &e->next;
+                continue;
+            }
+        }
+        tx_drop(at);
+    }
+}
+
+/* Fixed width runs that straddle column x are split there. */
+static void tx_split(struct Layer *ly, LONG x)
+{
+    struct tx *e;
+    LONG k;
+
+    for (e = tx_head[TX_BUCKET(ly)]; e; e = e->next)
+        if (e->layer == ly && e->cw && e->x < x && x < e->x + e->w) {
+            k = (x - e->x + e->cw / 2) / e->cw;
+            if (k > 0 && k < e->len)
+                tx_cut(e, k, k);  /* left keeps 0..k-1, the right part is new */
+        }
+}
+
+static void tx_layer_gone(struct Layer *ly)
+{
+    struct tx **at = &tx_head[TX_BUCKET(ly)];
+
+    while (*at)
+        if ((*at)->layer == ly)
+            tx_drop(at);
+        else
+            at = &(*at)->next;
+}
+
+/* regs: d0-d7 are r[0..7], a0-a6 r[8..14] */
+static void h_text(ULONG *r)
+{
+    struct RastPort *rp = (struct RastPort *)r[9];
+    struct Layer *ly = rp->Layer;
+    struct TextFont *f = rp->Font;
+    const UBYTE *s = (const UBYTE *)r[8];
+    LONG n = (LONG)r[0], cw, x, y, h, i, k, total = 0, piece;
+    WORD widths[(1024 + TX_LEN - 1) / TX_LEN];
+    struct tx *e;
+
+    if (!ly || !ly->Window || !f || n <= 0 || !tx_pool)
+        return;
+    if (n > 1024)
+        n = 1024;
+    /* Fixed width fonts may carry kerning tables too, all alike: the flag decides. */
+    cw = f->tf_Flags & FPF_PROPORTIONAL ? 0 : f->tf_XSize + rp->TxSpacing;
+    if (cw < 0)
+        cw = 0;
+    for (i = 0, k = 0; i < n; i += TX_LEN, k++) {
+        piece = n - i > TX_LEN ? TX_LEN : n - i;
+        widths[k] = cw ? piece * cw : TextLength(rp, (STRPTR)s + i, piece);
+        total += widths[k];
+    }
+    if (total <= 0)
+        return;
+    x = rp->cp_x;
+    y = rp->cp_y - f->tf_Baseline;
+    h = f->tf_YSize;
+    Forbid();
+    tx_gen++;
+    tx_clear(ly, x, y, x + total - 1, y + h - 1);
+    for (i = 0, k = 0; i < n; k++) {
+        piece = n - i > TX_LEN ? TX_LEN : n - i;
+        e = NULL;
+        if (cw) {  /* goes on where a run of the same font ends: typing */
+            for (e = tx_head[TX_BUCKET(ly)]; e; e = e->next)
+                if (e->layer == ly && e->cw == cw && e->y == y && e->h == h &&
+                    e->x + e->w == x && e->len < TX_LEN)
+                    break;
+            if (e && e->len + piece > TX_LEN)
+                piece = TX_LEN - e->len;
+        }
+        if (!e && (e = tx_new(ly, TRUE))) {
+            e->x = x;
+            e->y = y;
+            e->h = h;
+            e->cw = cw;
+            e->len = 0;
+            e->w = 0;
+        }
+        if (e) {
+            LONG j;
+            for (j = 0; j < piece; j++) {
+                UBYTE c = s[i + j];
+                e->s[e->len + j] = c < 32 || (c >= 127 && c < 160) ? '?' : c;
+            }
+            e->len += piece;
+            e->w += cw ? piece * cw : widths[k];
+            if (tx_blank(e))
+                tx_remove(e);
+        }
+        x += cw ? piece * cw : widths[k];
+        i += piece;
+    }
+    Permit();
+}
+
+static void h_fill(ULONG *r, BOOL erase)
+{
+    struct RastPort *rp = (struct RastPort *)r[9];
+
+    if (!rp->Layer || !rp->Layer->Window || !tx_pool || (!erase && (rp->DrawMode & COMPLEMENT)))
+        return;
+    Forbid();
+    tx_gen++;
+    tx_clear(rp->Layer, (WORD)r[0], (WORD)r[1], (WORD)r[2], (WORD)r[3]);
+    Permit();
+}
+
+static void h_rectfill(ULONG *r)
+{
+    h_fill(r, FALSE);
+}
+
+static void h_erase(ULONG *r)
+{
+    h_fill(r, TRUE);
+}
+
+static void h_setrast(ULONG *r)
+{
+    struct RastPort *rp = (struct RastPort *)r[9];
+
+    if (rp->Layer && tx_pool) {
+        Forbid();
+        tx_gen++;
+        tx_layer_gone(rp->Layer);
+        Permit();
+    }
+}
+
+static void h_scroll(ULONG *r)
+{
+    struct RastPort *rp = (struct RastPort *)r[9];
+    struct Layer *ly = rp->Layer;
+    LONG dx = (WORD)r[0], dy = (WORD)r[1], x0 = (WORD)r[2], y0 = (WORD)r[3];
+    LONG x1 = (WORD)r[4], y1 = (WORD)r[5];
+    struct tx **at, *e;
+
+    if (!ly || !ly->Window || !tx_pool)
+        return;
+    Forbid();
+    tx_gen++;
+    /* Cut runs where the area starts and ends, and where the part that
+     * leaves it ends: what is shifted out goes, the rest moves. */
+    tx_split(ly, x0);
+    tx_split(ly, x1 + 1);
+    if (dx > 0)
+        tx_split(ly, x0 + dx);
+    else if (dx < 0)
+        tx_split(ly, x1 + 1 + dx);
+    at = &tx_head[TX_BUCKET(ly)];
+    while ((e = *at)) {
+        if (e->layer != ly || e->x > x1 || e->x + e->w - 1 < x0 || e->y > y1 ||
+            e->y + e->h - 1 < y0) {
+            at = &e->next;
+            continue;
+        }
+        if (e->x >= x0 && e->x + e->w - 1 <= x1 && e->y >= y0 && e->y + e->h - 1 <= y1) {
+            e->x -= dx;
+            e->y -= dy;
+            if (e->x >= x0 && e->x + e->w - 1 <= x1 && e->y >= y0 && e->y + e->h - 1 <= y1) {
+                at = &e->next;
+                continue;
+            }
+        }
+        tx_drop(at);  /* cut by the edge or scrolled out */
+    }
+    Permit();
+}
+
+static void h_dellayer(ULONG *r)
+{
+    struct Layer *ly = (struct Layer *)r[9];
+    LONG i;
+
+    if (!ly || !tx_pool)
+        return;
+    Forbid();
+    tx_gen++;
+    tx_layer_gone(ly);
+    for (i = 0; i < TX_OLD; i++)
+        if (ly->Window && tx_old[i] == (struct Window *)ly->Window)
+            tx_old[i] = NULL;
+    Permit();
+}
+
+/* ---- debug output: kprintf, Enforcer, MuForce ------------------------------ */
+
+/* RawPutChar runs anywhere, interrupts and supervisor mode included: a byte
+ * into the ring under Disable, nothing else. */
+#define DBG_SIZE 65536L
+static UBYTE *dbg_ring;
+static volatile ULONG dbg_total;
+
+static void h_rawput(ULONG *r)
+{
+    Disable();
+    dbg_ring[dbg_total & (DBG_SIZE - 1)] = (UBYTE)r[0];
+    dbg_total++;
+    Enable();
+}
+
+static void hooks_start(void)
+{
+    struct Screen *s;
+    struct Window *w;
+    ULONG lock;
+    LONG i, n = 0, size;
+
+    Forbid();
+    hooks = (struct hookset *)FindSemaphore((STRPTR)HOOKS_NAME);
+    if (!hooks && (hooks = AllocMem(sizeof(*hooks), MEMF_PUBLIC | MEMF_CLEAR))) {
+        strcpy(hooks->name, HOOKS_NAME);
+        hooks->sem.ss_Link.ln_Name = hooks->name;
+        AddSemaphore(&hooks->sem);  /* stays for good, like the stubs */
+    }
+    Permit();
+    if (!hooks || hooks_owned || !AttemptSemaphore(&hooks->sem))
+        return;  /* another amigentd on another port has them */
+    hooks_owned = TRUE;
+    if (!no_text) {
+        size = AvailMem(MEMF_ANY) > 4000000 ? 4096 : AvailMem(MEMF_ANY) > 1000000 ? 1024 : 256;
+        if ((tx_pool = AllocVec(size * sizeof(struct tx), MEMF_PUBLIC | MEMF_CLEAR))) {
+            tx_size = size;
+            for (i = 0; i < size; i++) {
+                tx_pool[i].next = tx_free;
+                tx_free = &tx_pool[i];
+            }
+            lock = LockIBase(0);
+            for (s = IntuitionBase->FirstScreen; s; s = s->NextScreen)
+                for (w = s->FirstWindow; w && n < TX_OLD; w = w->NextWindow)
+                    tx_old[n++] = w;
+            UnlockIBase(lock);
+            tx_since = now_ms();
+            set_hook(H_TEXT, h_text);
+            set_hook(H_RECTFILL, h_rectfill);
+            set_hook(H_ERASE, h_erase);
+            set_hook(H_SETRAST, h_setrast);
+            set_hook(H_SCROLL, h_scroll);
+            set_hook(H_SCROLLBF, h_scroll);
+            set_hook(H_DELLAYER, h_dellayer);
+            text_on = TRUE;
+        }
+    }
+    if (!no_debug && (dbg_ring = AllocVec(DBG_SIZE, MEMF_PUBLIC))) {
+        set_hook(H_RAWPUT, h_rawput);
+        debug_on = TRUE;
+    }
+}
+
+static void hooks_stop(void)
+{
+    unhook_all();  /* waits until no task runs our hooks any more */
+    FreeVec(tx_pool);
+    tx_pool = NULL;
+    FreeVec(dbg_ring);
+    dbg_ring = NULL;
+}
+
+/* ---- TEXT: the front screen's text, row by row --------------------------- */
+
+struct row {
+    struct Window *win;
+    LONG x, y, w, h, cw, len;
+    UBYTE s[TX_LEN];
+};
+
+static int row_order(const void *a, const void *b)
+{
+    const struct row *p = a, *q = b;
+
+    if (p->win != q->win)
+        return 0;  /* kept in window order by the collector */
+    if (p->y != q->y)
+        return p->y < q->y ? -1 : 1;
+    if (p->h != q->h)
+        return p->h < q->h ? -1 : 1;
+    return p->x < q->x ? -1 : p->x > q->x;
+}
+
+/* The runs of one window, in screen coordinates, clipped to the window. */
+static LONG tx_collect(struct Window *w, struct row *out, LONG room)
+{
+    struct Layer *layers[2];
+    LONG n = 0, k, i;
+
+    layers[0] = w->WLayer;
+    layers[1] = w->BorderRPort && w->BorderRPort->Layer != w->WLayer ? w->BorderRPort->Layer : NULL;
+    for (k = 0; k < 2; k++) {
+        struct Layer *ly = layers[k];
+        struct tx *e;
+        if (!ly)
+            continue;
+        for (e = tx_head[TX_BUCKET(ly)]; e && n < room; e = e->next) {
+            LONG sx, sy, mx, my;
+            if (e->layer != ly || !e->len)
+                continue;
+            sx = ly->bounds.MinX - ly->Scroll_X + e->x;
+            sy = ly->bounds.MinY - ly->Scroll_Y + e->y;
+            mx = sx + e->w / 2, my = sy + e->h / 2;
+            if (mx < w->LeftEdge || mx >= w->LeftEdge + w->Width || my < w->TopEdge ||
+                my >= w->TopEdge + w->Height)
+                continue;  /* drawn outside, or scrolled out of a bigger layer */
+            out[n].win = w;
+            out[n].x = sx, out[n].y = sy, out[n].w = e->w, out[n].h = e->h, out[n].cw = e->cw;
+            out[n].len = e->len;
+            for (i = 0; i < e->len; i++)
+                out[n].s[i] = e->s[i];
+            n++;
+        }
+    }
+    return n;
+}
+
+static UBYTE lower(UBYTE c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7) ? c + 32 : c;
+}
+
+/* Rows of one window into t as L lines; with match, only the first line that
+ * contains it (any case), and TRUE when there was one. */
+static BOOL tx_lines(struct text *t, struct row *r, LONG n, const UBYTE *match)
+{
+    LONG i = 0, j, k;
+    UBYTE line[1100];
+
+    qsort(r, n, sizeof(*r), row_order);
+    while (i < n) {
+        LONG len = 0, x0 = r[i].x, end = r[i].x, y = r[i].y, h = r[i].h;
+        /* Same row, close together: one line. Far apart they are columns or
+         * buttons of their own, each with its own box to click. */
+        for (j = i; j < n && r[j].y == y && r[j].h == h && (j == i || r[j].x - end <= 2 * h); j++) {
+            LONG gap = r[j].x - end, spaces;
+            if (j > i && gap > 1) {
+                spaces = r[j].cw ? (gap + r[j].cw / 2) / r[j].cw : 1;
+                if (spaces > 40)
+                    spaces = 3;  /* columns far apart: a few spaces tell enough */
+                while (spaces-- > 0 && len < 1024)
+                    line[len++] = ' ';
+            }
+            for (k = 0; k < r[j].len && len < 1024; k++)
+                line[len++] = r[j].s[k];
+            if (r[j].x + r[j].w > end)
+                end = r[j].x + r[j].w;
+        }
+        while (len && line[len - 1] == ' ')
+            len--;
+        line[len] = 0;
+        if (len) {
+            if (match) {
+                LONG m = strlen((const char *)match), a;
+                for (a = 0; a + m <= len; a++) {
+                    for (k = 0; k < m && lower(line[a + k]) == lower(match[k]); k++)
+                        ;
+                    if (k == m)
+                        break;
+                }
+                if (a + m > len) {
+                    i = j;
+                    continue;
+                }
+            }
+            {
+                LONG box[4];
+                box[0] = x0, box[1] = y, box[2] = end - x0, box[3] = h;
+                t_chr(t, 'L');
+                t_tab(t);
+                t_hex(t, (ULONG)r[i].win);
+                t_box(t, box);
+                t_tab(t);
+                t_str(t, line, FALSE);
+                t_chr(t, '\n');
+            }
+            if (match)
+                return TRUE;
+        }
+        i = j;
+    }
+    return FALSE;
+}
+
+static BOOL tx_is_old(struct Window *w)
+{
+    LONG i;
+
+    for (i = 0; i < TX_OLD; i++)
+        if (tx_old[i] == w)
+            return TRUE;
+    return FALSE;
+}
+
+/* Text of the front screen, window by window front to back. With match only
+ * the first line that has it; returns whether one did. */
+static BOOL screen_text(struct text *t, const UBYTE *match)
+{
+    struct Screen *s;
+    struct Layer *l;
+    struct row *rows = tx_size ? AllocVec(tx_size * sizeof(struct row), MEMF_ANY) : NULL;
+    ULONG lock;
+    LONG n;
+    BOOL found = FALSE;
+
+    if (!match) {
+        t_chr(t, 'I');
+        t_tab(t);
+        t_num(t, tx_pool ? (LONG)((now_ms() - tx_since) / 1000) : -1);
+        t_tab(t);
+        t_num(t, tx_evicted);
+        t_tab(t);
+        t_num(t, tx_used);
+        t_tab(t);
+        t_num(t, tx_size);
+        t_chr(t, '\n');
+    }
+    if (!tx_pool)
+        return FALSE;
+    if (!rows) {
+        t->broke = TRUE;
+        return FALSE;
+    }
+    lock = LockIBase(0);
+    s = IntuitionBase->FirstScreen;
+    for (l = s->LayerInfo.top_layer; l && !found; l = l->back) {
+        struct Window *w;
+        LONG box[4];
+
+        for (w = s->FirstWindow; w && w != (struct Window *)l->Window; w = w->NextWindow)
+            ;
+        if (!w || l != w->WLayer)
+            continue;
+        if (!match) {
+            box[0] = w->LeftEdge, box[1] = w->TopEdge, box[2] = w->Width, box[3] = w->Height;
+            t_chr(t, 'W');
+            t_tab(t);
+            t_hex(t, (ULONG)w);
+            t_box(t, box);
+            t_tab(t);
+            if (w == IntuitionBase->ActiveWindow) t_chr(t, 'a');
+            if (w->Flags & WFLG_BACKDROP) t_chr(t, 'b');
+            if (tx_is_old(w)) t_chr(t, 'o');
+            t_tab(t);
+            t_str(t, w->Title, FALSE);
+            t_chr(t, '\n');
+        }
+        Forbid();  /* the hooks change the runs under Forbid only */
+        n = tx_collect(w, rows, tx_size);
+        Permit();
+        found = tx_lines(t, rows, n, match);
+    }
+    UnlockIBase(lock);
+    FreeVec(rows);
+    return found;
+}
+
+/* Another amigentd (on another port) may have had the hooks when this one
+ * started; once it is gone they are free. Asked for text or debug output,
+ * try again, at most every ten seconds. */
+static void hooks_again(void)
+{
+    static ULONG last;
+    static volatile BOOL trying;
+    BOOL mine = FALSE;
+
+    if (hooks_owned)
+        return;
+    Forbid();
+    if (!trying && now_ms() - last > 10000) {
+        trying = mine = TRUE;
+        last = now_ms();
+    }
+    Permit();
+    if (!mine)
+        return;
+    hooks_start();
+    trying = FALSE;
+}
+
+static BOOL c_screen_text(struct link *l)
+{
+    struct text t = {0};
+
+    hooks_again();
+    screen_text(&t, NULL);
+    return c_text(l, &t);
+}
+
+/* ---- WAIT: until a window or a text turns up, or goes ----------------------- */
+
+/* arg: 1 window appears, 2 window gone, 3 text appears, 4 text gone; +8 for 1:
+ * only a window that was not there yet. w = timeout in seconds (at most 3600). */
+#define WAIT_SEEN 32
+
+static struct Window *find_window(const UBYTE *pat, struct Window **seen, LONG nseen, struct text *t)
+{
+    struct Screen *scr;
+    struct Window *win, *found = NULL;
+    ULONG lock = LockIBase(0);
+    LONG k;
+
+    for (scr = IntuitionBase->FirstScreen; scr && !found; scr = scr->NextScreen)
+        for (win = scr->FirstWindow; win && !found; win = win->NextWindow) {
+            if (!win->Title || !MatchPatternNoCase((STRPTR)pat, win->Title))
+                continue;
+            for (k = 0; k < nseen && seen[k] != win; k++)
+                ;
+            if (k < nseen)
+                continue;
+            found = win;
+            if (t) {
+                LONG box[4];
+                box[0] = win->LeftEdge, box[1] = win->TopEdge, box[2] = win->Width, box[3] = win->Height;
+                t_chr(t, 'W');
+                t_tab(t);
+                t_hex(t, (ULONG)win);
+                t_box(t, box);
+                t_tab(t);
+                if (win == IntuitionBase->ActiveWindow) t_chr(t, 'a');
+                if (scr != IntuitionBase->FirstScreen) t_chr(t, 'h');  /* on a screen behind */
+                t_tab(t);
+                t_str(t, win->Title, FALSE);
+                t_chr(t, '\n');
+            }
+        }
+    UnlockIBase(lock);
+    return found;
+}
+
+/* The pattern for a window title, as ACTIVATEWINDOW takes it. */
+static UBYTE *title_pattern(const UBYTE *arg)
+{
+    LONG n = strlen((const char *)arg);
+    UBYTE *src = AllocVec(2 * n + 5, MEMF_ANY), *pat = AllocVec(4 * n + 12, MEMF_ANY), *q;
+    const UBYTE *a;
+    BOOL wild = FALSE;
+
+    if (src && pat) {
+        for (a = arg; *a; a++)
+            if (strchr("#?*()|~[]%'", *a))
+                wild = TRUE;
+        q = src;
+        if (!wild)
+            *q++ = '#', *q++ = '?';
+        for (a = arg; *a; a++)
+            if (*a == '*')
+                *q++ = '#', *q++ = '?';
+            else
+                *q++ = *a;
+        if (!wild)
+            *q++ = '#', *q++ = '?';
+        *q = 0;
+        if (ParsePatternNoCase(src, pat, 4 * n + 12) < 0) {
+            FreeVec(pat);
+            pat = NULL;
+        }
+    } else {
+        FreeVec(pat);
+        pat = NULL;
+    }
+    FreeVec(src);
+    return pat;
+}
+
+static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD secs)
+{
+    struct Window *seen[WAIT_SEEN];
+    struct text t = {0};
+    BOOL alive, got = FALSE;
+    LONG nseen = 0, kind = how & 7;
+    ULONG start = now_ms(), gen = ~0UL;
+    UBYTE *pat = NULL;
+    char *arg = c_name(l, len, &alive);
+
+    if (!alive)
+        return FALSE;
+    if (!arg)
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    if (secs > 3600)
+        secs = 3600;
+    if (kind < 1 || kind > 4 || !len) {
+        FreeVec(arg);
+        return c_fail(l, 1, "bad wait");
+    }
+    if (kind >= 3)
+        hooks_again();
+    if (kind >= 3 && !tx_pool) {
+        FreeVec(arg);
+        return c_fail(l, 1, "no text recording");
+    }
+    if (kind <= 2 && !(pat = title_pattern((UBYTE *)arg))) {
+        FreeVec(arg);
+        return c_fail(l, 1, "bad pattern");
+    }
+    if (kind == 1 && (how & 8)) {  /* only new ones: remember those already there */
+        struct Screen *scr;
+        struct Window *win;
+        ULONG lock = LockIBase(0);
+        for (scr = IntuitionBase->FirstScreen; scr; scr = scr->NextScreen)
+            for (win = scr->FirstWindow; win && nseen < WAIT_SEEN; win = win->NextWindow)
+                if (win->Title && MatchPatternNoCase((STRPTR)pat, win->Title))
+                    seen[nseen++] = win;
+        UnlockIBase(lock);
+    }
+    for (;;) {
+        if (kind == 1)
+            got = find_window(pat, seen, nseen, &t) != NULL;
+        else if (kind == 2)
+            got = find_window(pat, NULL, 0, NULL) == NULL;
+        else if (tx_gen != gen || kind == 4) {
+            gen = tx_gen;
+            t.len = 0;
+            got = screen_text(&t, (UBYTE *)arg);
+            if (kind == 4)
+                got = !got;
+        }
+        if (got || t.broke)
+            break;
+        t.len = 0;
+        if (secs && now_ms() - start >= secs * 1000UL)
+            break;
+        if (wait_ms(100, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
+            FreeVec(t.buf);
+            FreeVec(pat);
+            FreeVec(arg);
+            return FALSE;
+        }
+    }
+    FreeVec(pat);
+    FreeVec(arg);
+    if (!got) {
+        FreeVec(t.buf);
+        return c_fail(l, 2, "timeout");
+    }
+    if (kind == 2 || kind == 4)
+        t.len = 0;
+    return c_text(l, &t);
+}
+
+/* ---- TREE: a whole folder in one answer ------------------------------------ */
+
+/* Lines as DIR has them, with the path below the folder as name; arg 1 adds the
+ * CRC-32 of each file. w = most entries (0: 50000). Folders that can't be read
+ * come as "ERR", path, the error text. */
+#define TREE_DEPTH 24
+
+static ULONG crc_table[256];
+
+static void crc_init(void)
+{
+    ULONG c;
+    LONG i, k;
+
+    if (crc_table[1])
+        return;
+    for (i = 0; i < 256; i++) {
+        for (c = i, k = 0; k < 8; k++)
+            c = c & 1 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+        crc_table[i] = c;
+    }
+}
+
+static LONG crc_file(const char *path, ULONG *out, UBYTE *buf)
+{
+    ULONG crc = 0xFFFFFFFF;
+    BPTR fh = Open((STRPTR)path, MODE_OLDFILE);
+    LONG n, i;
+
+    if (!fh)
+        return IoErr();
+    while ((n = Read(fh, buf, CHUNK)) > 0)
+        for (i = 0; i < n; i++)
+            crc = crc_table[(crc ^ buf[i]) & 0xFF] ^ (crc >> 8);
+    Close(fh);
+    if (n < 0)
+        return IoErr();
+    *out = ~crc;
+    return 0;
+}
+
+static BOOL c_tree(struct link *l, BOOL with_crc, UWORD len, UWORD most)
+{
+    struct FileInfoBlock *fib[TREE_DEPTH];
+    BPTR locks[TREE_DEPTH];
+    LONG depth = 0, count = 0, err = 0, plen[TREE_DEPTH + 1], i;
+    UBYTE *buf = with_crc ? AllocVec(CHUNK, MEMF_ANY) : NULL;
+    char *full = AllocVec(1024, MEMF_ANY);
+    struct text t = {0};
+    BOOL alive, more = FALSE;
+    char *path = c_name(l, len, &alive);
+
+    for (i = 0; i < TREE_DEPTH; i++)
+        fib[i] = NULL;
+    if (!alive) {
+        FreeVec(buf);
+        FreeVec(full);
+        return FALSE;
+    }
+    if (!most)
+        most = 50000;
+    crc_init();
+    if (!path || !full || (with_crc && !buf) || !(fib[0] = AllocDosObject(DOS_FIB, NULL)))
+        err = ERROR_NO_FREE_STORE;
+    else if (!(locks[0] = Lock((STRPTR)path, SHARED_LOCK)))
+        err = IoErr();
+    else if (!Examine(locks[0], fib[0]) || fib[0]->fib_DirEntryType <= 0) {
+        err = fib[0]->fib_DirEntryType <= 0 ? ERROR_OBJECT_WRONG_TYPE : IoErr();
+        UnLock(locks[0]);
+    } else {
+        full[0] = 0;  /* the path below the top, '/' between the parts */
+        plen[0] = 0;
+        depth = 1;
+    }
+    while (depth > 0) {
+        struct FileInfoBlock *f = fib[depth - 1];
+        BPTR here = locks[depth - 1];
+        LONG at, k;
+        BOOL dir;
+
+        if (!ExNext(here, f)) {
+            if (IoErr() != ERROR_NO_MORE_ENTRIES) {
+                t_str(&t, (const UBYTE *)"ERR\t", FALSE);
+                t_str(&t, (const UBYTE *)full, FALSE);
+                t_tab(&t);
+                t_num(&t, IoErr());
+                t_chr(&t, '\n');
+            }
+            UnLock(here);
+            depth--;
+            full[plen[depth]] = 0;
+            continue;
+        }
+        if (count++ >= most) {
+            more = TRUE;
+            while (depth > 0)
+                UnLock(locks[--depth]);
+            break;
+        }
+        at = plen[depth - 1];
+        if (at)
+            full[at++] = '/';
+        for (k = 0; f->fib_FileName[k] && at < 1000; k++)
+            full[at++] = f->fib_FileName[k];
+        full[at] = 0;
+        dir = f->fib_DirEntryType > 0 && f->fib_DirEntryType != ST_SOFTLINK;
+        t_str(&t, (const UBYTE *)(dir ? "DIR" : "FILE"), FALSE);
+        t_tab(&t);
+        t_str(&t, (const UBYTE *)full, FALSE);
+        t_tab(&t);
+        t_num(&t, dir ? 0 : f->fib_Size);
+        t_tab(&t);
+        t_hex(&t, f->fib_Protection);
+        t_tab(&t);
+        t_date(&t, &f->fib_Date);
+        if (with_crc && !dir) {
+            ULONG crc = 0;
+            BPTR old = CurrentDir(here);
+            LONG e = crc_file(f->fib_FileName, &crc, buf);
+            CurrentDir(old);
+            t_tab(&t);
+            if (e)
+                t_chr(&t, '-');
+            else
+                t_hex(&t, crc);
+        }
+        t_chr(&t, '\n');
+        if (dir && depth < TREE_DEPTH) {
+            BPTR old = CurrentDir(here), sub = Lock(f->fib_FileName, SHARED_LOCK);
+            CurrentDir(old);
+            if (sub && !fib[depth])
+                fib[depth] = AllocDosObject(DOS_FIB, NULL);
+            if (sub && fib[depth] && Examine(sub, fib[depth])) {
+                locks[depth] = sub;
+                plen[depth] = at;
+                depth++;
+            } else {
+                if (sub)
+                    UnLock(sub);
+                t_str(&t, (const UBYTE *)"ERR\t", FALSE);
+                t_str(&t, (const UBYTE *)full, FALSE);
+                t_tab(&t);
+                t_num(&t, IoErr());
+                t_chr(&t, '\n');
+            }
+        }
+        full[plen[depth - 1]] = 0;
+    }
+    if (more)
+        t_str(&t, (const UBYTE *)"MORE\n", FALSE);
+    for (i = 0; i < TREE_DEPTH; i++)
+        if (fib[i])
+            FreeDosObject(DOS_FIB, fib[i]);
+    FreeVec(buf);
+    FreeVec(full);
+    FreeVec(path);
+    if (err) {
+        FreeVec(t.buf);
+        return c_fault(l, err);
+    }
+    return c_text(l, &t);
+}
+
+/* ---- DEBUGLOG: what went through RawPutChar -------------------------------- */
+
+/* w/h = the count to start from (high/low word), as the last answer told;
+ * answers u32 count now, u32 length, the bytes since then (at most the ring). */
+static BOOL c_debuglog(struct link *l, ULONG since)
+{
+    UBYTE head[9], *copy;
+    ULONG total, from, n, i;
+    BOOL ok;
+
+    hooks_again();
+    if (!dbg_ring)
+        return c_fail(l, 1, "no debug capture");
+    total = dbg_total;
+    from = since > total || total - since > DBG_SIZE ? (total > DBG_SIZE ? total - DBG_SIZE : 0) : since;
+    n = total - from;
+    if (!(copy = AllocVec(n + 1, MEMF_ANY)))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    for (i = 0; i < n; i++)
+        copy[i] = dbg_ring[(from + i) & (DBG_SIZE - 1)];
+    head[0] = 0;
+    be32(head + 1, total);
+    be32(head + 5, n);
+    ok = l_send(l, head, 9, IO_SECONDS) && l_send(l, copy, n, IO_SECONDS);
+    FreeVec(copy);
+    return ok;
+}
+
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -3481,7 +5369,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_READ_FILE:
         return c_read(l, x);
     case CMD_WRITE_FILE:
-        return c_write(l, c[1] & 1, x, (ULONG)w << 16 | h);
+        return c_write(l, c[1] & 1, (c[1] & 2) != 0, x, (ULONG)w << 16 | h);
     case CMD_DIR:
     case CMD_STAT:
         return c_dir(l, x, c[0] == CMD_STAT);
@@ -3498,6 +5386,16 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_ok(l);
     case CMD_VOLUMES:
         return c_volumes(l);
+    case CMD_TEXT:
+        return c_screen_text(l);
+    case CMD_WAIT:
+        return c_wait(l, c[1], x, w);
+    case CMD_COMPRESS:
+        return c_compress(l, c[1]);
+    case CMD_TREE:
+        return c_tree(l, c[1] & 1, x, w);
+    case CMD_DEBUGLOG:
+        return c_debuglog(l, (ULONG)w << 16 | h);
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
             return FALSE;
@@ -3523,6 +5421,7 @@ static void __saveds channel_main(void)
         struct Library *SocketBase = l.base;
         LONG one = 1, buffer = 32768;
 
+        l.zp = NULL;
         l.fd = ObtainSocket(c->id, AF_INET, SOCK_STREAM, 0);
         if (l.fd < 0)
             l.fd = ObtainSocket(c->id, AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -3538,6 +5437,7 @@ static void __saveds channel_main(void)
             }
             CloseSocket(l.fd);
         }
+        z_free(l.zp);
         CloseLibrary(l.base);
     }
     Forbid();
@@ -3686,6 +5586,7 @@ static BOOL command(const UBYTE *c)
         set_pause(x);
         return reply(0);
     case CMD_FRAME:
+        frame_level = c[1] & 16 ? 2 : c[1] & 8 ? 1 : 0;
         if (c[1] & 2)
             return frame_planar(c[1] & 1, (c[1] & 4) != 0, x, y, w, h);
         return frame(c[1] & 1, x, y, w, h);
@@ -4703,6 +6604,10 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
                 quiet = TRUE;
             if (FindToolType(tt, "TLSONLY"))
                 tls_only = TRUE;
+            if (FindToolType(tt, "NOTEXT"))
+                no_text = TRUE;
+            if (FindToolType(tt, "NODEBUG"))
+                no_debug = TRUE;
             if ((v = FindToolType(tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
@@ -4715,7 +6620,7 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
 
 int main(int argc, char **argv)
 {
-    LONG args[5] = {0, 0, 0, 0, 0};
+    LONG args[7] = {0, 0, 0, 0, 0, 0, 0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -4726,7 +6631,7 @@ int main(int argc, char **argv)
         from_wb = TRUE;
         tool_types((struct WBStartup *)argv, &port);
     } else {
-        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S", args, NULL);
+        rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
@@ -4738,6 +6643,8 @@ int main(int argc, char **argv)
             set_key_file((const char *)args[2]);
         quiet = args[3] != 0;
         tls_only = args[4] != 0;
+        no_text = args[5] != 0;
+        no_debug = args[6] != 0;
         FreeArgs(rda);
     }
 
@@ -4809,6 +6716,10 @@ int main(int argc, char **argv)
     }
     plain_port = port;
     rexx_open(port);
+    /* Without layers.library the text of closed windows would stay: no text then. */
+    if (!(LayersBase = OpenLibrary("layers.library", 37)))
+        no_text = TRUE;
+    hooks_start();
     Forbid();
     children++;
     Permit();
@@ -4847,6 +6758,10 @@ out:
             break;
         Wait(1UL << chan_gone);
     }
+    hooks_stop();  /* no channel looks at the text any more */
+    z_free(frame_z);
+    if (LayersBase)
+        CloseLibrary(LayersBase);
     rexx_close();
     if (chan_gone >= 0)
         FreeSignal(chan_gone);
