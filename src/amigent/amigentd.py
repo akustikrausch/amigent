@@ -634,8 +634,11 @@ class Amigentd:
         items = []
         for f in self._text(CMD_UITREE):
             if f[0] == "S" and len(f) >= 5:
+                # from amigentd 1.3.0 a sixth field: m a menu is open, h windows are held back
+                hold = f[5][:1] if len(f) >= 6 else ""
                 items.append({"kind": "screen", "handle": int(f[1], 16), "width": int(f[2]),
-                              "height": int(f[3]), "title": f[4]})
+                              "height": int(f[3]), "title": f[4],
+                              "held": {"m": "menu", "h": "held"}.get(hold, "")})
             elif f[0] == "W" and len(f) >= 8:
                 items.append({"kind": "window", "id": f[1], "x": int(f[2]), "y": int(f[3]),
                               "w": int(f[4]), "h": int(f[5]), "active": "a" in f[6],
@@ -645,6 +648,15 @@ class Amigentd:
                               "y": int(f[4]), "w": int(f[5]), "h": int(f[6]), "type": f[7],
                               "disabled": "d" in f[8], "selected": "s" in f[8], "label": f[9]})
         return items
+
+    def held(self) -> str:
+        """What holds Intuition up: "menu" (one is open), "held" (new windows wait, as
+        behind a popup left open) or "" for nothing, or for an amigentd before 1.3.0."""
+        return next((i["held"] for i in self.ui_tree() if i["kind"] == "screen"), "")
+
+    def right_held(self) -> bool:
+        """Is the right button down because this client pressed it?"""
+        return bool(self._buttons & 2)
 
     def menus(self) -> list[dict]:
         """Menu strip of the active window with the boxes where titles and items appear."""

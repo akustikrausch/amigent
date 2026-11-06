@@ -75,11 +75,12 @@ KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
 amigent-status shows a small window with amigentd's state and its
 connections, refreshed every 2 seconds. amigentd also answers ARexx on the
 port AMIGENT: STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
-TYPE, KEY, HELP, QUIT. PAUSE <seconds> stops all screen reading for that
+TYPE, KEY, BUSY, HELP, QUIT. PAUSE <seconds> stops all screen reading for that
 long, so a test or a benchmark has the CPU to itself; RESUME ends it.
 ACTIVATEWINDOW <pattern> brings a window to the front, TYPE <text> types
 into it through your keymap (keys in angle brackets: <return>, <ctrl c>),
-KEY <name> presses one key.
+KEY <name> presses one key, BUSY says whether a menu or a popup holds
+Intuition up.
 
 Licence: MIT, see LICENSE.
 """
@@ -135,6 +136,11 @@ NEW IN THIS VERSION
   an "insert volume" requester that waits for someone at the Amiga.
 - Games and programs on 256-colour graphics card screens come through in
   their real colours in the remote desktop and in screenshots.
+- After a lost connection the AI agent learns whether the Amiga started
+  again and which guru code it kept.
+- An open menu or a popup left open on the desktop, which holds back every
+  new window, is noticed; the AI agent closes the popup before it starts a
+  program.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
@@ -162,7 +168,7 @@ INSTALLATION
 A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
 SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY. amigentd answers ARexx on the
 port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
-TYPE, KEY, HELP, QUIT).
+TYPE, KEY, BUSY, HELP, QUIT).
 
 
 UPDATING FROM AN EARLIER AMIGENT

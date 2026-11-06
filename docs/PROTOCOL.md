@@ -332,10 +332,17 @@ inside names become spaces.
 
 UITREE describes the front screen:
 
-    S  handle  width  height  title
+    S  handle  width  height  title  held
     W  window  x  y  w  h  flags  title
     G  window  gadget  x  y  w  h  type  flags  label
 
+- `held`, from amigentd 1.3.0: `m` while a menu is open (Intuition locks the
+  screen's layers then, also while a window is dragged), `h` while Intuition
+  holds back new windows and screens without such a lock, as behind the pop-up a
+  short right click leaves open on a DOpus desktop; empty when neither. amigentd
+  tells `h` from a ScreenToFront of the front screen, which changes nothing, by a
+  helper process: it counts when the call hasn't come back after 0.4 s.
+  Older amigentd send no such field.
 - Windows come front to back. `window` is the window's address in 8 hex digits,
   `handle` the screen's, as in SCREENS. Window flags: `a` active, `b` backdrop.
 - `gadget` counts the window's gadgets from `0`, in list order, system gadgets
@@ -389,7 +396,8 @@ real mouse and keyboard.
 - A short right click on the DOpus desktop leaves its pop-up menu open. While a
   menu is open Intuition holds back every new window and screen, so programs
   seem to hang on opening. Esc (rawkey `0x45`) closes it. For menus, hold the
-  right button, move, and let go over the item.
+  right button, move, and let go over the item. UITREE's `held` field and the
+  ARexx command BUSY tell when this is the case.
 
 ## command channels
 
@@ -468,6 +476,11 @@ separated by tabs.
   68010, 68020, 68030, 68040 or 68060, from the CPU bits exec knows) and
   `attn_flags`, exec's AttnFlags as a number, for bits newer than that list,
   and from protocol 4 `screen_paused`, the seconds of [pause](#pause) left.
+  From amigentd 1.3.0 also `uptime`, the seconds since the Amiga started (its
+  E clock), `daemon_uptime`, the seconds since amigentd started, and
+  `last_alert`, exec's last alert in 8 hex digits, when it kept one from before
+  the last reset. A client compares the uptimes with its last look to tell a
+  restart of the Amiga or of amigentd from a network fault.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 
@@ -511,9 +524,10 @@ the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
 | VERSION | `amigentd 1.3.0 (06.11.2026)` |
 | PAUSE [seconds] | stops screen reading for that long, see [pause](#pause); the seconds left, without a number just those |
 | RESUME | ends the pause, `0` |
-| ACTIVATEWINDOW pattern | brings the first window whose title matches to the front and gives it the keys; the title, return code 5 when none matched |
+| ACTIVATEWINDOW pattern | brings the first window whose title matches to the front and gives it the keys; the title, return code 5 when none matched or a menu or pop-up holds Intuition up (see BUSY) |
 | TYPE text | types the text through the Amiga's keymap, keys in angle brackets; return code 5 at the first unknown key or character |
 | KEY name | presses one key, written as inside the brackets of TYPE |
+| BUSY | `menu` while a menu is open, `held` while Intuition holds back new windows (a pop-up left open), empty when neither; the `held` field of [UITREE](#text) |
 | HELP | the command names |
 | QUIT | `bye`, then amigentd ends as on Ctrl-C |
 

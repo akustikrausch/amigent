@@ -1978,6 +1978,101 @@ static BOOL screen_front(ULONG handle)
     return reply(0);
 }
 
+/* ---- what holds input back: menus and popups ------------------------- */
+
+#define PROBE_MS 400  /* a helper that takes longer counts as held up */
+static BYTE probe_sig = -1;  /* a probe helper is done */
+static volatile BOOL held_waiting;
+
+/* Waits until *flag is clear, at most ms. */
+static void wait_flag(volatile BOOL *flag, LONG ms)
+{
+    ULONG end = now_ms() + ms;
+    LONG left;
+
+    while (*flag && (left = (LONG)(end - now_ms())) > 0)
+        wait_ms(left, 1UL << probe_sig);
+}
+
+static void helper_done(volatile BOOL *flag)
+{
+    Forbid();
+    *flag = FALSE;
+    children--;
+    Signal(server, 1UL << probe_sig | 1UL << chan_gone);
+}
+
+/* A ScreenToFront of the screen in front changes nothing, and comes back at
+ * once unless Intuition holds back new windows and screens. */
+static void __saveds held_main(void)
+{
+    struct Screen *s;
+
+    Wait(SIGBREAKF_CTRL_F);
+    if ((s = open_screen((ULONG)FindTask(NULL)->tc_UserData)))
+        ScreenToFront(s);
+    helper_done(&held_waiting);
+}
+
+static BOOL start_helper(volatile BOOL *flag, void (*entry)(void), const char *name, APTR data)
+{
+    struct Process *proc;
+
+    if (probe_sig < 0)
+        return FALSE;
+    SetSignal(0, 1UL << probe_sig);
+    Forbid();
+    children++;
+    *flag = TRUE;
+    Permit();
+    proc = CreateNewProcTags(NP_Entry, (ULONG)entry, NP_Name, (ULONG)name, NP_Priority, 0,
+                             NP_StackSize, 4096, TAG_END);
+    if (!proc) {
+        Forbid();
+        children--;
+        *flag = FALSE;
+        Permit();
+        return FALSE;
+    }
+    proc->pr_Task.tc_UserData = data;
+    Signal(&proc->pr_Task, SIGBREAKF_CTRL_F);
+    return TRUE;
+}
+
+/* Is Intuition holding up input? 'm': a menu is open (or a window is being
+ * dragged), which locks the screen's layers. 'h': new windows and screens
+ * wait, as behind the popup a short right click leaves on a Directory Opus
+ * desktop, without any lock to see. 0: neither. */
+static char held(void)
+{
+    struct Screen *s;
+    ULONG lock, handle = 0;
+    LONG i;
+    BOOL free_ = FALSE;
+
+    for (i = 0; i < 3 && !free_; i++) {
+        if (i)
+            Delay(1);
+        lock = LockIBase(0);
+        s = IntuitionBase->FirstScreen;
+        handle = (ULONG)s;
+        if (!s || AttemptSemaphore(&s->LayerInfo.Lock)) {
+            if (s)
+                ReleaseSemaphore(&s->LayerInfo.Lock);
+            free_ = TRUE;
+        }
+        UnlockIBase(lock);
+    }
+    if (!free_)
+        return 'm';
+    if (!held_waiting && handle) {
+        if (!start_helper(&held_waiting, held_main, "amigentd probe", (APTR)handle))
+            return 0;
+        wait_flag(&held_waiting, PROBE_MS);
+    }
+    return held_waiting ? 'h' : 0;
+}
+
 /* Runs of equal pixels as u8 count-1, r, g, b, crossing row ends. Returns the
    packed length, or 0 once it would reach len, the raw size. */
 static ULONG pack_rgb(const UBYTE *p, ULONG len, UBYTE *out)
@@ -2101,6 +2196,7 @@ static BOOL ui_tree(void)
     struct Screen *s;
     struct Layer *l;
     ULONG lock;
+    char hold = held();
 
     lock = LockIBase(0);
     s = IntuitionBase->FirstScreen;
@@ -2113,6 +2209,9 @@ static BOOL ui_tree(void)
     t_num(&t, s->Height);
     t_tab(&t);
     t_str(&t, screen_title(s), FALSE);
+    t_tab(&t);  /* from 1.3.0: m menu open, h new windows held back */
+    if (hold)
+        t_chr(&t, hold);
     t_chr(&t, '\n');
     /* Layers run front to back; the window list does not. */
     for (l = s->LayerInfo.top_layer; l; l = l->back) {
@@ -3062,6 +3161,20 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "fast_largest", AvailMem(MEMF_FAST | MEMF_LARGEST));
     t_pair(&t, "total_free", AvailMem(MEMF_ANY));
     t_pair(&t, "screen_paused", pause_left());  /* seconds left, see PAUSE */
+    {
+        /* Since the Amiga started, by the E clock, and since amigentd did: after
+           a lost connection the client tells a restart from a network fault. */
+        struct EClockVal ev;
+        ULONG hz = ReadEClock(&ev);
+
+        t_pair(&t, "uptime", hz ? (ULONG)((((unsigned long long)ev.ev_hi << 32) | ev.ev_lo) / hz) : 0);
+        t_pair(&t, "daemon_uptime", (now_ms() - start_ms) / 1000);
+    }
+    if (SysBase->LastAlert[0] != 0xFFFFFFFFUL) {  /* the guru before the last reset */
+        t_str(&t, (const UBYTE *)"last_alert=", FALSE);
+        t_hex(&t, SysBase->LastAlert[0]);
+        t_chr(&t, '\n');
+    }
     t_version(&t, "exec_version", SysBase->LibNode.lib_Version, SysBase->LibNode.lib_Revision);
     t_version(&t, "kickstart", SysBase->LibNode.lib_Version, SysBase->SoftVer);
     t_version(&t, "bsdsocket", SocketBase->lib_Version, SocketBase->lib_Revision);
@@ -4404,6 +4517,10 @@ static LONG rexx_activate(const UBYTE *s, struct text *t)
         } else
             rc = RC_ERROR;
     }
+    if (found && held()) {  /* ScreenToFront would wait for as long as that lasts */
+        found = NULL;
+        t->len = 0;
+    }
     if (found) {  /* Intuition must not be called under LockIBase */
         ScreenToFront(found->WScreen);
         WindowToFront(found);
@@ -4414,6 +4531,17 @@ static LONG rexx_activate(const UBYTE *s, struct text *t)
     FreeVec(src);
     FreeVec(arg);
     return rc;
+}
+
+/* BUSY: why clicks and keys would not get through now. "menu" while a menu
+ * is open, "held" while Intuition holds back new windows (a popup left open);
+ * empty when neither. */
+static void rexx_busy(struct text *t)
+{
+    char h = held();
+
+    if (h)
+        t_str(t, (const UBYTE *)(h == 'm' ? "menu" : "held"), FALSE);
 }
 
 /* All messages waiting on the port: answer each, a result string if asked. */
@@ -4447,8 +4575,10 @@ static void rexx_messages(void)
             rc = rexx_type(s + 4);
         else if (is_word(s, "KEY"))
             rc = rexx_key(s + 3);
+        else if (is_word(s, "BUSY"))
+            rexx_busy(&t);
         else if (is_word(s, "HELP"))
-            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION PAUSE RESUME ACTIVATEWINDOW TYPE KEY HELP QUIT", FALSE);
+            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION PAUSE RESUME ACTIVATEWINDOW TYPE KEY BUSY HELP QUIT", FALSE);
         else if (is_word(s, "QUIT")) {
             t_str(&t, (const UBYTE *)"bye", FALSE);
             quit = TRUE;  /* the main loop sees it on its next turn */
@@ -4657,6 +4787,7 @@ int main(int argc, char **argv)
         complain("cannot open %s", (LONG)"input.device");
         goto out;
     }
+    probe_sig = AllocSignal(-1);  /* without it there are no probes, nothing else lacks */
     if ((chan_gone = AllocSignal(-1)) < 0 || (reader_gone = AllocSignal(-1)) < 0) {
         complain("out of signals", 0);
         goto out;
@@ -4719,6 +4850,8 @@ out:
     rexx_close();
     if (chan_gone >= 0)
         FreeSignal(chan_gone);
+    if (probe_sig >= 0)
+        FreeSignal(probe_sig);
     if (reader) {
         reader_quit = TRUE;
         Signal(reader, SIGBREAKF_CTRL_C);

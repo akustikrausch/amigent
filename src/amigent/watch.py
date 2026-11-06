@@ -58,10 +58,14 @@ def wait_change(screen, guard, lookout: Lookout, region: tuple, since: float, ti
     clock = lookout.clock
     start = clock()
     deadline = start + timeout
+    looked = False  # a poll came back: running out of time later is no slow link
     while True:
         if not lookout.poll(screen, guard, region, deadline - clock()):
+            if looked:
+                return f"no change within {timeout:g} s", False
             return (f"no change seen within {timeout:g} s; the link is slow and a screen read "
                     "is still on its way, so ask again", False)
+        looked = True
         changed = screen.changed_since(max(since, lookout.baseline), *region)
         if changed:
             return f"changed ({changed} tiles) after {clock() - start:.1f} s of waiting", True

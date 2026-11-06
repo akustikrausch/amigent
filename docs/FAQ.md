@@ -19,7 +19,7 @@ Double-click `amigent-status` in the Amigent folder (`SYS:amigent` after setup).
 Its window shows amigentd's version, uptime, encryption and every connection
 with its address, refreshed every 2 seconds. Scripts get the same from the
 ARexx port `AMIGENT`: `STATUS`, `CLIENTS`, `VERSION`, `PAUSE`, `RESUME`,
-`ACTIVATEWINDOW`, `TYPE`, `KEY`, `HELP` and `QUIT`.
+`ACTIVATEWINDOW`, `TYPE`, `KEY`, `BUSY`, `HELP` and `QUIT`.
 
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:
@@ -163,7 +163,9 @@ Amiga. `amigent-setup` keeps a copy in its folder on the Amiga.
 **After a right click nothing opens any more.**
 On a Directory Opus desktop a short right click leaves Opus' popup menu open,
 and Intuition holds back every new window and screen until it is closed. Press
-Esc. Menus are opened by holding the right button, moving and releasing.
+Esc. Menus are opened by holding the right button, moving and releasing. From
+1.3.0 `amiga_ui_tree` says when a menu or such a popup holds things up, and
+`amiga_start` closes the popup with Esc before it starts a program.
 
 **Which programs give their buttons a name in amiga_ui_tree?**
 Classic Intuition gadgets and GadTools checkboxes, string gadgets and sliders.

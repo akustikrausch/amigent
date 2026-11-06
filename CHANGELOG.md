@@ -11,18 +11,45 @@ Versions follow [semver](https://semver.org). The number lives in
   `ACTIVATEWINDOW <pattern>` finds a window by its title (AmigaDOS patterns,
   or a part of the title) and gives it the keys, `TYPE <text>` types through
   the Amiga's keymap with keys in angle brackets (`<return>`, `<ctrl c>`,
-  `<lamiga q>`), `KEY <name>` presses one key.
+  `<lamiga q>`), `KEY <name>` presses one key, `BUSY` tells whether a menu
+  or a popup holds Intuition up.
+
+### Crashes and things that hold the Amiga up
+
+- `amiga_status` tells whether the Amiga started again since the last look
+  and how long ago, or only amigentd did, and the guru code exec kept from
+  before the last reset. After a lost connection that tells a crash from a
+  network fault. amigentd's SYSINFO has `uptime`, `daemon_uptime` and
+  `last_alert` for it.
+- An open menu, and a popup left open as a short right click leaves it on a
+  Directory Opus desktop, hold back every new window until they close.
+  amigentd now notices both (UITREE's new `held` field); `amiga_ui_tree`
+  says so, and `amiga_start` closes such a popup with Esc before it starts
+  the program, or lets go of a right button it holds itself.
+- `amiga_type` with several lines types them one at a time and waits after
+  each Return until the window has been still for a moment (up to `settle`
+  seconds, 10 by default), so a Shell shows each command's output before the
+  next one comes.
 
 ### Fixes
 
 - A volume that isn't there makes a command or a file transfer fail at once.
   Before, AmigaDOS opened an "insert volume" requester that waited for
   someone at the Amiga and held up the command until then.
+- `amiga_wait_change` said the link was slow when its time ran out on a quiet
+  screen over a fast link; now it says there was no change.
 - 256-colour graphics card screens, as games open them, come through in their
   real colours. They came out as a few shades of blue or black: some RTG
   drivers convert such screens through a palette other than the one on
   display. amigentd now reads the pens itself and looks them up in the
   screen's palette.
+
+### For developers
+
+- `scripts/regress.py HOST` runs every tool against a real Amiga or an
+  emulator before a release and prints PASS, FAIL or SKIP per check;
+  `scripts/pointer_test.py` waits for slow Amigas and skips screen modes the
+  chipset doesn't have.
 
 ## 1.2.0 (2026-11-05)
 

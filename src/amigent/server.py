@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import files, inventory, locks, machines, pictures, secret, watch
+from . import files, inventory, locks, machines, pictures, secret, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd
@@ -84,13 +84,55 @@ def _with_screen(fn):
 _join = join_path
 
 
+seen = uptime.Seen(secret.FOLDER / "uptime.json")
+
+
 @mcp.tool()
 def amiga_status() -> str:
-    """Show memory, OS and TCP stack versions, and mounted volumes with free space."""
-    return json.dumps(
-        {"amiga": machines.name_of(HOST), "address": machines.address(HOST),
-         "sysinfo": _with_ctl(ctl.sysinfo), "volumes": _with_ctl(ctl.volumes)}, indent=1
-    )
+    """Show memory, OS and TCP stack versions, and mounted volumes with free space.
+
+    Also tells whether the Amiga started again since the last look, and the
+    guru code it kept from before the last reset, so after a lost connection
+    you can tell a crash from a network fault. Call it first when the Amiga
+    answers again after being away.
+    """
+    info = _with_ctl(ctl.sysinfo)
+    report = {"amiga": machines.name_of(HOST), "address": machines.address(HOST)}
+    if "uptime" in info:
+        report["running_for"] = uptime.duration(int(info["uptime"]))
+    said = seen.check(machines.name_of(HOST) or machines.address(HOST) or "", info)
+    if said:
+        report["notes"] = said
+    report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
+    return json.dumps(report, indent=1)
+
+
+def _clear_hold() -> str:
+    """Before a window opens: get Intuition going again, or say what holds it up."""
+    try:
+        state = _with_screen(screen.held)
+    except (OSError, AmigaError):
+        return ""
+    done = ""
+    if state == "held":  # a popup left open, such as Directory Opus's after a short right click
+        _with_screen(lambda: screen.press("esc"))
+        done = "closed a popup with Esc first. "
+    elif state == "menu" and screen.right_held():  # our own right button holds a menu open
+        _with_screen(lambda: screen.button("right", False))
+        done = "let go of the right mouse button first. "
+    else:
+        return HOLD_NOTE[state] if state else ""
+    time.sleep(0.3)
+    state = _with_screen(screen.held)
+    return done + (HOLD_NOTE[state] if state else "")
+
+
+HOLD_NOTE = {
+    "menu": "A menu is open on the Amiga (someone holds the right button), so new windows "
+            "wait until it closes. ",
+    "held": "Intuition holds back new windows, as behind a popup left open; amiga_key('esc') "
+            "usually closes it. ",
+}
 
 
 @mcp.tool()
@@ -138,9 +180,10 @@ last_started = ""
 def amiga_start(command: str) -> str:
     """Start a program in the background, without capturing output."""
     global last_started
+    before = _clear_hold()
     _with_ctl(lambda: ctl.exec(f"Run >NIL: {command}"))
     last_started = command
-    return f"started: {command}"
+    return f"{before}started: {command}"
 
 
 @mcp.tool()
@@ -519,6 +562,9 @@ def amiga_ui_tree(pictures: bool = True) -> list:
             state += " selected" if item["selected"] else ""
             lines.append(f"    #{item['id']} {item['type']} {item['label']!r} {box}{state}")
     text = "\n".join(lines) or "no windows"
+    hold = next((i.get("held", "") for i in tree if i["kind"] == "screen"), "")
+    if hold:
+        text = f"note: {HOLD_NOTE[hold]}\n{text}"
     sheet = _gadget_sheet(tree) if pictures else None
     return [text, sheet] if sheet else [text]
 
@@ -663,11 +709,54 @@ def amiga_drag(x1: int, y1: int, x2: int, y2: int, button: str = "left") -> str:
     return f"dragged {button} from ({x1},{y1}) to ({x2},{y2})"
 
 
+SETTLE_FIRST = 0.3  # after Return, before the window counts: the Shell starts the command
+SETTLE_QUIET = 0.6  # this long without a change and the window has settled
+
+
+def _settle(box: tuple, wait: float) -> bool:
+    """Wait until box has not changed for SETTLE_QUIET s, at most wait; True if it did.
+
+    One changed tile is a blinking cursor, not output."""
+    end = time.monotonic() + wait
+    time.sleep(SETTLE_FIRST)
+    quiet_since = time.monotonic()
+    while time.monotonic() < end:
+        if screen.poll(*box) > 1:
+            quiet_since = time.monotonic()
+        elif time.monotonic() - quiet_since >= SETTLE_QUIET:
+            return True
+        time.sleep(0.15)
+    return False
+
+
 @mcp.tool()
-def amiga_type(text: str) -> str:
-    """Type text into the active window through its keymap. Newline presses Return."""
-    _with_screen(lambda: screen.type_text(text))
-    return f"typed {len(text)} characters"
+def amiga_type(text: str, settle: float = 10) -> str:
+    """Type text into the active window through its keymap. Newline presses Return.
+
+    Several lines go in one at a time: after each Return it waits, up to settle
+    seconds, until the window has been still for a moment, so a Shell is done
+    with one command before the next one comes. A command that runs quietly
+    for long still gets the next line early, into the Shell's type-ahead.
+    settle=0 types everything at once.
+    """
+    lines = text.splitlines(keepends=True)
+    if settle <= 0 or len(lines) < 2:
+        _with_screen(lambda: screen.type_text(text))
+        return f"typed {len(text)} characters"
+
+    def run():
+        box = next(((w["x"], w["y"], w["w"], w["h"]) for w in screen.ui_tree()
+                    if w["kind"] == "window" and w["active"]), None)
+        late = 0
+        for i, line in enumerate(lines):
+            screen.type_text(line)
+            if box and line.endswith("\n") and i < len(lines) - 1 and not _settle(box, settle):
+                late += 1
+        return late
+
+    late = _with_screen(run)
+    note = f"; {late} line(s) went on before the window was still" if late else ""
+    return f"typed {len(text)} characters in {len(lines)} lines{note}"
 
 
 @mcp.tool()

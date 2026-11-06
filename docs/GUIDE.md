@@ -234,6 +234,7 @@ interrupted copy.
   'ACTIVATEWINDOW "Shell*"'   /* rc 5 when no window title matches */
   'TYPE "dir RAM:<return>"'   /* keys in angle brackets: <ctrl c>, <lamiga q> */
   'KEY "esc"'
+  'BUSY'                      /* "menu" or "held" while a menu or popup holds Intuition up */
   ```
 
 - **System information.** The *i* button shows Kickstart and Workbench versions,
@@ -326,7 +327,7 @@ settings and menu entries; see
 On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
 `TLSONLY` from the command line or, started from Workbench, from the tool types
 of its icon. It answers ARexx on the port `AMIGENT` (`STATUS`, `CLIENTS`,
-`VERSION`, `PAUSE`, `RESUME`, `ACTIVATEWINDOW`, `TYPE`, `KEY`, `HELP`, `QUIT`;
+`VERSION`, `PAUSE`, `RESUME`, `ACTIVATEWINDOW`, `TYPE`, `KEY`, `BUSY`, `HELP`, `QUIT`;
 see [the protocol](PROTOCOL.md#arexx)), and `amigent-status` shows the same in a small
 window.
 

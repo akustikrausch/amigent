@@ -177,6 +177,15 @@ def test_wait_change_keeps_its_deadline_on_a_slow_link():
     assert took < 0.8
 
 
+def test_a_quiet_screen_on_a_fast_link_is_no_slow_link():
+    lookout = watch.Lookout()
+    screen = SlowScreen(0.0)
+    screen.frame = object()  # the picture is there: polls come back at once
+    report, changed = watch.wait_change(screen, lambda fn: fn(), lookout, (0, 0, None, None),
+                                        time.monotonic(), 0.3)
+    assert not changed and report == "no change within 0.3 s"
+
+
 def test_a_first_picture_is_not_a_change():
     lookout = watch.Lookout()
     screen = SlowScreen(0.0)
