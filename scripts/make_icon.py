@@ -6,6 +6,7 @@ Usage: make_icon.py repair OUT.info      project icon that runs a script through
        make_icon.py drawer OUT.info      drawer icon for the Amigent folder
        make_icon.py status OUT.info      tool icon for the amigent-status window
        make_icon.py update OUT.info      project icon for Amigent-Update, through IconX
+       make_icon.py monitor OUT.info     tool icon for the amigent-monitor window
 Layout from the icon.library DiskObject structure and the GlowIcon IFF chunks.
 """
 
@@ -43,6 +44,37 @@ def update_pixel(x: int, y: int) -> int:
     return 2 if head or shaft else 3
 
 
+def monitor_pixel(x: int, y: int) -> int:
+    """A black terminal (1) in a white frame (2), with log lines in white and a blue cursor."""
+    if x in (0, WIDTH - 1) or y in (0, HEIGHT - 1):
+        return 2
+    if x in (1, WIDTH - 2) or y in (1, HEIGHT - 2):
+        return 0
+    lines = {6: 30, 10: 22, 14: 34, 18: 18, 22: 26}
+    if y in lines and 5 <= x < lines[y]:
+        return 2 if x < 9 else 3
+    if 26 <= y < 28 and 5 <= x < 9:
+        return 3
+    return 1
+
+
+def monitor_picture() -> Image.Image:
+    """The colour face: a dark terminal with green lines and a rainbow bar on top."""
+    from PIL import ImageDraw
+    picture = Image.new("RGBA", (GLOW, GLOW), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(picture)
+    draw.rounded_rectangle((1, 3, GLOW - 2, GLOW - 4), 4, fill=(4, 12, 6, 255), outline=(120, 140, 125, 255))
+    rainbow = [(255, 64, 192), (64, 224, 255), (255, 192, 64)]
+    for i, colour in enumerate(rainbow):
+        draw.rectangle((4, 6 + i * 2, GLOW - 5, 7 + i * 2), fill=colour + (255,))
+    for i, width in enumerate((30, 22, 34, 18, 26)):
+        y = 16 + i * 5
+        draw.rectangle((5, y, 9, y + 2), fill=(200, 255, 210, 255))
+        draw.rectangle((11, y, 11 + width - 8, y + 2), fill=(51, 255, 102, 255))
+    draw.rectangle((5, 41, 9, 42), fill=(51, 255, 102, 255))
+    return picture
+
+
 def amigent_pixels() -> list[list[int]]:
     """The Amigent icon reduced to the four Workbench pens."""
     picture = Image.open(SOURCE).convert("RGBA").resize((WIDTH, HEIGHT), Image.LANCZOS)
@@ -76,9 +108,10 @@ def chunk(name: bytes, body: bytes) -> bytes:
     return name + struct.pack(">I", len(body)) + body + (b"\0" if len(body) % 2 else b"")
 
 
-def glow_icon() -> bytes:
+def glow_icon(picture: Image.Image | None = None) -> bytes:
     """FORM ICON with one uncompressed palette image; colour 0 is transparent."""
-    picture = Image.open(SOURCE).convert("RGBA").resize((GLOW, GLOW), Image.LANCZOS)
+    if picture is None:
+        picture = Image.open(SOURCE).convert("RGBA").resize((GLOW, GLOW), Image.LANCZOS)
     solid = Image.new("RGB", picture.size, (0, 0, 0))
     solid.paste(picture, mask=picture.split()[3])
     indexed = solid.quantize(colors=255)
@@ -127,7 +160,8 @@ def disk_object(kind: int, image: bytes, default_tool: bytes | None, tool_types:
 
 
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status", "update"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("repair", "amigentd", "drawer", "status", "update",
+                                                    "monitor"):
         raise SystemExit(__doc__)
     if sys.argv[1] == "repair":
         data = disk_object(WBPROJECT, planes(repair_pixel), b"C:IconX\0", [], 4096)
@@ -137,6 +171,11 @@ def main() -> None:
     elif sys.argv[1] == "drawer":
         rows = amigent_pixels()
         data = disk_object(WBDRAWER, planes(lambda x, y: rows[y][x]), None, [], 0) + glow_icon()
+    elif sys.argv[1] == "monitor":
+        data = disk_object(WBTOOL, planes(monitor_pixel), None,
+                           ["(NAME=)", "(WIDTH=760)", "(HEIGHT=480)",
+                            "(FONT=topaz.font)", "(SIZE=8)"], 8192)
+        data += glow_icon(monitor_picture())
     elif sys.argv[1] == "status":
         rows = amigent_pixels()  # same face, the tool type says which amigentd to watch
         data = disk_object(WBTOOL, planes(lambda x, y: rows[y][x]), None, ["(PORT=AMIGENT)"], 8192)

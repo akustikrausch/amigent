@@ -73,7 +73,7 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         text = (AMIGA / name).read_text(encoding="iso-8859-1").replace("SYS:amigent", home)
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
-    for name in ("amigent-status", "amigent-status.info"):  # the little window on the Amiga's side
+    for name in WINDOWS:  # the little windows on the Amiga's side
         if (AMIGA / "bin" / name).exists():
             link.put(f"{home}/{name}", (AMIGA / "bin" / name).read_bytes())
     print("setting the key")
@@ -85,6 +85,7 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
     script = f"""FailAt 21
 Protect {home}/amigent-repair +s
 Protect >NIL: {home}/amigent-status +rwed
+Protect >NIL: {home}/amigent-monitor +rwed
 Copy C:amigentd.new C:amigentd QUIET
 Protect C:amigentd rwed
 Delete >NIL: C:amigentd.new QUIET
@@ -111,7 +112,32 @@ UPDATE_TROUBLE = {
                "restart the Amiga to start it.",
     b"missing": "C:amigentd.new did not arrive, so nothing was changed.",
 }
+WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-monitor.info")
 UPDATE_WAIT = 90.0  # seconds for the old amigentd to go and the new one to answer
+
+
+def update_windows(channel, home: str | None) -> None:
+    """amigent-status and amigent-monitor into the Amigent folder, where they differ."""
+    if not home:
+        try:
+            home = channel.read_file("ENVARC:amigent-home").decode("iso-8859-1").strip()
+        except AmigaError:
+            home = ""
+    home = home or "SYS:amigent"
+    for name in WINDOWS:
+        local = AMIGA / "bin" / name
+        if not local.exists():
+            continue
+        target = f"{home}/{name}"
+        try:
+            there = channel.read_file(target)
+        except AmigaError:
+            there = None
+        # an icon that is there stays: it holds the user's tool types and place
+        if there == local.read_bytes() or (there is not None and name.endswith(".info")):
+            continue
+        print(f"uploading {name}")
+        channel.write_file(target, local.read_bytes())
 
 
 def update(host: str, home: str | None) -> int:
@@ -128,6 +154,7 @@ def update(host: str, home: str | None) -> int:
         new = (AMIGA / "bin" / build).read_bytes()
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
+        update_windows(channel, home)
         if channel.read_file("C:amigentd") == new:
             print(f"amigentd on {host} is already the one from Amigent {__version__}.")
             channel.close()

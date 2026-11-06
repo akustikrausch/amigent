@@ -56,6 +56,61 @@ pack.policy_for(HOST, mode=(machines.find(HOST) or {}).get("compress") if HOST e
 ctl = Commands(HOST, CTL_PORT, SCREEN_PORT)  # amigentd's channel, or amigactld on older installs
 screen = Amigentd(HOST, SCREEN_PORT)
 
+# Every tool call shows up as a line in amigent-monitor's window on the Amiga.
+NOTE_HIDDEN = {"key", "password", "token", "secret"}
+
+
+def note_line(name: str, kwargs: dict) -> str:
+    """'amiga_start', {'command': 'HiP'} -> 'start HiP'; short, without secrets."""
+    parts = [name.removeprefix("amiga_")]
+    for k, v in kwargs.items():
+        if k in NOTE_HIDDEN or v is None or v == "" or v is False:
+            continue
+        text = " ".join(str(v).split())
+        parts.append(text if len(text) <= 60 else text[:57] + "...")
+        if len(" ".join(parts)) > 120:
+            break
+    return " ".join(parts)
+
+
+def _note(line: str) -> bool:
+    """Best effort and only on a link that is up: the monitor must never cost a tool."""
+    backend = getattr(ctl, "backend", None)
+    if not getattr(ctl, "connected", False) or not hasattr(backend, "note"):
+        return False
+    try:
+        with _exclusive():
+            backend.note(line)
+        return True
+    except Exception:  # noqa: BLE001 - a monitor line is never worth a failed tool
+        return False
+
+
+def _noted(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def run(*args, **kwargs):
+        line = note_line(fn.__name__, kwargs)
+        sent = _note(line)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            if not sent:  # the tool may have brought the link up
+                _note(line)
+    return run
+
+
+_tool = mcp.tool
+
+
+def _tool_noted(*args, **kwargs):
+    register = _tool(*args, **kwargs)
+    return lambda fn: register(_noted(fn))
+
+
+mcp.tool = _tool_noted
+
 
 def _exclusive(name: str = LOCK_FILE):
     """Serialise access across all amigent processes and threads on this PC."""

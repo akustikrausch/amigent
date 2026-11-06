@@ -21,6 +21,13 @@ with its address, refreshed every 2 seconds. Scripts get the same from the
 ARexx port `AMIGENT`: `STATUS`, `CLIENTS`, `VERSION`, `PAUSE`, `RESUME`,
 `ACTIVATEWINDOW`, `TYPE`, `KEY`, `BUSY`, `HELP` and `QUIT`.
 
+**Can I watch on the Amiga what the agent does?**
+Double-click `amigent-monitor` in the Amigent folder. Its window lists every tool
+the agent calls and the commands, files, clicks and keys that reach amigentd, as
+they happen. It never takes the input focus, so the agent's typing still goes where
+it should. Beside the log it shows the data rates of the last minute, totals and how
+much the agent did.
+
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:
 `SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands started through it

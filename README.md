@@ -144,6 +144,8 @@ All numbers, how they were taken and how to repeat them are in
 - **New address after a restart?** Amigent finds the Amiga again by itself. It
   takes only the one that proves to be yours.
 - **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
+- **Watching from the Amiga?** `amigent-monitor` in the Amigent folder opens a
+  window there that lists, line by line, what the agent is doing.
 - **Running a test or a benchmark?** *Pause the picture* in the remote desktop
   (or `PAUSE` by ARexx) gives the Amiga's CPU back to it for a while; mouse,
   keys and files keep working.

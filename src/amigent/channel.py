@@ -24,6 +24,8 @@ ENCODING = "iso-8859-1"
 CMD_AUTH, CMD_CHANNEL = 17, 20
 EXEC, READ, WRITE, DIR, STAT, DELETE, RENAME, MAKEDIR, CHECKSUM, SYSINFO, VOLUMES = range(21, 32)
 TEXT, WAIT, COMPRESS, TREE, DEBUGLOG = range(32, 37)
+NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when understood
+NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
 PACK_PROTOCOL = 5  # TEXT, WAIT, COMPRESS, TREE, DEBUGLOG, packed replies and writes
 WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW, WAIT_KNOWN = 1, 2, 3, 4, 8, 16
@@ -241,6 +243,7 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError("amigentd refused a command channel")
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
+            self._notes = None
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -521,6 +524,21 @@ class AmigaChannel(VolumeFlush):
     def tree(self, path: str, crc: bool = False, most: int = 0) -> list[dict]:
         self._need5("listing a whole tree at once")
         return self._one(Request.tree(path, crc, most))
+
+    def note(self, text: str) -> None:
+        """A line for amigent-monitor's window on the Amiga: what the agent is doing.
+
+        NOTE has no answer, so it costs no round trip and the stream stays in
+        step. Silently nothing on an amigentd that doesn't know it."""
+        if not self._sock or self.protocol < PACK_PROTOCOL:
+            return
+        if getattr(self, "_notes", None) is None:
+            self._notes = self.sysinfo().get("note") == "1"
+        if not self._notes:
+            return
+        raw = text.encode(ENCODING, "replace")[:NOTE_MAX]
+        self._sock.settimeout(self.timeout)
+        self._send(struct.pack(">BBHHHH", NOTE, 0, len(raw), 0, 0, 0) + raw)
 
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""

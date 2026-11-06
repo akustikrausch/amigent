@@ -101,10 +101,13 @@ enum {
     CMD_FRAME_RGB, CMD_MOVE_REL, CMD_UITREE, CMD_MENUS, CMD_AUTH, CMD_CLIENT, CMD_PAUSE,
     CMD_CHANNEL = 20, CMD_EXEC, CMD_READ_FILE, CMD_WRITE_FILE, CMD_DIR, CMD_STAT, CMD_DELETE,
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES,
-    CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG  /* protocol 5 */
+    CMD_TEXT, CMD_WAIT, CMD_COMPRESS, CMD_TREE, CMD_DEBUGLOG,  /* protocol 5 */
+    CMD_NOTE  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
 };
 
 const char version[] = "$VER: amigentd 1.3.0 (06.11.2026)";
+
+static void mon_say(UBYTE kind, const char *what, const char *arg);
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -157,6 +160,7 @@ static struct channel {
     ULONG addr, since;  /* for CLIENTS on the ARexx port */
 } chans[CHANNELS];
 static ULONG client_addr, client_since, start_ms;
+static volatile ULONG net_in, net_out;  /* bytes on all links, for the monitor */
 static BYTE chan_gone = -1;  /* a channel or exec runner ended */
 static LONG children;  /* channel and runner processes alive, changed under Forbid */
 static ULONG runs;  /* numbers temporary names, under Forbid */
@@ -231,6 +235,7 @@ static BOOL flush(void)
         if (n <= 0)
             return FALSE;
         done += n;
+        net_out += n;
     }
     out_len = 0;
     return TRUE;
@@ -275,6 +280,7 @@ static BOOL receive(void *data, LONG len)
             return FALSE;
         p += n;
         len -= n;
+        net_in += n;
     }
     return TRUE;
 }
@@ -2471,6 +2477,7 @@ static BOOL run_command(UWORD len)
 static void drop_client(void)
 {
     if (client >= 0) {
+        mon_say('S', "screen link closed", NULL);
         /* Reset rather than close: whatever still sits in the send buffer would
          * otherwise hold up the next client on a slow link. */
         struct linger now = {1, 0};
@@ -2538,9 +2545,12 @@ static BOOL auth(UWORD len)
     memset(got, 0, sizeof(got));
     if (!receive(got, len < KEY_MAX ? len : KEY_MAX) || (len > KEY_MAX && !skip(len - KEY_MAX)))
         return FALSE;
-    if (!key_matches(got, len))
+    if (!key_matches(got, len)) {
+        mon_say('E', "refused a wrong key", NULL);
         return refuse();
+    }
     authed = TRUE;
+    mon_say('S', "screen link up", NULL);
     return reply(0);
 }
 
@@ -2593,6 +2603,7 @@ static BOOL l_send(struct link *l, const void *data, ULONG len, LONG secs)
             return FALSE;
         p += n;
         len -= n;
+        net_out += n;
     }
     return TRUE;
 }
@@ -2613,6 +2624,7 @@ static BOOL l_recv(struct link *l, void *data, ULONG len, LONG secs)
             return FALSE;
         p += n;
         len -= n;
+        net_in += n;
     }
     return TRUE;
 }
@@ -2735,6 +2747,7 @@ static void step(LONG i)
             p->screen = TRUE;  /* serve() hands it the screen */
         return;
     }
+    mon_say('E', "refused a newcomer: wrong key", NULL);
     l_send(&l, "\1", 1, HELLO_SECONDS);
     Delay(50);  /* as refuse() */
     close_pending(i);
@@ -2792,6 +2805,8 @@ static BOOL c_fail(struct link *l, UBYTE status, const char *text)
     UBYTE head[3];
     UWORD n = strlen(text);
 
+    mon_say('E', "failed:", text);
+
     head[0] = status;
     be16(head + 1, n);
     return l_send(l, head, 3, IO_SECONDS) && l_send(l, text, n, IO_SECONDS);
@@ -2827,6 +2842,103 @@ static BOOL c_text(struct link *l, struct text *t)
 }
 
 /* A name of len bytes from the request. NULL with *alive still set: no memory. */
+/* ---- monitor: a line per request for amigent-monitor's window ---------- */
+
+/* amigent-monitor opens this public port; each line goes there as a message
+ * the monitor frees (no reply). Nobody listening costs one FindPort. */
+#define MON_PORT "Amigent.monitor"
+#define MON_TEXT 160
+
+struct monmsg {
+    struct Message m;
+    UBYTE kind;  /* A agent, C command, I input, T typed, V screen, S link, E error */
+    UBYTE pad;
+    char text[2];
+};
+
+static void mon_say(UBYTE kind, const char *what, const char *arg)
+{
+    struct MsgPort *port;
+    struct monmsg *m;
+    LONG a = strlen(what), b = arg ? strlen(arg) : 0, i;
+
+    Forbid();
+    port = FindPort(MON_PORT);
+    Permit();
+    if (!port)
+        return;
+    if (a + b > MON_TEXT)
+        b = a > MON_TEXT ? 0 : MON_TEXT - a;
+    if (!(m = AllocVec(sizeof(*m) + a + b + 1, MEMF_PUBLIC | MEMF_CLEAR)))
+        return;
+    m->m.mn_Node.ln_Type = NT_MESSAGE;
+    m->m.mn_Length = sizeof(*m) + a + b + 1;
+    m->kind = kind;
+    memcpy(m->text, what, a);
+    if (b) {
+        m->text[a] = ' ';
+        memcpy(m->text + a + 1, arg, b);
+    }
+    for (i = 0; m->text[i]; i++)
+        if ((UBYTE)m->text[i] < 32 || (UBYTE)m->text[i] == 127)
+            m->text[i] = ' ';
+    Forbid();
+    if ((port = FindPort(MON_PORT)))
+        PutMsg(port, &m->m);
+    Permit();
+    if (!port)
+        FreeVec(m);
+}
+
+/* x,y as text into out (at least 16 bytes). */
+static void mon_xy(char *out, LONG x, LONG y)
+{
+    char *p = out;
+    LONG v, i, d;
+
+    for (i = 0; i < 2; i++) {
+        v = i ? y : x;
+        if (v < 0) {
+            *p++ = '-';
+            v = -v;
+        }
+        for (d = 10000; d > 1 && v < d; d /= 10)
+            ;
+        for (; d; d /= 10)
+            *p++ = '0' + v / d % 10;
+        if (!i)
+            *p++ = ',';
+    }
+    *p = 0;
+}
+
+static void dec(char *p, ULONG v);
+
+/* Once a second: bytes in and out so far, command links open, screen link
+ * up; the monitor turns that into rates and keeps no log line for it. */
+static void mon_stats(void)
+{
+    static ULONG last;
+    struct channel *c;
+    char buf[64];
+    LONG n = 0;
+    ULONG now = now_ms();
+
+    if (now - last < 1000)
+        return;
+    last = now;
+    for (c = chans; c < chans + CHANNELS; c++)
+        if (c->proc)
+            n++;
+    dec(buf, net_in);
+    strcat(buf, " ");
+    dec(buf + strlen(buf), net_out);
+    strcat(buf, " ");
+    dec(buf + strlen(buf), n);
+    strcat(buf, client >= 0 ? " 1" : " 0");
+    mon_say('K', buf, NULL);
+}
+
 static char *c_name(struct link *l, UWORD len, BOOL *alive)
 {
     char *name = AllocVec(len + 1, MEMF_ANY);
@@ -2937,6 +3049,7 @@ static BOOL c_dir(struct link *l, UWORD len, BOOL itself)
         FreeDosObject(DOS_FIB, fib);
         return FALSE;
     }
+    mon_say('C', itself ? "stat" : "list", path);
     if (!path || !fib)
         err = ERROR_NO_FREE_STORE;
     else if (!(lock = Lock(path, SHARED_LOCK)) || !Examine(lock, fib))
@@ -2972,6 +3085,8 @@ static BOOL c_read(struct link *l, UWORD len)
     BOOL alive;
     char *path = c_name(l, len, &alive);
 
+    if (alive && path)
+        mon_say('C', "read", path);
     if (alive) {
         if (!path || !fib || !buf)
             err = ERROR_NO_FREE_STORE;
@@ -3068,6 +3183,8 @@ static BOOL c_write(struct link *l, BOOL append, BOOL packed, UWORD len, ULONG s
         FreeVec(buf);
         return FALSE;
     }
+    if (path)
+        mon_say('C', append ? "append" : "write", path);
     if (!path || !buf || (!append && !(tmp = AllocVec(len + sizeof(name) + 2, MEMF_ANY))))
         err = ERROR_NO_FREE_STORE;
     else if (is_dir(path))
@@ -3176,6 +3293,7 @@ static BOOL c_path_cmd(struct link *l, UBYTE cmd, UWORD len)
         return FALSE;
     if (!path)
         return c_fault(l, ERROR_NO_FREE_STORE);
+    mon_say('C', cmd == CMD_CHECKSUM ? "checksum" : cmd == CMD_DELETE ? "delete" : "makedir", path);
     if (cmd == CMD_CHECKSUM) {
         ok = c_checksum(l, path);
         FreeVec(path);
@@ -3199,6 +3317,10 @@ static BOOL c_rename(struct link *l, UWORD old_len, UWORD new_len)
     char *from = c_name(l, old_len, &alive), *to = alive ? c_name(l, new_len, &alive2) : NULL;
 
     if (alive && alive2) {
+        if (from && to) {
+            mon_say('C', "rename", from);
+            mon_say('C', "    to", to);
+        }
         if (!from || !to)
             err = ERROR_NO_FREE_STORE;
         else if (!Rename(from, to))
@@ -3312,6 +3434,7 @@ static BOOL c_sysinfo(struct link *l)
     hooks_again();
     t_pair(&t, "text", text_on);
     t_pair(&t, "debug", debug_on);
+    t_pair(&t, "note", 1);  /* NOTE is understood */
     return c_text(l, &t);
 }
 
@@ -3539,6 +3662,7 @@ static BOOL c_exec(struct link *l, UWORD len, UWORD dir_len, UWORD secs)
     }
     r->line[len] = 0;
     dir[dir_len] = 0;
+    mon_say('C', "exec", r->line);
     if (dir_len && !(r->dir = Lock(dir, SHARED_LOCK))) {
         left = IoErr();
         FreeVec(r);
@@ -5143,7 +5267,11 @@ static BOOL c_wait(struct link *l, LONG how, UWORD len, UWORD known, UWORD secs)
     ULONG start = now_ms(), gen = ~0UL;
     UBYTE *pat = NULL;
     char *arg = c_name(l, len, &alive);
+    static const char *const wait_what[] = {"wait", "wait for window", "wait till gone",
+                                            "wait for text", "wait till no text"};
 
+    if (alive)
+        mon_say('C', wait_what[kind <= 4 ? kind : 0], arg);
     if (!alive)
         return FALSE;
     if (how & 16) {  /* the windows the client knew: they don't count as new */
@@ -5274,6 +5402,8 @@ static BOOL c_tree(struct link *l, BOOL with_crc, UWORD len, UWORD most)
     BOOL alive, more = FALSE;
     char *path = c_name(l, len, &alive);
 
+    if (alive)
+        mon_say('C', "tree", path);
     for (i = 0; i < TREE_DEPTH; i++)
         fib[i] = NULL;
     if (!alive) {
@@ -5438,14 +5568,27 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_RENAME:
         return c_rename(l, x, y);
     case CMD_SYSINFO:
+        mon_say('C', "sysinfo", NULL);
         return c_sysinfo(l);
     case CMD_PAUSE:
+        mon_say('C', x ? "pause screen" : "resume screen", NULL);
         set_pause(x);
         return c_ok(l);
     case CMD_VOLUMES:
+        mon_say('C', "volumes", NULL);
         return c_volumes(l);
     case CMD_TEXT:
+        mon_say('V', "read screen text", NULL);
         return c_screen_text(l);
+    case CMD_NOTE: {  /* no answer: the client doesn't wait for the monitor */
+        BOOL alive;
+        char *text = c_name(l, x, &alive);
+
+        if (text)
+            mon_say('A', text, NULL);
+        FreeVec(text);
+        return alive;
+    }
     case CMD_WAIT:
         return c_wait(l, c[1], x, y, w);
     case CMD_COMPRESS:
@@ -5453,6 +5596,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_TREE:
         return c_tree(l, c[1] & 1, x, w);
     case CMD_DEBUGLOG:
+        mon_say('C', "debug log", NULL);
         return c_debuglog(l, (ULONG)w << 16 | h);
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
@@ -5573,18 +5717,40 @@ static UBYTE do_input(const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
 
+    static WORD mon_x, mon_y;
+    static UBYTE mon_b;
+    char at[24], ch[2];
+
     input_ms = now_ms();
     switch (c[0]) {
     case CMD_MOVE:
         move_to(x, y);
+        mon_x = x;
+        mon_y = y;
         break;
     case CMD_BUTTON:
+        if ((c[1] & 7) & ~mon_b) {  /* only presses */
+            mon_xy(at, mon_x, mon_y);
+            mon_say('I', c[1] & 2 ? "mouse right at" : c[1] & 4 ? "mouse middle at" : "click at", at);
+        }
+        mon_b = c[1] & 7;
         set_buttons(c[1] & 7);
         break;
     case CMD_RAWKEY:
+        if (c[1] & 1) {
+            static const char hex[] = "0123456789ABCDEF";
+            at[0] = '$';
+            at[1] = hex[x >> 4 & 7];
+            at[2] = hex[x & 15];
+            at[3] = 0;
+            mon_say('I', "key", at);
+        }
         key(x & 0x7F, c[1] & 1, y);
         break;
     case CMD_CHAR:
+        ch[0] = x < 256 ? (char)x : '?';
+        ch[1] = 0;
+        mon_say('T', ch, NULL);
         return type_char(x, y) ? 0 : 1;
     case CMD_MOVE_REL:
         move_by((WORD)x, (WORD)y);
@@ -5605,6 +5771,7 @@ static BOOL sneak_input(void)
         if (n <= 0)
             return FALSE;
         in_have += n;
+        net_in += n;
         if (in_have == sizeof(in_cmd) && authed && is_input(in_cmd[0])) {
             acks[nacks++] = do_input(in_cmd);
             in_have = 0;
@@ -5641,8 +5808,24 @@ static BOOL command(const UBYTE *c)
     case CMD_INFO:
         return info();
     case CMD_PAUSE:
+        mon_say('C', x ? "pause screen" : "resume screen", NULL);
         set_pause(x);
         return reply(0);
+    case CMD_FRAME:
+    case CMD_FRAME_RGB:
+        mon_say('V', "screen picture", NULL);  /* the monitor counts these on one line */
+        break;
+    case CMD_UITREE:
+        mon_say('C', "window tree", NULL);
+        break;
+    case CMD_MENUS:
+        mon_say('C', "menus", NULL);
+        break;
+    case CMD_SCREENS:
+        mon_say('C', "screens", NULL);
+        break;
+    }
+    switch (c[0]) {
     case CMD_FRAME:
         frame_level = c[1] & 16 ? 2 : c[1] & 8 ? 1 : 0;
         if (c[1] & 2)
@@ -5684,6 +5867,7 @@ static void serve(void)
         struct timeval tv = {1, 0};
         ULONG sigs = SIGBREAKF_CTRL_C | rexx_signal();
 
+        mon_stats();
         for (i = 0; i < PENDING && !(pend[i].fd >= 0 && pend[i].screen); i++)
             ;
         if (i < PENDING) {  /* the newcomer wins */
@@ -5693,6 +5877,7 @@ static void serve(void)
             client_since = now_ms();
             pend[i].fd = -1;
             authed = TRUE;
+            mon_say('S', "screen link up", NULL);
             client_id = 0;
             conn_serial++;  /* a new face: pref is not its picture yet */
             heard = now_ms();

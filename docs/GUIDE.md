@@ -350,7 +350,11 @@ On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
 of its icon. It answers ARexx on the port `AMIGENT` (`STATUS`, `CLIENTS`,
 `VERSION`, `PAUSE`, `RESUME`, `ACTIVATEWINDOW`, `TYPE`, `KEY`, `BUSY`, `HELP`, `QUIT`;
 see [the protocol](PROTOCOL.md#arexx)), and `amigent-status` shows the same in a small
-window.
+window. `amigent-monitor` opens a window that lists what the agent does: each tool
+it calls and the commands, files, clicks and keys that reach `amigentd`. Its tool
+types: `NAME` (for the greeting), `WIDTH`, `HEIGHT`, `LEFT`, `TOP`, `FONT`, `SIZE`
+(a fixed-width font). Esc or the close gadget ends it, C
+clears the log.
 
 ## Security
 

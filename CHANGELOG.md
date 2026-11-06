@@ -26,6 +26,17 @@ Versions follow [semver](https://semver.org). The number lives in
   menus, waits, commands) and ends with one look: text, the changed parts or
   a screenshot. Saves a round trip per step.
 
+### Watching the agent on the Amiga
+
+- amigent-monitor opens a window on the Amiga that shows, line by line, what
+  the agent is doing: each tool it calls and the commands, files, clicks and
+  keys that reach amigentd, with the time. Beside it the link: data rates
+  with the last minute as a graph, totals, how much the agent did, free
+  memory. Dark green on RTG screens, the Workbench's own colours on a 4 or 8
+  colour screen; it fits itself to a 640x256 Workbench and runs on OS 2.04
+  and a 68000. The window never takes the input focus. NOTE (37) carries
+  the tool names; it has no answer and costs no round trip.
+
 ### Faster on slow networks
 
 - Replies, file transfers, command output and screen tiles travel packed

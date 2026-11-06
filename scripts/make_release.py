@@ -72,6 +72,12 @@ TCP/IP stack with bsdsocket.library. On the PC or Mac: Python 3.10 or newer.
 Tool types of the icon: SETUP (accept the first install from the PC),
 KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
 
+amigent-monitor opens a window that shows, line by line, what the agent
+does on this Amiga: the tools it calls, commands, files, clicks and keys,
+next to the data rates and totals. Tool types: NAME=<your name> for the
+greeting, WIDTH, HEIGHT, LEFT, TOP, FONT, SIZE. Esc or the close gadget
+ends it, C clears the log.
+
 amigent-status shows a small window with amigentd's state and its
 connections, refreshed every 2 seconds. amigentd also answers ARexx on the
 port AMIGENT: STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
@@ -117,7 +123,8 @@ clicks through programs, while you watch every click in that window and can
 take over at any moment.
 
 This archive is the Amiga half: amigentd, the small service that does the
-work on the Amiga, amigent-status, a window that shows who is connected, and
+work on the Amiga, amigent-status, a window that shows who is connected,
+amigent-monitor, a window that shows what the agent is doing, and
 Amigent-Update for updating an earlier installation. The PC or Mac half is a
 Python package:
 
@@ -233,6 +240,9 @@ def main() -> None:
     if (BIN / "amigent-status").exists():
         files["amigent-status"] = BIN / "amigent-status"
         files["amigent-status.info"] = BIN / "amigent-status.info"
+    if (BIN / "amigent-monitor").exists():
+        files["amigent-monitor"] = BIN / "amigent-monitor"
+        files["amigent-monitor.info"] = BIN / "amigent-monitor.info"
     if (BIN / "amigentd.000").exists():
         files["amigentd.000"] = BIN / "amigentd.000"
         files["amigentd.000.info"] = BIN / "amigentd.info"
@@ -243,7 +253,7 @@ def main() -> None:
         ctl.write_file(f"{folder}/{name}", source.read_bytes())
     ctl.write_file(f"{folder}/ReadMe", README.encode("iso-8859-1"))
     ctl.write_file(f"{stage}/Amigent.info", (BIN / "Amigent.info").read_bytes())
-    for name in ("amigentd", "amigentd.000", "amigent-status"):
+    for name in ("amigentd", "amigentd.000", "amigent-status", "amigent-monitor"):
         if name in files:
             ctl.exec(f"Protect {folder}/{name} +rwed")
     archive = "amigent.lha"

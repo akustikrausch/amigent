@@ -442,6 +442,7 @@ everything else.
 | 34 | COMPRESS | 0 off, 1 fast, 2 best | | | |
 | 35 | TREE | 1 = with CRC-32 | x = path length, w = most entries (0: 50000) | path | text |
 | 36 | DEBUGLOG | | w/h = count to start from, high/low | | `u32 count`, `u32 length`, bytes |
+| 37 | NOTE | | x = text length | text | nothing, see [monitor](#monitor) |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first
@@ -579,6 +580,30 @@ Only one amigentd at a time records; a second one on another port takes
 over once the first is gone. RawPutChar output still reaches the serial
 port; DEBUGLOG keeps the last 64 KB. `NOTEXT` and `NODEBUG` leave the
 patches out.
+
+### monitor
+
+amigent-monitor shows what the agent does on the Amiga. It opens the public
+message port `Amigent.monitor`; while that port is there amigentd sends it
+one message per request: EXEC lines, paths of READ, WRITE, DIR, TREE and the
+like, WAIT patterns, clicks, keys, typed characters, screen pictures, links
+coming and going, and every failure with its text. Without the port this
+costs one FindPort per request.
+Once a second it also sends kind `K` with four numbers: bytes received and
+sent on all links since amigentd started, command links open, and `1` while
+a screen link is up.
+
+NOTE (37) adds a line of the client's own, at most 160 bytes: the PC sends
+the name of each tool the agent calls. NOTE has no answer, so it costs no
+round trip; the next request follows straight behind. SYSINFO says `note=1`
+when amigentd understands it; an older amigentd would answer with a refusal,
+so clients send NOTE only after seeing that.
+
+A message is an exec `Message` followed by `UBYTE kind`, a pad byte and the
+text with a 0 at its end, in one AllocVec block of `mn_Length` bytes. The
+monitor frees it with FreeVec and does not reply. Kinds: `A` the agent's
+NOTE, `C` a command, `I` mouse and keys, `T` a typed character, `V` the
+screen being read, `S` a link, `E` a failure.
 
 ## tls
 

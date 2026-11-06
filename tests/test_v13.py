@@ -23,8 +23,9 @@ from amigent.errors import AmigaError
 class Fake5:
     """Speaks enough of amigentd's protocol 5 command channel for the client."""
 
-    def __init__(self, rates=(20000, 9000, 20000), files=None, text_lines=None):
+    def __init__(self, rates=(20000, 9000, 20000), files=None, text_lines=None, notes=True):
         self.rates = rates
+        self.notes = notes
         self.files = dict(files or {})
         self.text_lines = text_lines or []
         self.level = 0
@@ -69,9 +70,12 @@ class Fake5:
                     self.seen.append((cmd, arg, path))
                     if cmd == 20:
                         conn.sendall(b"\0")
+                    elif cmd == 37:  # NOTE: no answer
+                        pass
                     elif cmd == SYSINFO:
                         lines = (f"cpu=68040\ndeflate_fast={self.rates[0]}\ndeflate_best={self.rates[1]}\n"
-                                 f"inflate={self.rates[2]}\ntext=1\ndebug=1\n")
+                                 f"inflate={self.rates[2]}\ntext=1\ndebug=1\n"
+                                 + ("note=1\n" if self.notes else ""))
                         self._blob(conn, lines.encode())
                     elif cmd == COMPRESS:
                         self.level = arg
@@ -533,3 +537,29 @@ def test_multi_assigns_are_spread_out():
 
     assert install.expand(C(), ["C:", "LIBS:", "AmiKit:Classes", "SYS:Games/X"]) == \
         ["C:", "AmiKit:Libs", "AmiKit:Classes", "Work:MUI/Libs", "SYS:Games/X"]
+
+
+def test_notes_reach_the_monitor_without_an_answer():
+    fake = Fake5(files={"S:f": b"abc"})
+    ch = channel_to(fake, mode="off")
+    ch.note("start HiP morning.xm")
+    ch.note("x" * 500)
+    assert ch.read_file("S:f") == b"abc"  # the stream is still in step
+    notes = [p for c, _, p in fake.seen if c == 37]
+    assert notes == ["start HiP morning.xm", "x" * 160]
+
+
+def test_no_notes_for_an_amigentd_that_does_not_know_them():
+    fake = Fake5(files={"S:f": b"abc"}, notes=False)
+    ch = channel_to(fake, mode="off")
+    ch.note("hello")
+    assert ch.read_file("S:f") == b"abc"
+    assert not any(c == 37 for c, _, _ in fake.seen)
+
+
+def test_note_lines_are_short_and_keep_secrets():
+    from amigent.server import note_line
+    assert note_line("amiga_start", {"command": "SYS:Utilities/HiP  x.xm"}) == "start SYS:Utilities/HiP x.xm"
+    assert note_line("amiga_put", {"local_path": "a", "key": "s3cret"}) == "put a"
+    long = note_line("amiga_exec", {"command": "Echo " + "y" * 200, "cd": "", "timeout": 30})
+    assert len(long) < 130 and long.endswith("30")
