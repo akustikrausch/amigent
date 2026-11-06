@@ -37,6 +37,15 @@ Versions follow [semver](https://semver.org). The number lives in
   and a 68000. The window never takes the input focus. NOTE (37) carries
   the tool names; it has no answer and costs no round trip.
 
+### Another agent on the same Amiga
+
+- `amiga_status` says when other remote control software for AI agents runs
+  on the Amiga too, such as amimcp's amiagent, or is installed there; while
+  one runs, the first click or key of a session carries a note that two
+  agents would share one mouse and keyboard. Nothing is stopped or removed.
+  amigentd's SYSINFO lists the public ports and tasks for it (`ports=`,
+  `tasks=`).
+
 ### Faster on slow networks
 
 - Replies, file transfers, command output and screen tiles travel packed

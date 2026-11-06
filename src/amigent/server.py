@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
-from . import aminet, files, install, inventory, locks, machines, notes, pack, pictures, screentext
+from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import secret, uptime, watch
 from .client import join_path
 from .errors import AmigaError
@@ -37,7 +37,9 @@ def inventory_folder() -> Path:
 
 
 INSTRUCTIONS = """Amigent operates a real Amiga.
-- After the Amiga was away, amiga_status first: it tells a restart or a guru.
+- After the Amiga was away, amiga_status first: it tells a restart or a guru,
+  and whether another agent (such as amimcp's amiagent) runs there too; then
+  ask the user before driving mouse and keys, so the two don't collide.
 - To find something out, read amiga_screen_text before taking a screenshot; take
   a picture (best of just the part you need) for layout, graphics and games, or
   when the text says something is missing. After a click, amiga_screenshot
@@ -86,6 +88,37 @@ def _note(line: str) -> bool:
         return False
 
 
+class _Exec:
+    """ctl.exec through the shared lock, for modules that only take a ctl."""
+
+    def exec(self, command: str, timeout: float = 30):
+        return _with_ctl(lambda: ctl.exec(command, timeout=timeout))
+
+
+# Another agent on the same Amiga: said once per session before input, looked up again
+# every few minutes. amiga_status always says it.
+INPUT_TOOLS = {"amiga_click", "amiga_type", "amiga_key", "amiga_do", "amiga_start", "amiga_drag",
+               "amiga_click_text", "amiga_ui_click", "amiga_menu_select"}
+OTHERS_RECHECK = 300.0
+_others_seen = {"at": -1e9, "text": "", "told": ""}
+
+
+def _others_note() -> str:
+    """The warning about another running agent, the first time it applies; else ''."""
+    if time.monotonic() - _others_seen["at"] > OTHERS_RECHECK:
+        try:
+            info = _with_ctl(ctl.sysinfo)
+            _others_seen["text"] = others.warning(others.from_sysinfo(info))
+        except Exception:  # noqa: BLE001 - never worth a failed tool
+            pass
+        _others_seen["at"] = time.monotonic()
+    text = _others_seen["text"]
+    if not text or _others_seen["told"] == text:
+        return ""
+    _others_seen["told"] = text
+    return text
+
+
 def _noted(fn):
     import functools
 
@@ -94,10 +127,17 @@ def _noted(fn):
         line = note_line(fn.__name__, kwargs)
         sent = _note(line)
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
         finally:
             if not sent:  # the tool may have brought the link up
                 _note(line)
+        if fn.__name__ in INPUT_TOOLS:
+            warn = _others_note()
+            if warn and isinstance(result, str):
+                result = f"Note: {warn}\n{result}"
+            elif warn and isinstance(result, list):
+                result = [f"Note: {warn}"] + result
+        return result
     return run
 
 
@@ -169,7 +209,15 @@ def amiga_status() -> str:
     answers again after being away.
     """
     info = _with_ctl(ctl.sysinfo)
+    ports, tasks = info.pop("ports", None), info.pop("tasks", None)
     report = {"amiga": machines.name_of(HOST), "address": machines.address(HOST)}
+    found = others.scan(_Exec(), machines.address(HOST) or HOST,
+                        {"ports": ports or "", "tasks": tasks or ""})
+    _others_seen.update(at=time.monotonic(), text=others.warning(found))
+    if found:
+        report["other_agents"] = [f.as_dict() for f in found]
+        if _others_seen["text"]:
+            report["warning"] = _others_seen["text"]
     if "uptime" in info:
         report["running_for"] = uptime.duration(int(info["uptime"]))
     said = seen.check(machines.name_of(HOST) or machines.address(HOST) or "", info)

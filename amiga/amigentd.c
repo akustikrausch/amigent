@@ -62,6 +62,7 @@ extern struct Library *CyberGfxBase;
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
 #define PROTOCOL_VERSION 5
+#define NAMES_MAX 4096  /* SYSINFO ports= and tasks= */
 #define DEFAULT_PORT 6801
 #define TILE 64
 #define RGB_TILES 2  /* tiles read in one go: 24 KB, so a 1 MB A500+ still copes */
@@ -3377,6 +3378,56 @@ static BOOL text_on, debug_on;
 static void measure_pack(void);
 static void hooks_again(void);
 
+/* key=name|name|... of every node on the lists, copied under Forbid: public
+ * ports, or tasks ready and waiting (the caller itself is running). */
+static void t_names(struct text *t, const char *key, struct List *a, struct List *b)
+{
+    UBYTE *buf = AllocVec(NAMES_MAX, MEMF_ANY);
+    struct List *lists[2];
+    struct Node *n;
+    LONG used = 0, i, k;
+
+    if (!buf)
+        return;
+    lists[0] = a;
+    lists[1] = b;
+    Forbid();
+    for (i = 0; i < 2; i++)
+        for (n = lists[i] ? lists[i]->lh_Head : NULL; n && n->ln_Succ; n = n->ln_Succ) {
+            const UBYTE *name = (const UBYTE *)n->ln_Name;
+            LONG len = 40;
+
+            if (n->ln_Type == NT_PROCESS && ((struct Process *)n)->pr_CLI) {
+                /* a Shell process is "Background CLI": the command it runs says more */
+                struct CommandLineInterface *cli = BADDR(((struct Process *)n)->pr_CLI);
+                const UBYTE *cmd = cli->cli_CommandName ? BADDR(cli->cli_CommandName) : NULL;
+
+                if (cmd && cmd[0]) {
+                    len = cmd[0];
+                    name = cmd + 1;
+                    for (k = len - 1; k >= 0; k--)
+                        if (name[k] == ':' || name[k] == '/')
+                            break;
+                    name += k + 1;
+                    len -= k + 1;
+                }
+            }
+            if (!name || !*name || len <= 0)
+                continue;
+            for (k = 0; k < len && name[k] && k < 40 && used < NAMES_MAX - 2; k++)
+                buf[used++] = name[k] == '|' || name[k] < ' ' ? ' ' : name[k];
+            if (used >= NAMES_MAX - 2)
+                break;
+            buf[used++] = '|';
+        }
+    Permit();
+    t_str(t, (const UBYTE *)key, FALSE);
+    if (used)
+        t_add(t, buf, used - 1);
+    t_chr(t, '\n');
+    FreeVec(buf);
+}
+
 static BOOL c_sysinfo(struct link *l)
 {
     struct Library *SocketBase = l->base;
@@ -3435,6 +3486,8 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "text", text_on);
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
+    t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
+    t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
 }
 

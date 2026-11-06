@@ -505,7 +505,12 @@ separated by tabs.
 - From protocol 5 SYSINFO also has `deflate_fast`, `deflate_best` and
   `inflate`, how many KB a second this Amiga packs (levels 1 and 2) and
   unpacks, measured once on text-like data at the first SYSINFO; `text` and
-  `debug`, `1` while amigentd records screen text and debug output.
+  `debug`, `1` while amigentd records screen text and debug output; `note`,
+  `1` when it takes [NOTE](#monitor); `ports` and `tasks`, the names of all
+  public message ports and of all other tasks, separated by `|` (a Shell
+  process by the command it runs), at most 4 KB each. With them a client
+  notices other remote control software on the Amiga, such as a second AI
+  agent's daemon.
 - TREE lists a folder and everything below it in one answer, lines as DIR has
   them with the path below the folder as name (`sub/file`), parents before
   children; with arg 1 a CRC-32 in 8 hex digits follows each file (`-` when

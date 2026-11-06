@@ -28,6 +28,13 @@ they happen. It never takes the input focus, so the agent's typing still goes wh
 it should. Beside the log it shows the data rates of the last minute, totals and how
 much the agent did.
 
+**Does Amigent get along with other AI bridges, such as amimcp?**
+They use other ports, so both can be installed. What they share is the one mouse and
+keyboard: if two agents drive the Amiga at the same time, clicks land elsewhere and
+typing mixes. `amiga_status` says when such a program runs (it knows amimcp's
+amiagent), and the agent is told once before it clicks or types. Amigent never
+stops or removes the other one.
+
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:
 `SETUP`, `KEY=S:amigent.key`, `PORT=6801`, `QUIET`. Commands started through it
