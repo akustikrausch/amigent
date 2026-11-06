@@ -438,7 +438,10 @@ separated by tabs.
   `SYS:System`, `S:`, `SYS:Prefs`, `SYS:WBStartup`, `SYS:Tools` and
   `SYS:Tools/Commodities`, those that exist. `C:` is always searched last. The directory is the
   current directory for the command; without one it is the one amigentd was
-  started in. The output
+  started in. A volume that isn't there is an error at once, never an "insert
+  volume" requester waiting for someone at the Amiga: amigentd, its channels
+  and every command they run have `pr_WindowPtr` set to -1, from 1.3.0 on. A
+  program that wants its requesters back sets its own. The output
   comes after the command has finished, all at once. Return code `-1` with a
   failure status: the line could not run at all. When the timeout runs out the
   command gets Ctrl-C and the reply is status `2`, text `timeout`; the command
@@ -505,9 +508,12 @@ the first has the name, gets `AMIGENT.<port>`, say `AMIGENT.6811`. No
 |---|---|
 | STATUS | `key=value` lines, see below |
 | CLIENTS | a line per connection: kind, address, seconds connected, tab separated |
-| VERSION | `amigentd 1.2.0 (05.11.2026)` |
+| VERSION | `amigentd 1.3.0 (06.11.2026)` |
 | PAUSE [seconds] | stops screen reading for that long, see [pause](#pause); the seconds left, without a number just those |
 | RESUME | ends the pause, `0` |
+| ACTIVATEWINDOW pattern | brings the first window whose title matches to the front and gives it the keys; the title, return code 5 when none matched |
+| TYPE text | types the text through the Amiga's keymap, keys in angle brackets; return code 5 at the first unknown key or character |
+| KEY name | presses one key, written as inside the brackets of TYPE |
 | HELP | the command names |
 | QUIT | `bye`, then amigentd ends as on Ctrl-C |
 
@@ -521,6 +527,19 @@ CLIENTS kinds: `screen`, `channel`, `pending`, and `tls` for each TLS connection
 with the address it came from. A TLS connection reaches the plain port through
 127.0.0.1, so it shows twice: as `tls` with its real address, and as `screen`
 or `channel` with `127.0.0.1`.
+
+ACTIVATEWINDOW takes an AmigaDOS pattern, any case, with `*` as `#?`; plain
+text without pattern characters matches any part of the title. Windows are
+searched screen by screen, front screen first.
+
+TYPE goes to the active window, as typed at the keyboard, so umlauts come out
+as the keymap has them. Keys go in angle brackets: `<return>`, `<enter>` (the
+number pad's), `<tab>`, `<esc>`, `<backspace>`, `<del>`, `<space>`, `<help>`,
+`<up>` `<down>` `<left>` `<right>`, `<f1>` to `<f10>`, or one character, each
+after qualifiers `shift`, `ctrl`, `alt`, `lamiga`, `ramiga` separated by spaces
+or `+`: `<ctrl c>`, `<lamiga+q>`, `<shift tab>`. `<<` types a `<`. One pair of
+quotes around the whole argument is taken off. Text typed ahead of a program
+that is still busy waits in its input as it would from the keyboard.
 
 Results come back with `options results`; an unknown command gives return code
 10. The answer comes between two looks at the network, also between two tiles

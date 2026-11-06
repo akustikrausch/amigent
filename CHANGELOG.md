@@ -3,6 +3,27 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.3.0 (not released yet)
+
+### Scripts on the Amiga
+
+- amigentd's ARexx port brings windows to the front and types into them:
+  `ACTIVATEWINDOW <pattern>` finds a window by its title (AmigaDOS patterns,
+  or a part of the title) and gives it the keys, `TYPE <text>` types through
+  the Amiga's keymap with keys in angle brackets (`<return>`, `<ctrl c>`,
+  `<lamiga q>`), `KEY <name>` presses one key.
+
+### Fixes
+
+- A volume that isn't there makes a command or a file transfer fail at once.
+  Before, AmigaDOS opened an "insert volume" requester that waited for
+  someone at the Amiga and held up the command until then.
+- 256-colour graphics card screens, as games open them, come through in their
+  real colours. They came out as a few shades of blue or black: some RTG
+  drivers convert such screens through a palette other than the one on
+  display. amigentd now reads the pens itself and looks them up in the
+  screen's palette.
+
 ## 1.2.0 (2026-11-05)
 
 ### Pause the picture

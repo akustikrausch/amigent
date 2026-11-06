@@ -74,9 +74,12 @@ KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
 
 amigent-status shows a small window with amigentd's state and its
 connections, refreshed every 2 seconds. amigentd also answers ARexx on the
-port AMIGENT: STATUS, CLIENTS, VERSION, PAUSE, RESUME, HELP, QUIT.
-PAUSE <seconds> stops all screen reading for that long, so a test or a
-benchmark has the CPU to itself; RESUME ends it.
+port AMIGENT: STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
+TYPE, KEY, HELP, QUIT. PAUSE <seconds> stops all screen reading for that
+long, so a test or a benchmark has the CPU to itself; RESUME ends it.
+ACTIVATEWINDOW <pattern> brings a window to the front, TYPE <text> types
+into it through your keymap (keys in angle brackets: <return>, <ctrl c>),
+KEY <name> presses one key.
 
 Licence: MIT, see LICENSE.
 """
@@ -126,13 +129,12 @@ the network and sets everything up from the PC.
 
 NEW IN THIS VERSION
 
-- Pause the picture: the Amiga stops reading its screen for a while, so a
-  test, a benchmark or a demo has the CPU and the chip bus to itself. From
-  the remote desktop (1, 5 or 15 minutes), from the AI agent, or by ARexx:
-  address AMIGENT 'PAUSE 300' and 'RESUME'. Mouse, keys, commands and files
-  keep working.
-- Updating is one double-click on Amigent-Update, or amigent-setup --update
-  from the PC.
+- Scripts on the Amiga can bring a window to the front and type into it
+  through the ARexx port: ACTIVATEWINDOW, TYPE and KEY.
+- A drive that isn't there makes a command fail at once instead of opening
+  an "insert volume" requester that waits for someone at the Amiga.
+- Games and programs on 256-colour graphics card screens come through in
+  their real colours in the remote desktop and in screenshots.
 
 
 TUNED FOR SLOW AMIGAS AND SLOW NETWORKS
@@ -159,7 +161,8 @@ INSTALLATION
 
 A Vampire's 68080 runs the plain amigentd. Tool types and Shell arguments:
 SETUP, KEY=<file>, PORT=<n>, QUIET, TLSONLY. amigentd answers ARexx on the
-port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, HELP, QUIT).
+port AMIGENT (STATUS, CLIENTS, VERSION, PAUSE, RESUME, ACTIVATEWINDOW,
+TYPE, KEY, HELP, QUIT).
 
 
 UPDATING FROM AN EARLIER AMIGENT

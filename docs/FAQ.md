@@ -18,7 +18,8 @@ and files on one port. Older installs also had amigactld; it keeps working.
 Double-click `amigent-status` in the Amigent folder (`SYS:amigent` after setup).
 Its window shows amigentd's version, uptime, encryption and every connection
 with its address, refreshed every 2 seconds. Scripts get the same from the
-ARexx port `AMIGENT`: `STATUS`, `CLIENTS`, `VERSION`, `HELP` and `QUIT`.
+ARexx port `AMIGENT`: `STATUS`, `CLIENTS`, `VERSION`, `PAUSE`, `RESUME`,
+`ACTIVATEWINDOW`, `TYPE`, `KEY`, `HELP` and `QUIT`.
 
 **Can I start amigentd from Workbench?**
 Yes, from the icon in the archive. Its tool types work like the Shell options:

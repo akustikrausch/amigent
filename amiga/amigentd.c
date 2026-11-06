@@ -49,11 +49,12 @@
 #include <string.h>
 
 /* The SDK here has the CGX inline stubs but no clib or cybergraphx headers;
- * the two values below are from cybergraphx/cybergraphics.h. */
+ * the values below are from cybergraphx/cybergraphics.h. */
 extern struct Library *CyberGfxBase;
 #include <inline/cybergraphics_protos.h>
 
 #define RECTFMT_RGB 0
+#define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
 
 #define PROTOCOL_VERSION 4
@@ -98,7 +99,7 @@ enum {
     CMD_RENAME, CMD_MAKEDIR, CMD_CHECKSUM, CMD_SYSINFO, CMD_VOLUMES
 };
 
-const char version[] = "$VER: amigentd 1.2.0 (05.11.2026)";
+const char version[] = "$VER: amigentd 1.3.0 (06.11.2026)";
 
 extern struct ExecBase *SysBase;
 struct Device *TimerBase;
@@ -111,6 +112,7 @@ struct Library *IconBase;
 
 static struct MsgPort *input_port, *timer_port;
 static struct IOStdReq *input_io;
+static APTR old_window;  /* pr_WindowPtr as the Shell or Workbench gave it */
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
@@ -726,14 +728,57 @@ static BOOL is_rtg(struct Screen *scr)
     return CyberGfxBase && GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_ISCYBERGFX);
 }
 
+/* A graphics card screen of 256 colours, as RGB888 rows. Its pens are read
+ * with graphics.library and looked up in the screen's own palette: asked for
+ * RGB, or for the pens, some drivers answer from something other than what is
+ * on display, and a game comes out in a handful of wrong colours or black.
+ * ReadPixelArray8 pads each row to 16 pixels. FALSE when memory is short. */
+static BOOL read_lut8(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
+{
+    ULONG colours = scr->ViewPort.ColorMap ? scr->ViewPort.ColorMap->Count : 0;
+    LONG pw = (w + 15) & ~15, x, y;
+    ULONG *table = AllocVec(256 * 3 * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
+    UBYTE *pens = AllocVec(pw * h, MEMF_ANY);
+    struct BitMap *line = AllocBitMap(pw, 1, 8, 0, NULL);
+    struct RastPort temp;
+    BOOL ok = table && pens && line;
+
+    if (ok) {
+        if (colours > 256)
+            colours = 256;
+        if (colours)
+            get_rgb32(scr->ViewPort.ColorMap, 0, colours, table);
+        temp = scr->RastPort;
+        temp.Layer = NULL;
+        temp.BitMap = line;
+        ReadPixelArray8(&scr->RastPort, x0, y0, x0 + w - 1, y0 + h - 1, pens, &temp);
+        for (y = 0; y < h; y++) {
+            const UBYTE *p = pens + y * pw;
+            UBYTE *o = out + 3 * y * w;
+            for (x = 0; x < w; x++, o += 3) {
+                const ULONG *c = table + 3 * p[x];
+                o[0] = c[0] >> 24;
+                o[1] = c[1] >> 24;
+                o[2] = c[2] >> 24;
+            }
+        }
+    }
+    if (line)
+        FreeBitMap(line);
+    FreeVec(pens);
+    FreeVec(table);
+    return ok;
+}
+
 /* Any screen, as RGB888 rows of w pixels. Callers hold LockIBase. */
 static void read_rgb(struct Screen *scr, LONG x0, LONG y0, LONG w, LONG h, UBYTE *out)
 {
     if (is_rtg(scr) || !read_planar(scr, x0, y0, w, h, out)) {
-        if (CyberGfxBase)
-            ReadPixelArray(out, 0, 0, w * 3, &scr->RastPort, x0, y0, w, h, RECTFMT_RGB);
-        else
+        if (!CyberGfxBase)
             memset(out, 0, w * h * 3);  /* deeper than 8 planes, nothing to read it with */
+        else if (!(os39 && is_rtg(scr) && GetCyberMapAttr(scr->RastPort.BitMap, CYBRMATTR_BPPIX) == 1 &&
+                   read_lut8(scr, x0, y0, w, h, out)))
+            ReadPixelArray(out, 0, 0, w * 3, &scr->RastPort, x0, y0, w, h, RECTFMT_RGB);
     }
 }
 
@@ -2272,7 +2317,7 @@ static BOOL run_command(UWORD len)
         nil = Open("NIL:", MODE_NEWFILE);
         if (in && nil) {
             rc = SystemTags(line, SYS_Input, in, SYS_Output, nil,
-                            NP_StackSize, 65536, NP_Priority, 0, TAG_END);
+                            NP_StackSize, 65536, NP_Priority, 0, NP_WindowPtr, -1, TAG_END);
             if (rc < 0 || rc > 255)
                 rc = 255;
         }
@@ -3161,7 +3206,7 @@ static void __saveds runner_main(void)
         r->rc = SystemTags(r->line, SYS_Input, in, SYS_Output, out,
                            NP_Error, out, NP_CloseError, FALSE, NP_Name, (ULONG)r->name,
                            NP_Path, copy_path(),
-                           NP_StackSize, 65536, NP_Priority, 0, TAG_END);
+                           NP_StackSize, 65536, NP_Priority, 0, NP_WindowPtr, -1, TAG_END);
         if (r->rc == -1)
             r->err = IoErr();
     } else
@@ -3271,7 +3316,7 @@ static BOOL c_exec(struct link *l, UWORD len, UWORD dir_len, UWORD secs)
     children++;
     Permit();
     proc = CreateNewProcTags(NP_Entry, (ULONG)runner_main, NP_Name, (ULONG)"amigentd runner",
-                             NP_StackSize, 8192, NP_Priority, 0, TAG_END);
+                             NP_StackSize, 8192, NP_Priority, 0, NP_WindowPtr, -1, TAG_END);
     if (!proc) {
         Forbid();
         children--;
@@ -3424,7 +3469,7 @@ static void start_channel(LONG i)
         children++;
         Permit();
         proc = CreateNewProcTags(NP_Entry, (ULONG)channel_main, NP_Name, (ULONG)"amigentd channel",
-                                 NP_Priority, 0, NP_StackSize, 16384, TAG_END);
+                                 NP_Priority, 0, NP_StackSize, 16384, NP_WindowPtr, -1, TAG_END);
         if (proc) {
             c->proc = proc;
             proc->pr_Task.tc_UserData = c;
@@ -4195,6 +4240,182 @@ static LONG rexx_pause(const UBYTE *s, struct text *t)
     return 0;
 }
 
+/* An argument as AllocVec'd text: blanks around it and one pair of quotes off,
+ * so 'TYPE "hello"' and 'TYPE hello' type the same. */
+static UBYTE *rexx_arg(const UBYTE *s)
+{
+    LONG n;
+    UBYTE *a;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+    n = strlen((const char *)s);
+    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+        n--;
+    if (n >= 2 && (s[0] == '"' || s[0] == '\'') && s[n - 1] == s[0]) {
+        s++;
+        n -= 2;
+    }
+    if ((a = AllocVec(n + 1, MEMF_ANY)) != NULL) {
+        memcpy(a, s, n);
+        a[n] = 0;
+    }
+    return a;
+}
+
+static const struct { const char *name; UBYTE code; } key_names[] = {
+    {"space", 0x40}, {"backspace", 0x41}, {"tab", 0x42}, {"enter", 0x43}, {"return", 0x44},
+    {"esc", 0x45}, {"escape", 0x45}, {"del", 0x46}, {"delete", 0x46}, {"up", 0x4C},
+    {"down", 0x4D}, {"right", 0x4E}, {"left", 0x4F}, {"help", 0x5F},
+    {"f1", 0x50}, {"f2", 0x51}, {"f3", 0x52}, {"f4", 0x53}, {"f5", 0x54},
+    {"f6", 0x55}, {"f7", 0x56}, {"f8", 0x57}, {"f9", 0x58}, {"f10", 0x59}
+};
+static const struct { const char *name; UWORD bits; } qual_names[] = {
+    {"shift", IEQUALIFIER_LSHIFT}, {"ctrl", IEQUALIFIER_CONTROL}, {"alt", IEQUALIFIER_LALT},
+    {"lamiga", IEQUALIFIER_LCOMMAND}, {"ramiga", IEQUALIFIER_RCOMMAND}
+};
+#define COUNT(a) ((LONG)(sizeof(a) / sizeof((a)[0])))
+
+/* Does s[0..n) spell name, whatever the case? */
+static BOOL same_name(const UBYTE *s, LONG n, const char *name)
+{
+    LONG i;
+
+    for (i = 0; i < n; i++)
+        if (!name[i] || (s[i] | 0x20) != name[i])
+            return FALSE;
+    return !name[n];
+}
+
+/* One key as words, "ctrl c", "lamiga+q", "shift tab", "return": qualifiers
+ * first, the key last, a key name or one character. Pressed and let go. */
+static BOOL press_named(const UBYTE *s, LONG len)
+{
+    UWORD qual = 0;
+    LONG i, n;
+
+    for (;;) {
+        while (len && (*s == ' ' || *s == '\t' || *s == '+' && len > 1))
+            s++, len--;
+        for (n = 0; n < len && s[n] != ' ' && s[n] != '\t' && (s[n] != '+' || n == 0); n++)
+            ;
+        if (!n)
+            return FALSE;
+        if (n == len)
+            break;  /* the last word is the key */
+        for (i = 0; i < COUNT(qual_names) && !same_name(s, n, qual_names[i].name); i++)
+            ;
+        if (i == COUNT(qual_names))
+            return FALSE;
+        qual |= qual_names[i].bits;
+        s += n;
+        len -= n;
+    }
+    for (i = 0; i < COUNT(key_names); i++)
+        if (same_name(s, n, key_names[i].name)) {
+            key(key_names[i].code, TRUE, qual);
+            key(key_names[i].code, FALSE, qual);
+            return TRUE;
+        }
+    return n == 1 && type_char(*s, qual);
+}
+
+/* TYPE <text>: typed through the Amiga's own keymap, so umlauts come out
+ * right. Keys go in angle brackets, "<return>", "<ctrl c>", "<lamiga q>";
+ * "<<" is a "<". rc 5 at the first character or key name that is not known;
+ * what came before it is typed. */
+static LONG rexx_type(const UBYTE *s)
+{
+    UBYTE *text = rexx_arg(s), *p, *end;
+    LONG rc = 0;
+
+    if (!text)
+        return RC_ERROR;
+    for (p = text; *p && !rc; p++) {
+        if (*p == '<' && p[1] == '<') {
+            if (!type_char('<', 0))
+                rc = RC_WARN;
+            p++;
+        } else if (*p == '<' && (end = (UBYTE *)strchr((char *)p + 1, '>')) != NULL) {
+            if (!press_named(p + 1, end - p - 1))
+                rc = RC_WARN;
+            p = end;
+        } else if (!type_char(*p, 0))
+            rc = RC_WARN;
+    }
+    FreeVec(text);
+    return rc;
+}
+
+/* KEY <name>: one key, written as inside the brackets of TYPE. */
+static LONG rexx_key(const UBYTE *s)
+{
+    UBYTE *name = rexx_arg(s);
+    LONG rc;
+
+    if (!name)
+        return RC_ERROR;
+    rc = *name && press_named(name, strlen((char *)name)) ? 0 : RC_WARN;
+    FreeVec(name);
+    return rc;
+}
+
+/* ACTIVATEWINDOW <pattern>: the first window on any screen whose title
+ * matches the AmigaDOS pattern ("*" works as "#?"); plain text matches a part
+ * of the title. Its screen and the window come to the front and it gets the
+ * keys. The result is the title; rc 5 when no window matched. */
+static LONG rexx_activate(const UBYTE *s, struct text *t)
+{
+    UBYTE *arg = rexx_arg(s), *pat = NULL, *src = NULL, *q;
+    const UBYTE *a;
+    struct Screen *scr;
+    struct Window *win, *found = NULL;
+    ULONG lock;
+    LONG n, rc = RC_WARN;
+    BOOL wild = FALSE;
+
+    if (!arg)
+        return RC_ERROR;
+    n = strlen((char *)arg);
+    for (a = arg; *a; a++)
+        if (strchr("#?*()|~[]%'", *a))
+            wild = TRUE;
+    if (n && (src = AllocVec(2 * n + 5, MEMF_ANY)) && (pat = AllocVec(4 * n + 12, MEMF_ANY))) {
+        q = src;
+        if (!wild)
+            *q++ = '#', *q++ = '?';
+        for (a = arg; *a; a++)
+            if (*a == '*')
+                *q++ = '#', *q++ = '?';
+            else
+                *q++ = *a;
+        if (!wild)
+            *q++ = '#', *q++ = '?';
+        *q = 0;
+        if (ParsePatternNoCase(src, pat, 4 * n + 12) >= 0) {
+            lock = LockIBase(0);
+            for (scr = IntuitionBase->FirstScreen; scr && !found; scr = scr->NextScreen)
+                for (win = scr->FirstWindow; win && !found; win = win->NextWindow)
+                    if (win->Title && MatchPatternNoCase(pat, win->Title)) {
+                        found = win;
+                        t_str(t, win->Title, FALSE);
+                    }
+            UnlockIBase(lock);
+        } else
+            rc = RC_ERROR;
+    }
+    if (found) {  /* Intuition must not be called under LockIBase */
+        ScreenToFront(found->WScreen);
+        WindowToFront(found);
+        ActivateWindow(found);
+        rc = 0;
+    }
+    FreeVec(pat);
+    FreeVec(src);
+    FreeVec(arg);
+    return rc;
+}
+
 /* All messages waiting on the port: answer each, a result string if asked. */
 static void rexx_messages(void)
 {
@@ -4220,8 +4441,14 @@ static void rexx_messages(void)
         else if (is_word(s, "RESUME")) {
             set_pause(0);
             t_num(&t, 0);
-        } else if (is_word(s, "HELP"))
-            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION PAUSE RESUME HELP QUIT", FALSE);
+        } else if (is_word(s, "ACTIVATEWINDOW"))
+            rc = rexx_activate(s + 14, &t);
+        else if (is_word(s, "TYPE"))
+            rc = rexx_type(s + 4);
+        else if (is_word(s, "KEY"))
+            rc = rexx_key(s + 3);
+        else if (is_word(s, "HELP"))
+            t_str(&t, (const UBYTE *)"STATUS CLIENTS VERSION PAUSE RESUME ACTIVATEWINDOW TYPE KEY HELP QUIT", FALSE);
         else if (is_word(s, "QUIT")) {
             t_str(&t, (const UBYTE *)"bye", FALSE);
             quit = TRUE;  /* the main loop sees it on its next turn */
@@ -4386,6 +4613,12 @@ int main(int argc, char **argv)
 
     server = FindTask(NULL);
     SetTaskPri(server, 2);
+    /* No "insert volume" requesters: nobody may be at the Amiga to answer one,
+     * and it would hold up the command, a file transfer or the whole daemon.
+     * A missing volume is an error instead. Our processes and every command
+     * they run inherit it; the Shell gets its own setting back at the end. */
+    old_window = ((struct Process *)server)->pr_WindowPtr;
+    ((struct Process *)server)->pr_WindowPtr = (APTR)-1;
     for (i = 0; i < PENDING; i++)
         pend[i].fd = -1;
     InitSemaphore(&picture);
@@ -4493,6 +4726,7 @@ out:
     }
     if (reader_gone >= 0)
         FreeSignal(reader_gone);
+    ((struct Process *)server)->pr_WindowPtr = old_window;
     free_frame();
     if (input_io) {
         CloseDevice((struct IORequest *)input_io);

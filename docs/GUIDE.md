@@ -226,6 +226,16 @@ interrupted copy.
   'RESUME'
   ```
 
+- **Scripts that type.** amigentd's ARexx port also brings a window to the
+  front and types into it, through the Amiga's own keymap:
+
+  ```rexx
+  address AMIGENT
+  'ACTIVATEWINDOW "Shell*"'   /* rc 5 when no window title matches */
+  'TYPE "dir RAM:<return>"'   /* keys in angle brackets: <ctrl c>, <lamiga q> */
+  'KEY "esc"'
+  ```
+
 - **System information.** The *i* button shows Kickstart and Workbench versions,
   CPU, FPU, memory, the network stack and the free space of each volume.
 
@@ -316,7 +326,8 @@ settings and menu entries; see
 On the Amiga, `amigentd` takes `SETUP`, `KEY=file`, `PORT=number`, `QUIET` and
 `TLSONLY` from the command line or, started from Workbench, from the tool types
 of its icon. It answers ARexx on the port `AMIGENT` (`STATUS`, `CLIENTS`,
-`VERSION`, `HELP`, `QUIT`), and `amigent-status` shows the same in a small
+`VERSION`, `PAUSE`, `RESUME`, `ACTIVATEWINDOW`, `TYPE`, `KEY`, `HELP`, `QUIT`;
+see [the protocol](PROTOCOL.md#arexx)), and `amigent-status` shows the same in a small
 window.
 
 ## Security
