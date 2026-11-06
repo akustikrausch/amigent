@@ -100,6 +100,41 @@ def listing(amiga: str) -> list[Record]:
     return out
 
 
+def parse_assign(output: str) -> list[str]:
+    """The directories of an "Assign NAME: EXISTS" answer: the first after the
+    name, more after a plus sign (a multi-directory assign such as LIBS:)."""
+    dirs = []
+    for line in output.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0] == "+":
+            dirs.append(parts[1].strip())
+        elif len(parts) == 2 and not dirs:
+            dirs.append(parts[1].strip())
+    return dirs
+
+
+def expand(ctl, paths: list[str]) -> list[str]:
+    """Watched paths with multi-directory assigns spread out over their folders,
+    each folder once (LIBS: on AmiKit also holds SYS:Classes, say)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        targets = [path]
+        if path.endswith(":") and "/" not in path:
+            try:
+                found = ctl.exec(f"Assign {path} EXISTS", timeout=15)
+                dirs = parse_assign(found.output) if found.rc == 0 else []
+                if len(dirs) > 1:
+                    targets = dirs
+            except AmigaError:
+                pass
+        for t in targets:
+            if t.upper() not in seen:
+                seen.add(t.upper())
+                out.append(t)
+    return out
+
+
 def snapshot(ctl, path: str) -> dict | None:
     """{relative name: entry} of everything below path; None when path isn't there."""
     try:

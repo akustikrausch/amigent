@@ -1341,8 +1341,8 @@ def amiga_install_begin(name: str, folders: str = "", system: bool = True) -> st
     base = list(install.SYSTEM) if system else []
     if not base and not extra:
         raise AmigaError("with system=False, name the folders to watch")
-    record = install.Record(name, _home(), base + [f for f in extra if f not in base],
-                            started=time.strftime("%Y-%m-%d %H:%M:%S"))
+    paths = _with_ctl(lambda: install.expand(ctl, base + [f for f in extra if f not in base]))
+    record = install.Record(name, _home(), paths, started=time.strftime("%Y-%m-%d %H:%M:%S"))
     for path in record.paths:
         snap = _with_ctl(lambda: install.snapshot(ctl, path))
         if snap is None:

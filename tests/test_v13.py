@@ -520,3 +520,16 @@ def test_new_window_after_a_start_excludes_those_open_before(monkeypatch):
     assert seen["known"] == [0x1000, 0x2000] and seen["kind"] & 8
     server.amiga_wait_window("Clock")
     assert seen["known"] is None
+
+
+def test_multi_assigns_are_spread_out():
+    out = "LIBS           AmiKit:Libs\n             + AmiKit:Classes\n             + Work:MUI/Libs\n"
+    assert install.parse_assign(out) == ["AmiKit:Libs", "AmiKit:Classes", "Work:MUI/Libs"]
+
+    class C:
+        def exec(self, line, cd=None, timeout=None):
+            from amigent.client import ExecResult
+            return ExecResult(0, out if "LIBS" in line else "C              AmiKit:C\n")
+
+    assert install.expand(C(), ["C:", "LIBS:", "AmiKit:Classes", "SYS:Games/X"]) == \
+        ["C:", "AmiKit:Libs", "AmiKit:Classes", "Work:MUI/Libs", "SYS:Games/X"]
