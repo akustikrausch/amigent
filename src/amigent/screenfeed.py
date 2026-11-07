@@ -30,6 +30,7 @@ DOZE_AFTER, DOZE = 15.0, 1.0  # nobody touched anything for long: let the Amiga 
 DUTY = 0.5, 0.25  # share of the Amiga's time a sweep may take while awake, while dozing
 FOCUS_KEEP = 10.0  # a tile that answered a key stays interesting this long
 FOCUS_HALF_LIFE = 2.0  # seconds: old answers count half, the cursor moves on
+SHARED_GRACE = 20.0  # s the screen may stay taken by another client before we say offline
 FOCUS_BOXES = 2
 ANIMATED_KEEP = 30.0  # a tile that moved by itself is suspect this long after its last move
 ANIMATED_EVERY = 1.0  # while someone drives, the screen's own demo gets the leftovers
@@ -282,7 +283,8 @@ class Feed:
 
     def __init__(self, screen, lock, inputs: InputQueue, planner: Planner | None = None,
                  watching=lambda: True, on_online=lambda online, reason: None,
-                 on_screens=lambda found: None, on_refused=lambda text: None):
+                 on_screens=lambda found: None, on_refused=lambda text: None,
+                 alive=lambda: False):
         self.screen = screen
         self.lock = lock
         self.inputs = inputs
@@ -291,6 +293,7 @@ class Feed:
         self.on_online = on_online
         self.on_screens = on_screens
         self.on_refused = on_refused
+        self.alive = alive  # the Amiga answers on another line, so the screen was taken
         self.wake = threading.Event()
         self._bell_r, self._bell_w = socket.socketpair()
         self._bell_r.setblocking(False)
@@ -339,7 +342,7 @@ class Feed:
                     or (self.follow_up and now >= self.follow_up))
 
     def run(self) -> None:
-        retried = False
+        retried, shared_since = False, 0.0
         while True:
             if not self.watching():
                 self.wake.wait(1)
@@ -356,13 +359,24 @@ class Feed:
             try:
                 with self.lock():
                     self._burst()
-                retried = False
+                retried, shared_since = False, 0.0
                 self._set_online(True)
             except Exception as e:  # noqa: BLE001 - the loop must survive anything
                 self._broken()
                 if self.online and not retried:
                     retried = True  # someone may just have taken the screen for a moment
                     continue
+                # Another screen client (an AI agent at work) wins every connect; while the
+                # Amiga answers on the command line it is there, so wait and come back.
+                now = time.monotonic()
+                if self.online and (not shared_since or now - shared_since < SHARED_GRACE) \
+                        and self.alive():
+                    shared_since = shared_since or now
+                    retried = False
+                    self.wake.wait(1)
+                    self.wake.clear()
+                    continue
+                shared_since = 0.0
                 self._set_online(False, str(e) or type(e).__name__)
                 self.wake.wait(2)
                 self.wake.clear()

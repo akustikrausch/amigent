@@ -153,3 +153,29 @@ def test_feed_shows_a_key_through_a_slow_link(kind):
         time.sleep(0.01)
     amiga.close()
     link.close()
+
+
+@pytest.mark.parametrize("answers", [True, False])
+def test_feed_stays_online_while_another_client_holds_the_screen(answers, monkeypatch):
+    """An agent's screen connection pushes the viewer out; the Amiga is still there."""
+    import amigent.screenfeed as sf
+    monkeypatch.setattr(sf, "SHARED_GRACE", 0.6)
+    seen = []
+    feed = Feed(None, lambda: threading.Lock(), InputQueue(),
+                on_online=lambda online, reason: seen.append(online),
+                alive=lambda: answers)
+    feed.online = True
+    feed._due = lambda now: True
+    feed._broken = lambda: None
+
+    def burst():
+        raise OSError("connection closed by amigentd")
+
+    feed._burst = burst
+    threading.Thread(target=feed.run, daemon=True).start()
+    time.sleep(0.3)
+    assert seen == ([] if answers else [False])
+    deadline = time.monotonic() + 5
+    while not seen and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert seen == [False]  # a screen that stays taken is reported in the end

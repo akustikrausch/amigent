@@ -139,7 +139,8 @@ class Viewer:
         self.inputs = InputQueue()
         self.feed = Feed(self.screen, self.lock, self.inputs, watching=self._watching,
                          on_online=self._set_online, on_screens=self._show_screens,
-                         on_refused=lambda text: self.event("toast", key="not_supported", text=text))
+                         on_refused=lambda text: self.event("toast", key="not_supported", text=text),
+                         alive=self._answers)
         self.uploads: queue.Queue = queue.Queue()
         self.online = None
         self.ever_joined = False
@@ -315,6 +316,14 @@ class Viewer:
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
                 "volumes": sorted(volumes, key=lambda v: v["name"].lower())}
+
+    def _answers(self) -> bool:
+        """Is the Amiga there? Asked on the command line, which leaves the screen alone."""
+        try:
+            self._ctl(lambda: self.ctl.stat("RAM:"))
+            return True
+        except Exception:  # noqa: BLE001 - any failure means no
+            return False
 
     # files
 

@@ -51,6 +51,10 @@ Versions follow [semver](https://semver.org). The number lives in
   agents would share one mouse and keyboard. Nothing is stopped or removed.
   amigentd's SYSINFO lists the public ports and tasks for it (`ports=`,
   `tasks=`).
+- The viewer no longer says the Amiga is not answering while an agent works
+  on it at the same time. Only one screen connection can exist, so each agent
+  action pushes the viewer out for a moment; it now checks on the command
+  line that the Amiga is there and comes back a second later.
 
 ### Faster on slow networks
 
