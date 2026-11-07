@@ -4775,13 +4775,12 @@ static void tx_layer_gone(struct Layer *ly)
 }
 
 /* regs: d0-d7 are r[0..7], a0-a6 r[8..14] */
-static void h_text(ULONG *r)
+/* Text s[n] drawn in rp with its font, left edge x, top y. */
+static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG y)
 {
-    struct RastPort *rp = (struct RastPort *)r[9];
     struct Layer *ly = rp->Layer;
     struct TextFont *f = rp->Font;
-    const UBYTE *s = (const UBYTE *)r[8];
-    LONG n = (LONG)r[0], cw, x, y, h, i, k, total = 0, piece;
+    LONG cw, h, i, k, total = 0, piece;
     WORD widths[(1024 + TX_LEN - 1) / TX_LEN];
     struct tx *e;
 
@@ -4800,8 +4799,6 @@ static void h_text(ULONG *r)
     }
     if (total <= 0)
         return;
-    x = rp->cp_x;
-    y = rp->cp_y - f->tf_Baseline;
     h = f->tf_YSize;
     Forbid();
     tx_gen++;
@@ -4840,6 +4837,15 @@ static void h_text(ULONG *r)
         i += piece;
     }
     Permit();
+}
+
+static void h_text(ULONG *r)
+{
+    struct RastPort *rp = (struct RastPort *)r[9];
+
+    if (!rp->Font || (LONG)r[0] <= 0)
+        return;
+    tx_record(rp, (const UBYTE *)r[8], (LONG)r[0], rp->cp_x, rp->cp_y - rp->Font->tf_Baseline);
 }
 
 static void h_fill(ULONG *r, BOOL erase)
@@ -5060,6 +5066,74 @@ static LONG tx_collect(struct Window *w, struct row *out, LONG room)
     return n;
 }
 
+/* Gadget labels as rows: GadTools draws button labels on OS 3.2 (and under
+ * VisualPrefs) without going through graphics' Text vector, so the hooks never
+ * see them. The label is in the gadget itself; it goes in where no recorded
+ * text covers that spot yet. Called with IntuitionBase locked. */
+static LONG gadget_rows(struct Window *w, struct row *out, LONG n, LONG room)
+{
+    struct Gadget *g;
+    struct TextFont *f = w->RPort ? w->RPort->Font : NULL;
+    LONG count = 0, base = n;
+
+    if (!f)
+        return n;
+    for (g = w->FirstGadget; g && n < room && count < 256; g = g->NextGadget, count++) {
+        struct IntuiText *it = NULL;
+        const UBYTE *txt;
+        LONG box[4], len, tw, x, y, h = f->tf_YSize, k, cx, cy;
+        BOOL centred = FALSE, covered = FALSE;
+
+        if (g->GadgetType & GTYP_SYSGADGET || !g->GadgetText)
+            continue;
+        if ((g->Flags & GFLG_LABELMASK) == GFLG_LABELSTRING) {
+            txt = (const UBYTE *)g->GadgetText;
+            centred = TRUE;
+        } else {
+            if ((g->Flags & GFLG_LABELMASK) == GFLG_LABELITEXT)
+                it = g->GadgetText;
+            else {
+                it = image_text((struct Image *)g->GadgetText);
+                centred = TRUE;
+            }
+            if (!it || !it->IText)
+                continue;
+            txt = it->IText;
+        }
+        for (len = 0; txt[len] && len < TX_LEN; len++)
+            ;
+        if (!len)
+            continue;
+        gadget_box(w, g, box);
+        tw = TextLength(w->RPort, (STRPTR)txt, len);
+        for (k = 0; k < len; k++)  /* GadTools underscores mark the shortcut key */
+            if (txt[k] == '_')
+                tw -= TextLength(w->RPort, (STRPTR)"_", 1);
+        if (centred || !it) {
+            x = box[0] + (box[2] - tw) / 2;
+            y = box[1] + (box[3] - h) / 2;
+        } else {
+            x = box[0] + it->LeftEdge;
+            y = box[1] + it->TopEdge;
+        }
+        cx = x + tw / 2, cy = y + h / 2;
+        for (k = 0; k < base && !covered; k++)
+            covered = out[k].win == w && cx >= out[k].x && cx < out[k].x + out[k].w &&
+                      cy >= out[k].y && cy < out[k].y + out[k].h;
+        if (covered)
+            continue;
+        out[n].win = w;
+        out[n].x = x, out[n].y = y, out[n].w = tw > 0 ? tw : len * f->tf_XSize, out[n].h = h;
+        out[n].cw = 0;
+        out[n].len = 0;
+        for (k = 0; k < len; k++)
+            if (txt[k] != '_')
+                out[n].s[out[n].len++] = txt[k] < 32 ? '?' : txt[k];
+        n++;
+    }
+    return n;
+}
+
 static UBYTE lower(UBYTE c)
 {
     return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7) ? c + 32 : c;
@@ -5193,6 +5267,7 @@ static BOOL screen_text(struct text *t, const UBYTE *match)
         Forbid();  /* the hooks change the runs under Forbid only */
         n = tx_collect(w, rows, tx_size);
         Permit();
+        n = gadget_rows(w, rows, n, tx_size);
         found = tx_lines(t, rows, n, match);
     }
     UnlockIBase(lock);

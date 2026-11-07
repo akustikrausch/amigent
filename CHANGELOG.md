@@ -17,6 +17,12 @@ Versions follow [semver](https://semver.org). The number lives in
   a picture.
 - `amiga_click_text` clicks on visible text, such as a button label that
   `amiga_ui_tree` can't name.
+- Gadget labels that Intuition draws itself (an IntuiText in the gadget, as
+  most programs without GadTools have) appear in the screen text at their
+  place. GadTools button labels on OS 3.2 sit in a private image class and
+  stay invisible to it: take a picture of that part.
+- `amiga_ui_click` with a window title that several windows share takes the
+  frontmost one.
 - `amiga_wait_window` and `amiga_wait_text` wait on the Amiga itself until a
   window opens or closes, or a text shows up or goes; the Amiga looks ten
   times a second and the line stays quiet.

@@ -223,6 +223,19 @@ def test_ui_click_by_number(monkeypatch):
     assert fake.calls == [("click", 1043, 588)]
 
 
+def test_ui_click_takes_the_front_window_when_titles_repeat(monkeypatch):
+    gadget = lambda win, x: {"kind": "gadget", "window": win, "id": "0", "label": "close", "x": x,
+                             "y": 300, "w": 29, "h": 30, "disabled": False, "selected": False,
+                             "type": "sys"}
+    fake = FakeScreen(tree=[
+        {"kind": "window", "id": "0a000001", "title": "GT Label Test"}, gadget("0a000001", 300),
+        {"kind": "window", "id": "0a000002", "title": "GT Label Test"}, gadget("0a000002", 600),
+    ])
+    monkeypatch.setattr(server, "screen", fake)
+    server.amiga_ui_click("close", window="GT Label Test")
+    assert fake.calls == [("click", 314, 315)]
+
+
 def test_refusal_is_not_retried():
     seen = []
     amiga = fake_amigentd(2, {7: b"\1"}, seen)

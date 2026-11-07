@@ -748,6 +748,10 @@ def amiga_ui_click(label: str = "", window: str = "", number: int = -1, button: 
             raise AmigaError("give a label or a number")
         exact = [g for g in gadgets if g["label"].lower() == label.lower()]
         matches = exact or [g for g in gadgets if label.lower() in g["label"].lower()]
+    if len(matches) > 1 and window and window not in windows:
+        # several windows share the title: the frontmost one (first in the tree) counts
+        first = matches[0]["window"]
+        matches = [g for g in matches if g["window"] == first]
     if len(matches) != 1:
         names = ", ".join(repr(g["label"]) for g in matches[:8])
         raise AmigaError(f"{len(matches)} gadgets match {label!r}{': ' + names if names else ''}")
