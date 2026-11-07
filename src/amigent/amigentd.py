@@ -51,6 +51,8 @@ PALETTE = bytes(c for v in range(256) for c in (_LUT["r"][v], _LUT["g"][v], _LUT
 _BYTE = [bytes((v,)) for v in range(256)]
 
 
+DRAG_STEP = 8  # px per relative step: small enough that mouse acceleration stays out
+
 class AmigentdError(Exception):
     pass
 
@@ -583,12 +585,26 @@ class Amigentd:
             self.button(button, False)
             time.sleep(0.05)
 
-    def drag(self, x1: int, y1: int, x2: int, y2: int, button: str = "left") -> None:
+    def drag(self, x1: int, y1: int, x2: int, y2: int, button: str = "left",
+             relative: bool = False) -> None:
+        """relative: the way there as mouse movement in small steps, for programs that
+        follow the mouse themselves (ProTracker 4 moves its window only so)."""
         self.move(x1, y1)
         time.sleep(0.05)
         self.button(button, True)
         time.sleep(0.05)
-        self.move(x2, y2)
+        if relative:
+            fx, fy = self.mickeys_per_pixel()
+            dx, dy = round((x2 - x1) * fx), round((y2 - y1) * fy)
+            steps = max(1, -(-max(abs(dx), abs(dy)) // DRAG_STEP))
+            done_x = done_y = 0
+            for i in range(1, steps + 1):
+                sx, sy = dx * i // steps - done_x, dy * i // steps - done_y
+                self.move_relative(sx, sy)
+                done_x, done_y = done_x + sx, done_y + sy
+                time.sleep(0.03)
+        else:
+            self.move(x2, y2)
         time.sleep(0.05)
         self.button(button, False)
 
@@ -648,6 +664,16 @@ class Amigentd:
                     picture.paste(Image.frombytes("RGB", (gw, gh), unpack_rgb(data, gw * gh)),
                                   (left, top))
         return picture
+
+    def mickeys_per_pixel(self) -> tuple[float, float]:
+        """Mouse counts per screen pixel. Intuition counts chipset screens in hires
+        interlace units: lores takes two across, a screen without interlace two down,
+        superhires half. Graphics card screens count one to one."""
+        if not self.planar or not self.width or not self.height:
+            return 1.0, 1.0
+        fx = 2.0 if self.width <= 400 else 0.5 if self.width >= 1000 else 1.0
+        fy = 2.0 if self.height < 360 else 1.0
+        return fx, fy
 
     def move_relative(self, dx: int, dy: int) -> None:
         """Mouse movement as deltas, for programs that ignore where the pointer is put."""

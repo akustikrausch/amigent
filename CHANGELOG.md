@@ -21,6 +21,11 @@ Versions follow [semver](https://semver.org). The number lives in
   most programs without GadTools have) appear in the screen text at their
   place. GadTools button labels on OS 3.2 sit in a private image class and
   stay invisible to it: take a picture of that part.
+- `amiga_drag(relative=True)` moves the way as mouse movement in small steps,
+  for windows and programs that follow the mouse themselves and ignore where
+  the pointer is put, such as ProTracker 4's window. On chipset screens the
+  distance is converted to Intuition's mouse units (lores, superhires, no
+  interlace).
 - `amiga_ui_click` with a window title that several windows share takes the
   frontmost one.
 - `amiga_wait_window` and `amiga_wait_text` wait on the Amiga itself until a

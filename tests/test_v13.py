@@ -571,3 +571,30 @@ def test_note_lines_leave_out_defaults():
     assert note_line("amiga_exec", {"command": "Echo hi", "timeout": 90}, {"timeout": 30}) == "exec Echo hi 90"
     assert note_line("amiga_screen_text", {"x": 0, "y": 0, "w": 0, "h": 0},
                      {"x": 0, "y": 0, "w": 0, "h": 0}) == "screen_text"
+
+
+def test_relative_drag_walks_the_way_in_small_steps(monkeypatch):
+    from amigent import amigentd as ad
+    monkeypatch.setattr(ad.time, "sleep", lambda s: None)
+    calls = []
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a.move = lambda x, y: calls.append(("move", x, y))
+    a.button = lambda b, down: calls.append(("button", down))
+    a.move_relative = lambda dx, dy: calls.append(("rel", dx, dy))
+    a.planar, a.width, a.height = False, 1920, 1080  # graphics card: one to one
+    a.drag(100, 50, 61, 70, relative=True)
+    rel = [c for c in calls if c[0] == "rel"]
+    assert calls[0] == ("move", 100, 50) and calls[1] == ("button", True) and calls[-1] == ("button", False)
+    assert sum(c[1] for c in rel) == -39 and sum(c[2] for c in rel) == 20
+    assert all(abs(c[1]) <= ad.DRAG_STEP and abs(c[2]) <= ad.DRAG_STEP for c in rel)
+    assert not any(c[0] == "move" for c in calls[1:])
+
+
+def test_mouse_counts_follow_the_screen_mode():
+    from amigent import amigentd as ad
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    for planar, w, h, want in ((False, 1920, 1080, (1, 1)), (True, 640, 256, (1, 2)),
+                               (True, 320, 256, (2, 2)), (True, 640, 512, (1, 1)),
+                               (True, 1280, 256, (0.5, 2))):
+        a.planar, a.width, a.height = planar, w, h
+        assert a.mickeys_per_pixel() == want

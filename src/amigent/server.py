@@ -861,10 +861,16 @@ def amiga_button(button: str = "left", down: bool = True) -> str:
 
 
 @mcp.tool()
-def amiga_drag(x1: int, y1: int, x2: int, y2: int, button: str = "left") -> str:
-    """Press at one point and release at another: drag icons or pick menu items."""
-    _with_screen(lambda: screen.drag(x1, y1, x2, y2, button))
-    return f"dragged {button} from ({x1},{y1}) to ({x2},{y2})"
+def amiga_drag(x1: int, y1: int, x2: int, y2: int, button: str = "left",
+               relative: bool = False) -> str:
+    """Press at one point and release at another: drag icons or pick menu items.
+
+    relative=True moves the way as mouse movement in small steps, for windows
+    and programs that follow the mouse themselves and ignore where the pointer
+    is put (ProTracker 4's window, many games).
+    """
+    _with_screen(lambda: screen.drag(x1, y1, x2, y2, button, relative))
+    return f"dragged {button} from ({x1},{y1}) to ({x2},{y2})" + (" by mouse movement" if relative else "")
 
 
 SETTLE_FIRST = 0.3  # after Return, before the window counts: the Shell starts the command
