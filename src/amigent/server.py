@@ -1593,7 +1593,8 @@ def amiga_aminet_install(path: str, target: str) -> str:
     path as amiga_aminet_search shows it, e.g. 'game/strat/foo.lha'; target a
     folder such as 'SYS:Games'. The archive travels packed and the Amiga's own
     lha, unlzx or unzip unpacks it; without one, the PC unpacks .lha and .zip
-    and sends the files. Use amiga_install_begin first to make it undoable,
+    and sends the files. Disk images (.adf, .adz) are read on the PC and their
+    files sent; .dms is not supported. Use amiga_install_begin first to make it undoable,
     and read the readme for an installer to run afterwards.
     """
     import io
@@ -1626,6 +1627,15 @@ def amiga_aminet_install(path: str, target: str) -> str:
         elif name.lower().endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 members = {i.filename: z.read(i) for i in z.infolist() if not i.is_dir()}
+        elif name.lower().endswith((".adf", ".adz")):
+            from . import adf
+            try:
+                members = adf.extract_all(data)
+            except adf.AdfError as e:
+                raise AmigaError(f"{name}: {e}") from e
+        elif name.lower().endswith(".dms"):
+            raise AmigaError(f"{name} is a DMS disk archive: Amigent can't unpack those. Unpack "
+                             "it with xDMS on the Amiga, or fetch an .adf version")
         else:
             raise AmigaError(f"the Amiga has no {tool or 'unpacker'} for {name}, and the PC can't "
                              "unpack it either; install that tool first")

@@ -67,7 +67,8 @@ Versions follow [semver](https://semver.org). The number lives in
 - `amiga_aminet_search`, `amiga_aminet_readme` and `amiga_aminet_install`
   fetch from Aminet on the PC; the archive travels packed and the Amiga's own
   LhA, UnLZX or UnZip unpacks it (the PC does it for .lha and .zip when the
-  Amiga lacks the tool).
+  Amiga lacks the tool). Disk images (.adf, .adz) are read on the PC, OFS and
+  FFS, and their files sent; .dms is refused with a hint.
 - `amiga_debug_log` shows what went through exec's RawPutChar: kprintf
   output and Enforcer or MuForce hits, as Sashimi catches them.
 - `amiga_run` uploads a program if it is local, runs it and reports return

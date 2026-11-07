@@ -23,7 +23,7 @@ ROW = re.compile(r'<tr class="[^"]*pkg_row[^"]*"[^>]*>(.*?)</tr>', re.S)
 CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
 LINK = re.compile(r'href="([^"]+)"')
 TAG = re.compile(r"<[^>]+>")
-PACKAGE = re.compile(r"^[a-z]+/[a-z0-9]+/[^/\s]+\.(lha|lzh|lzx|zip|adf|dms|tar\.gz|tgz|readme)$", re.I)
+PACKAGE = re.compile(r"^[a-z]+/[a-z0-9]+/[^/\s]+\.(lha|lzh|lzx|zip|adf|adz|dms|tar\.gz|tgz|readme)$", re.I)
 
 
 @dataclass
@@ -40,13 +40,17 @@ class Package:
         return re.sub(r"\.[^.]+$", ".readme", self.path)
 
 
-def _get(url: str, limit: int = MAX_ARCHIVE) -> bytes:
+def _get(url: str, limit: int = MAX_ARCHIVE, tries: int = 2) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as answer:  # nosec: fixed site
-        data = answer.read(limit + 1)
-    if len(data) > limit:
-        raise ValueError(f"{url} is larger than {limit >> 20} MB")
-    return data
+    for attempt in range(tries):
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as answer:  # nosec: fixed site
+            expected = answer.headers.get("Content-Length")
+            data = answer.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError(f"{url} is larger than {limit >> 20} MB")
+        if not expected or not expected.isdigit() or len(data) == int(expected):
+            return data
+    raise ValueError(f"{url}: download cut short ({len(data)} of {expected} bytes)")
 
 
 def _text(cell: str) -> str:
