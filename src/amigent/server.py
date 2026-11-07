@@ -62,11 +62,16 @@ screen = Amigentd(HOST, SCREEN_PORT)
 NOTE_HIDDEN = {"key", "password", "token", "secret"}
 
 
-def note_line(name: str, kwargs: dict) -> str:
-    """'amiga_start', {'command': 'HiP'} -> 'start HiP'; short, without secrets."""
+def note_line(name: str, kwargs: dict, defaults: dict | None = None) -> str:
+    """'amiga_start', {'command': 'HiP'} -> 'start HiP'; short, without secrets.
+
+    Arguments left at their default say nothing: the MCP layer fills them in."""
     parts = [name.removeprefix("amiga_")]
+    defaults = defaults or {}
     for k, v in kwargs.items():
         if k in NOTE_HIDDEN or v is None or v == "" or v is False:
+            continue
+        if k in defaults and defaults[k] == v:
             continue
         text = " ".join(str(v).split())
         parts.append(text if len(text) <= 60 else text[:57] + "...")
@@ -121,10 +126,14 @@ def _others_note() -> str:
 
 def _noted(fn):
     import functools
+    import inspect
+
+    defaults = {k: p.default for k, p in inspect.signature(fn).parameters.items()
+                if p.default is not inspect.Parameter.empty}
 
     @functools.wraps(fn)
     def run(*args, **kwargs):
-        line = note_line(fn.__name__, kwargs)
+        line = note_line(fn.__name__, kwargs, defaults)
         sent = _note(line)
         try:
             result = fn(*args, **kwargs)

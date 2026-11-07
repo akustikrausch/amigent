@@ -563,3 +563,11 @@ def test_note_lines_are_short_and_keep_secrets():
     assert note_line("amiga_put", {"local_path": "a", "key": "s3cret"}) == "put a"
     long = note_line("amiga_exec", {"command": "Echo " + "y" * 200, "cd": "", "timeout": 30})
     assert len(long) < 130 and long.endswith("30")
+
+
+def test_note_lines_leave_out_defaults():
+    from amigent.server import note_line
+    assert note_line("amiga_exec", {"command": "Echo hi", "timeout": 30}, {"timeout": 30}) == "exec Echo hi"
+    assert note_line("amiga_exec", {"command": "Echo hi", "timeout": 90}, {"timeout": 30}) == "exec Echo hi 90"
+    assert note_line("amiga_screen_text", {"x": 0, "y": 0, "w": 0, "h": 0},
+                     {"x": 0, "y": 0, "w": 0, "h": 0}) == "screen_text"
