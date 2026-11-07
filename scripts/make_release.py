@@ -152,7 +152,12 @@ NEW IN THIS VERSION
   where text is enough, and waits on the Amiga for a window or a text.
 - Data travel packed when the Amiga packs faster than its network carries,
   such as a PiStorm behind a plipbox: several times as fast.
-- Installations can be taken back; Aminet archives install from the PC.
+- amigent-monitor, a window on the Amiga, shows line by line what the AI
+  agent does, with the traffic of the link; it fits an A500 screen too.
+- Other AI agent bridges on the same Amiga, such as amimcp, are noticed and
+  reported before the first click; nothing of theirs is touched.
+- Installations can be taken back; Aminet archives install from the PC,
+  disk images (.adf, .adz) included.
 - kprintf and Enforcer output reach the AI agent (start amigentd with
   NOTEXT or NODEBUG to leave the recording out).
 
