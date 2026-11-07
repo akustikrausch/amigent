@@ -662,18 +662,27 @@ def amiga_screens() -> str:
         f"{' ham' if s['ham'] else ''} {s['title']!r}" for s in found)
 
 
-@mcp.tool()
-def amiga_screen_front(screen_id: str) -> str:
-    """Bring a screen to the front, by handle from amiga_screens or by part of its title."""
+def _find_screen(screen_id: str) -> dict:
+    """A screen by handle from amiga_screens or by part of its title."""
     found = _with_screen(screen.screens)
     try:
         handle = int(screen_id, 0)
-        target = next(s for s in found if s["handle"] == handle)
+        return next(s for s in found if s["handle"] == handle)
     except (ValueError, StopIteration):
         matches = [s for s in found if screen_id.lower() in s["title"].lower()]
         if len(matches) != 1:
             raise AmigaError(f"{len(matches)} screens match {screen_id!r}; use the handle") from None
-        target = matches[0]
+        return matches[0]
+
+
+def _screen_handle(screen_id: str) -> int:
+    return _find_screen(screen_id)["handle"]
+
+
+@mcp.tool()
+def amiga_screen_front(screen_id: str) -> str:
+    """Bring a screen to the front, by handle from amiga_screens or by part of its title."""
+    target = _find_screen(screen_id)
     if not _with_screen(lambda: screen.screen_to_front(target["handle"])):
         raise AmigaError("that screen has just closed")
     _with_screen(screen.check_size)
@@ -681,19 +690,37 @@ def amiga_screen_front(screen_id: str) -> str:
 
 
 @mcp.tool()
-def amiga_mouse_relative(dx: int, dy: int) -> str:
+def amiga_mouse_relative(dx: int, dy: int, exact: bool = False) -> str:
     """Move the mouse by a distance, as a real mouse does.
 
     For games and other programs that read mouse movement and keep their own
     pointer; amiga_click places the Intuition pointer, which those ignore.
+    The Amiga's mouse acceleration applies, as to a real mouse. exact=True
+    takes dx, dy as screen pixels and moves in small steps, then corrects by
+    where the pointer really is, so the pointer lands on the spot. The answer
+    says where Intuition has the pointer afterwards.
     """
-    _with_screen(lambda: screen.move_relative(dx, dy))
-    return f"moved by ({dx},{dy})"
+    def move():
+        if not exact:
+            screen.move_relative(dx, dy)
+            time.sleep(0.05)
+            return screen.pointer()
+        start = screen.pointer()
+        screen.walk_relative(dx, dy)
+        return screen.settle_pointer(start[0] + dx, start[1] + dy) if start else None
+
+    at = _with_screen(move)
+    where = f"; pointer now at ({at[0]},{at[1]})" if at else ""
+    return f"moved by ({dx},{dy}){where}"
 
 
 @mcp.tool()
-def amiga_ui_tree(pictures: bool = True) -> list:
+def amiga_ui_tree(pictures: bool = True, screen_id: str = "") -> list:
     """The front screen's windows and gadgets as text, with labels, boxes and numbers.
+
+    screen_id (a handle from amiga_screens or part of a title) looks at a screen
+    behind the front one without bringing it forward; pictures only come from
+    the front screen.
 
     Labels come from classic Intuition gadgets and GadTools checkboxes, strings
     and sliders. Gadgets whose label can't be read (GadTools buttons, BOOPSI,
@@ -702,7 +729,14 @@ def amiga_ui_tree(pictures: bool = True) -> list:
     read what it says and click it with amiga_ui_click(number=..., window=...).
     Only the active window's gadgets get pictures.
     """
-    tree = _with_screen(screen.ui_tree)
+    handle = _screen_handle(screen_id) if screen_id else 0
+    tree = _with_screen(lambda: screen.ui_tree(handle) if handle else screen.ui_tree())
+    if handle:
+        got = next((i.get("handle") for i in tree if i["kind"] == "screen"), None)
+        if got != handle:
+            raise AmigaError("that screen has just closed, or amigentd is older than 1.3.0 "
+                             "and only reads the front screen")
+        pictures = pictures and _with_screen(screen.screens)[0]["handle"] == handle
     lines = []
     for item in tree:
         box = f"({item.get('x', 0)},{item.get('y', 0)} {item.get('w', item.get('width', 0))}x" \
@@ -853,6 +887,12 @@ def amiga_button(button: str = "left", down: bool = True) -> str:
     """Press (down=True) or release (down=False) one mouse button on its own.
 
     For long presses and drags with stops on the way; release it again afterwards.
+    Buttons arrive as input events, as a mouse's do for Intuition and every
+    program that reads input. Programs that read the button straight from the
+    hardware (left: CIA-A $BFE001 bit 6; right/middle: POTGO), such as
+    ProTracker, many games and demos, don't see them: amigentd doesn't drive
+    those port pins, as that could fight a real mouse's button. Use keys
+    there, or a real mouse.
     """
     if button not in ("left", "right", "middle"):
         raise AmigaError("button must be left, right or middle")
@@ -1310,6 +1350,55 @@ def amiga_debug_log(everything: bool = False) -> str:
     debug_seen = total
     text = data.decode("iso-8859-1").replace("\r\n", "\n").replace("\r", "\n")
     return text if text else "no new debug output"
+
+
+followers: dict = {}  # source -> follow.Follower
+
+
+@mcp.tool()
+def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False,
+                 every: float = 1.0) -> str:
+    """Copy a growing log from the Amiga to this PC while it grows, so it survives a crash.
+
+    source is "debug" (kprintf, Enforcer and MuForce output) or a file on the
+    Amiga, such as a program's log. Every `every` seconds what is new goes to
+    local_path (default: amigent's config folder, follow/<name>.log), on a
+    connection of its own. When the Amiga hangs, the copy holds everything up to
+    that moment, also what its filesystem had not yet written to disk, with a
+    marked line where the Amiga stopped answering. stop=True ends one (or all,
+    with source ""); without arguments while followers run it lists them.
+    """
+    from . import follow, paths
+
+    if stop:
+        names = [source] if source else list(followers)
+        done = []
+        for name in names:
+            f = followers.pop(name, None)
+            if f:
+                f.stop()
+                done.append(f"{name}: {f.written} bytes in {f.target}")
+        return "stopped " + "; ".join(done) if done else "nothing was being followed"
+    if source in followers:
+        f = followers[source]
+        state = f" (Amiga not answering since {time.strftime('%H:%M:%S', time.localtime(f.lost_since))})" \
+            if f.lost_since else ""
+        return f"already following {source}: {f.written} bytes in {f.target}{state}"
+    own = Commands(HOST, CTL_PORT, SCREEN_PORT, timeout=15)
+    if source == follow.DEBUG:
+        try:
+            start, _ = own.debug_log(0)
+        except AttributeError:
+            raise AmigaError("debug output needs amigentd 1.3.0; run amigent-setup --update") from None
+        fetch = follow.debug_fetch(own.debug_log)
+    else:
+        start = int(own.stat(source).get("size", 0) or 0)
+        fetch = follow.file_fetch(own.read_from, own.stat, source)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", source.replace(":", "_")).strip("_") or "log"
+    target = Path(local_path).expanduser() if local_path else paths.FOLDER / "follow" / f"{name}.log"
+    followers[source] = follow.Follower(source, target, fetch, max(0.2, every), start).start()
+    return (f"following {source} into {target}, from now on (what is already there: "
+            f"amiga_get or amiga_debug_log)")
 
 
 RUN_DIR = "RAM:amigent-run"

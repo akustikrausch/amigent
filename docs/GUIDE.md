@@ -184,6 +184,7 @@ starts the old one again.
 | `amiga_install_begin`, `amiga_install_end`, `amiga_install_undo`, `amiga_installs` | installations that can be taken back |
 | `amiga_aminet_search`, `amiga_aminet_readme`, `amiga_aminet_install` | find and install software from Aminet |
 | `amiga_run`, `amiga_debug_log` | run a program under test, with its kprintf and Enforcer output |
+| `amiga_follow` | copy a growing log or the debug output to the PC while it grows, so it survives a hang |
 | `amiga_clipboard` | read or set the Amiga's clipboard |
 | `amiga_notes`, `amiga_note` | what the agent learned about programs on this Amiga, for next time |
 | `amiga_viewer` | open the remote desktop |

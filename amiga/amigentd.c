@@ -2234,7 +2234,9 @@ static struct IntuiText *image_text(struct Image *im)
     return (struct IntuiText *)im->ImageData;
 }
 
-static BOOL ui_tree(void)
+/* want: a screen handle from SCREENS, or 0 for the front screen; a handle that
+ * isn't in the list any more gives the front screen (the S line tells which). */
+static BOOL ui_tree(ULONG want, BOOL screen_only)
 {
     static const char *const sys[] = {"", "size", "drag", "sdrag", "depth", "sdepth",
                                       "zoom", "", "close"};
@@ -2245,7 +2247,10 @@ static BOOL ui_tree(void)
     char hold = held();
 
     lock = LockIBase(0);
-    s = IntuitionBase->FirstScreen;
+    for (s = IntuitionBase->FirstScreen; want && s && (ULONG)s != want; s = s->NextScreen)
+        ;
+    if (!s)
+        s = IntuitionBase->FirstScreen;
     t_chr(&t, 'S');
     t_tab(&t);
     t_hex(&t, (ULONG)s);
@@ -2258,9 +2263,13 @@ static BOOL ui_tree(void)
     t_tab(&t);  /* from 1.3.0: m menu open, h new windows held back */
     if (hold)
         t_chr(&t, hold);
+    t_tab(&t);  /* from 1.3.0: where Intuition has the pointer on this screen */
+    t_num(&t, s->MouseX);
+    t_tab(&t);
+    t_num(&t, s->MouseY);
     t_chr(&t, '\n');
     /* Layers run front to back; the window list does not. */
-    for (l = s->LayerInfo.top_layer; l; l = l->back) {
+    for (l = screen_only ? NULL : s->LayerInfo.top_layer; l; l = l->back) {
         struct Window *w;
         struct Gadget *g;
         LONG box[4], n = 0;
@@ -2818,10 +2827,23 @@ static BOOL c_fault(struct link *l, LONG code)
 {
     ULONG words[25];  /* even address for the 68000 */
     char *buf = (char *)words;
+    LONG n, i;
+    char num[12];
 
     if (!code)
         return c_fail(l, 1, "failed");
-    Fault(code, NULL, buf, sizeof(words));
+    /* The text is in the Amiga's language; " [code]" lets the PC tell which it was. */
+    Fault(code, NULL, buf, sizeof(words) - 14);
+    for (n = code, i = 0; n > 0 && i < 10; n /= 10)
+        num[i++] = '0' + (char)(n % 10);
+    for (n = 0; buf[n]; n++)
+        ;
+    buf[n++] = ' ';
+    buf[n++] = '[';
+    while (i > 0)
+        buf[n++] = num[--i];
+    buf[n++] = ']';
+    buf[n] = 0;
     return c_fail(l, 1, buf);
 }
 
@@ -3076,7 +3098,8 @@ static BOOL c_dir(struct link *l, UWORD len, BOOL itself)
     return c_text(l, &t);
 }
 
-static BOOL c_read(struct link *l, UWORD len)
+/* from: the first byte to send (arg bit 1, from 1.3.0), for following a log. */
+static BOOL c_read(struct link *l, UWORD len, ULONG from)
 {
     struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
     UBYTE *buf = AllocVec(CHUNK, MEMF_ANY), head[5];
@@ -3094,14 +3117,16 @@ static BOOL c_read(struct link *l, UWORD len)
         else if (!(fh = Open(path, MODE_OLDFILE)) || !ExamineFH(fh, fib))
             err = IoErr();
         else {
-            size = fib->fib_Size;
+            size = (ULONG)fib->fib_Size > from ? fib->fib_Size - from : 0;
+            if (size)
+                Seek(fh, from, OFFSET_BEGINNING);
             /* Some handlers open a read protected file and only refuse the
              * Read: try one before the size goes out, so that is an error
              * reply and not a dropped link. */
             if (size && Read(fh, buf, size > CHUNK ? CHUNK : size) <= 0)
                 err = IoErr() ? IoErr() : ERROR_READ_PROTECTED;
             else
-                Seek(fh, 0, OFFSET_BEGINNING);
+                Seek(fh, size ? from : 0, OFFSET_BEGINNING);
         }
         if (err)
             alive = c_fault(l, err);
@@ -3486,6 +3511,7 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "text", text_on);
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
+    t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_names(&t, "ports=", &SysBase->PortList, NULL);  /* for the PC to spot other agents */
     t_names(&t, "tasks=", &SysBase->TaskReady, &SysBase->TaskWait);
     return c_text(l, &t);
@@ -5683,7 +5709,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_EXEC:
         return c_exec(l, x, y, w);
     case CMD_READ_FILE:
-        return c_read(l, x);
+        return c_read(l, x, c[1] & 1 ? (ULONG)w << 16 | h : 0);
     case CMD_WRITE_FILE:
         return c_write(l, c[1] & 1, (c[1] & 2) != 0, x, (ULONG)w << 16 | h);
     case CMD_DIR:
@@ -5975,7 +6001,7 @@ static BOOL command(const UBYTE *c)
     case CMD_FRAME_RGB:
         return frame_rgb(c[1] & 1, x, y, w, h);
     case CMD_UITREE:
-        return ui_tree();
+        return ui_tree((ULONG)x << 16 | y, (c[1] & 1) != 0);
     case CMD_MENUS:
         return menus();
     case CMD_CLIENT:

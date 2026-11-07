@@ -25,7 +25,14 @@ Versions follow [semver](https://semver.org). The number lives in
   for windows and programs that follow the mouse themselves and ignore where
   the pointer is put, such as ProTracker 4's window. On chipset screens the
   distance is converted to Intuition's mouse units (lores, superhires, no
-  interlace).
+  interlace), and the Amiga's mouse acceleration is taken back by reading
+  where the pointer really went. `amiga_mouse_relative` says where the
+  pointer is afterwards and with `exact=True` lands on the spot. UITREE's
+  screen line carries the pointer position (`mousex`, `mousey`).
+- `amiga_ui_tree(screen_id=...)` looks at a screen behind the front one
+  without bringing it forward.
+- `amiga_mouse_move` and the clicks put a point off the screen on its edge
+  instead of failing, as a window partly outside the screen gives such points.
 - `amiga_ui_click` with a window title that several windows share takes the
   frontmost one.
 - `amiga_wait_window` and `amiga_wait_text` wait on the Amiga itself until a
@@ -119,8 +126,19 @@ Versions follow [semver](https://semver.org). The number lives in
   each Return until the window has been still for a moment (up to `settle`
   seconds, 10 by default), so a Shell shows each command's output before the
   next one comes.
+- `amiga_follow` copies a growing log to the PC while it grows, a file or the
+  debug output, so it survives a hang: the copy holds everything up to that
+  moment, also what the filesystem had not yet written to disk, and marks
+  where the Amiga stopped answering. READ can start at an offset for it.
 
 ### Fixes
+
+- Errors from AmigaDOS carry their number (`Objekt ist in Gebrauch [202]` on
+  the wire), so the PC explains the common ones in any language: a file
+  another program has open for writing, a volume or assign that is gone
+  after a restart.
+- `amiga_button` says that programs reading the mouse buttons straight from
+  the hardware (ProTracker, many games) don't see them.
 
 - A volume that isn't there makes a command or a file transfer fail at once.
   Before, AmigaDOS opened an "insert volume" requester that waited for

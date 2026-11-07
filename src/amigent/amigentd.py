@@ -553,7 +553,11 @@ class Amigentd:
         return self._paint()
 
     def move(self, x: int, y: int) -> None:
-        self._ok(CMD_MOVE, 0, x, y)
+        """Put the pointer at x, y; points off the screen go to its nearest edge
+        (a window partly outside the screen gives such coordinates)."""
+        hi_x = self.width - 1 if self.width else 0xFFFF
+        hi_y = self.height - 1 if self.height else 0xFFFF
+        self._ok(CMD_MOVE, 0, max(0, min(int(x), hi_x)), max(0, min(int(y), hi_y)))
 
     def button(self, name: str, down: bool) -> None:
         mask = BUTTONS[name]
@@ -594,15 +598,8 @@ class Amigentd:
         self.button(button, True)
         time.sleep(0.05)
         if relative:
-            fx, fy = self.mickeys_per_pixel()
-            dx, dy = round((x2 - x1) * fx), round((y2 - y1) * fy)
-            steps = max(1, -(-max(abs(dx), abs(dy)) // DRAG_STEP))
-            done_x = done_y = 0
-            for i in range(1, steps + 1):
-                sx, sy = dx * i // steps - done_x, dy * i // steps - done_y
-                self.move_relative(sx, sy)
-                done_x, done_y = done_x + sx, done_y + sy
-                time.sleep(0.03)
+            self.walk_relative(x2 - x1, y2 - y1)
+            self.settle_pointer(x2, y2)
         else:
             self.move(x2, y2)
         time.sleep(0.05)
@@ -617,9 +614,9 @@ class Amigentd:
             raise AmigentdError(f"amigentd on the Amiga speaks protocol {self.protocol}, this needs "
                                 f"{version}; run amigent-setup --update")
 
-    def _text(self, cmd: int) -> list[list[str]]:
+    def _text(self, cmd: int, a: int = 0, b: int = 0, arg: int = 0) -> list[list[str]]:
         def call():
-            self._send(cmd)
+            self._send(cmd, arg, a, b)
             size = struct.unpack(">I", self._exact(4))[0]
             return self._exact(size).decode("iso-8859-1")
 
@@ -665,6 +662,14 @@ class Amigentd:
                                   (left, top))
         return picture
 
+    def pointer(self) -> tuple[int, int] | None:
+        """Where Intuition has the pointer on the front screen, or None from an
+        amigentd before 1.3.0."""
+        for f in self._text(CMD_UITREE, arg=1):
+            if f[0] == "S" and len(f) >= 8:
+                return int(f[6]), int(f[7])
+        return None
+
     def mickeys_per_pixel(self) -> tuple[float, float]:
         """Mouse counts per screen pixel. Intuition counts chipset screens in hires
         interlace units: lores takes two across, a screen without interlace two down,
@@ -675,21 +680,49 @@ class Amigentd:
         fy = 2.0 if self.height < 360 else 1.0
         return fx, fy
 
+    def walk_relative(self, dx: int, dy: int) -> None:
+        """A distance in screen pixels as mouse movement in small steps."""
+        fx, fy = self.mickeys_per_pixel()
+        dx, dy = round(dx * fx), round(dy * fy)
+        steps = max(1, -(-max(abs(dx), abs(dy)) // DRAG_STEP))
+        done_x = done_y = 0
+        for i in range(1, steps + 1):
+            sx, sy = dx * i // steps - done_x, dy * i // steps - done_y
+            self.move_relative(sx, sy)
+            done_x, done_y = done_x + sx, done_y + sy
+            time.sleep(0.03)
+
+    def settle_pointer(self, x: int, y: int, rounds: int = 6) -> tuple[int, int] | None:
+        """Correct mouse acceleration: read where the pointer is and walk the rest.
+        Returns where it ended, or None when amigentd can't tell."""
+        at = None
+        for _ in range(rounds):
+            time.sleep(0.05)
+            at = self.pointer()
+            if at is None or (abs(at[0] - x) <= 1 and abs(at[1] - y) <= 1):
+                return at
+            self.walk_relative(x - at[0], y - at[1])
+        return at
+
     def move_relative(self, dx: int, dy: int) -> None:
         """Mouse movement as deltas, for programs that ignore where the pointer is put."""
         self._need(2)
         self._ok(CMD_MOVE_REL, 0, dx & 0xFFFF, dy & 0xFFFF)
 
-    def ui_tree(self) -> list[dict]:
-        """Front screen, its windows and their gadgets, with screen coordinates."""
+    def ui_tree(self, handle: int = 0) -> list[dict]:
+        """A screen (the front one by default), its windows and their gadgets, with
+        screen coordinates. amigentd before 1.3.0, or a handle that has gone, answers
+        with the front screen: the screen item's handle tells."""
         items = []
-        for f in self._text(CMD_UITREE):
+        for f in self._text(CMD_UITREE, handle >> 16, handle & 0xFFFF):
             if f[0] == "S" and len(f) >= 5:
                 # from amigentd 1.3.0 a sixth field: m a menu is open, h windows are held back
                 hold = f[5][:1] if len(f) >= 6 else ""
                 items.append({"kind": "screen", "handle": int(f[1], 16), "width": int(f[2]),
                               "height": int(f[3]), "title": f[4],
                               "held": {"m": "menu", "h": "held"}.get(hold, "")})
+                if len(f) >= 8:  # from amigentd 1.3.0: where Intuition has the pointer
+                    items[-1]["mouse"] = (int(f[6]), int(f[7]))
             elif f[0] == "W" and len(f) >= 8:
                 items.append({"kind": "window", "id": f[1], "x": int(f[2]), "y": int(f[3]),
                               "w": int(f[4]), "h": int(f[5]), "active": "a" in f[6],

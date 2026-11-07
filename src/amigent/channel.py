@@ -8,6 +8,7 @@ otherwise. See docs/PROTOCOL.md.
 from __future__ import annotations
 
 import socket
+import re
 import struct
 import time
 import zlib
@@ -93,6 +94,23 @@ def _read_crc(ch) -> int:
 
 def _nothing(ch) -> None:
     return None
+
+
+DOS_HINTS = {
+    202: "another program has it open for writing; AmigaDOS lets nobody read it "
+         "until that program closes it",
+    218: "that volume or assign isn't there; assigns made by hand or by a start "
+         "script are gone after a restart; Assign NAME: folder makes one again",
+}
+
+
+def dos_text(text: str) -> str:
+    """'Objekt ist in Gebrauch [202]' from amigentd 1.3.0 -> the text with a hint."""
+    m = re.fullmatch(r"(.*?)\s*\[(\d+)\]", text, re.S)
+    if not m:
+        return text
+    hint = DOS_HINTS.get(int(m.group(2)))
+    return f"{m.group(1)} ({hint})" if hint else m.group(1)
 
 
 @dataclass
@@ -243,7 +261,7 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError("amigentd refused a command channel")
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
-            self._notes = None
+            self._notes = self._read_from = None  # a new amigentd may answer now
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -330,7 +348,8 @@ class AmigaChannel(VolumeFlush):
         status = self._exact(1)[0]
         if status:
             size = struct.unpack(">H", self._exact(2))[0]
-            raise AmigaError(self._exact(size).decode(ENCODING) or f"error {status}", status)
+            raise AmigaError(dos_text(self._exact(size).decode(ENCODING)) or f"error {status}",
+                             status)
 
     def _request(self, cmd: int, path: str = "", arg: int = 0, y: int = 0, w: int = 0, h: int = 0,
                  payload: bytes = b"", timeout: float | None = None) -> None:
@@ -422,6 +441,16 @@ class AmigaChannel(VolumeFlush):
 
     def read_file(self, path: str) -> bytes:
         return self._one(Request.read_file(path))
+
+    def read_from(self, path: str, start: int) -> bytes:
+        """The file from byte start on, for following a growing log. amigentd before
+        1.3.0 sends all of it; the cut happens here then."""
+        if getattr(self, "_read_from", None) is None:
+            self._read_from = self.sysinfo().get("readfrom") == "1"
+        if not self._read_from or start <= 0:
+            return self.read_file(path)[max(start, 0):]
+        return self._one(Request(READ, path, 1, 0, (start >> 16) & 0xFFFF, start & 0xFFFF,
+                                 read=_read_blob, wait=budget(0, DISK_RATE)))
 
     def write_file(self, path: str, data: bytes, append: bool = False) -> None:
         self._one(Request.write(path, data, append))

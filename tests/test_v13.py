@@ -582,6 +582,7 @@ def test_relative_drag_walks_the_way_in_small_steps(monkeypatch):
     a.button = lambda b, down: calls.append(("button", down))
     a.move_relative = lambda dx, dy: calls.append(("rel", dx, dy))
     a.planar, a.width, a.height = False, 1920, 1080  # graphics card: one to one
+    a.pointer = lambda: None  # an amigentd that can't tell
     a.drag(100, 50, 61, 70, relative=True)
     rel = [c for c in calls if c[0] == "rel"]
     assert calls[0] == ("move", 100, 50) and calls[1] == ("button", True) and calls[-1] == ("button", False)
@@ -598,3 +599,52 @@ def test_mouse_counts_follow_the_screen_mode():
                                (True, 1280, 256, (0.5, 2))):
         a.planar, a.width, a.height = planar, w, h
         assert a.mickeys_per_pixel() == want
+
+
+def test_relative_drag_corrects_for_acceleration(monkeypatch):
+    """The Amiga speeds big moves up; the pointer position tells how much to take back."""
+    from amigent import amigentd as ad
+    monkeypatch.setattr(ad.time, "sleep", lambda s: None)
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a.planar, a.width, a.height = False, 1920, 1080
+    at = [100, 100]
+
+    def rel(dx, dy):  # acceleration: moves over 4 counts go one and a half times as far
+        k = 1.5 if max(abs(dx), abs(dy)) > 4 else 1
+        at[0] += round(dx * k)
+        at[1] += round(dy * k)
+
+    a.move = lambda x, y: at.__setitem__(slice(0, 2), [x, y])
+    a.button = lambda b, down: None
+    a.move_relative = rel
+    a.pointer = lambda: tuple(at)
+    a.drag(100, 100, 160, 220, relative=True)
+    assert abs(at[0] - 160) <= 1 and abs(at[1] - 220) <= 1
+
+
+def test_ui_tree_reads_the_pointer_from_the_screen_line():
+    from amigent import amigentd as ad
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a._text = lambda cmd, a=0, b=0, arg=0: [["S", "085b63b0", "1920", "1080", "WB", "", "12", "-3"]]
+    assert a.pointer() == (12, -3)
+    assert a.ui_tree()[0]["mouse"] == (12, -3)
+    a._text = lambda cmd, a=0, b=0, arg=0: [["S", "085b63b0", "1920", "1080", "WB"]]
+    assert a.pointer() is None
+
+
+def test_dos_errors_get_their_number_off_and_a_hint_on():
+    from amigent.channel import dos_text
+    assert dos_text("Objekt ist in Gebrauch [202]").startswith("Objekt ist in Gebrauch (another program")
+    assert "Assign" in dos_text("Gerät nicht angemeldet [218]")
+    assert dos_text("Objekt nicht gefunden [205]") == "Objekt nicht gefunden"
+    assert dos_text("plain text") == "plain text"
+
+
+def test_moves_off_the_screen_stop_at_its_edge():
+    from amigent import amigentd as ad
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    sent = []
+    a._ok = lambda *args: sent.append(args)
+    a.width, a.height = 640, 256
+    a.move(-20, 300)
+    assert sent[-1][2:] == (0, 255)

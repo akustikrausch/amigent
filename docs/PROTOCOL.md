@@ -338,9 +338,13 @@ UITREE and MENUS answer `u32 length`, then Latin-1 text, one record per line,
 fields separated by tabs, coordinates in pixels of the screen. Tabs and line ends
 inside names become spaces.
 
-UITREE describes the front screen:
+UITREE describes the front screen. From amigentd 1.3.0 `x`/`y` (the command's
+words) may hold another screen's handle from SCREENS, high and low word; a handle
+that has gone, and older amigentd, give the front screen, so the `S` line's
+handle tells which one came. Arg bit 1 sends the `S` line alone, a cheap way to
+learn where the pointer is (older amigentd send the whole tree).
 
-    S  handle  width  height  title  held
+    S  handle  width  height  title  held  mousex  mousey
     W  window  x  y  w  h  flags  title
     G  window  gadget  x  y  w  h  type  flags  label
 
@@ -351,6 +355,9 @@ UITREE describes the front screen:
   tells `h` from a ScreenToFront of the front screen, which changes nothing, by a
   helper process: it counts when the call hasn't come back after 0.4 s.
   Older amigentd send no such field.
+- `mousex`, `mousey`, from amigentd 1.3.0: where Intuition has the pointer, in
+  the screen's pixels (MouseX, MouseY); after relative mouse movement this tells
+  where it really went, acceleration included.
 - Windows come front to back. `window` is the window's address in 8 hex digits,
   `handle` the screen's, as in SCREENS. Window flags: `a` active, `b` backdrop.
 - `gadget` counts the window's gadgets from `0`, in list order, system gadgets
@@ -420,13 +427,15 @@ Requests use the same 10 byte header, followed by their payload. Every reply
 starts with `u8 status`: `0` for success, followed by what the command returns;
 otherwise `u16 length` and a Latin-1 error text, and nothing else. The text is
 the AmigaDOS one for the error where there is one (in the Amiga's language, so
-`Objekt nicht gefunden` on a German system). Status `2` means a timeout, `1`
-everything else.
+`Objekt nicht gefunden` on a German system); from amigentd 1.3.0 it ends in the
+AmigaDOS error number in brackets, `Objekt nicht gefunden [205]`, so a client can
+tell errors apart in any language. Status `2` means a timeout, `1` everything
+else.
 
 | nr | command | arg | fields | payload | success returns |
 |---|---|---|---|---|---|
 | 21 | EXEC | | x = command length, y = directory length, w = timeout in seconds, 0 = none | command, directory | `i32 return code`, `u32 length`, output |
-| 22 | READ | | x = path length | path | `u32 size`, data |
+| 22 | READ | 1 = from w/h (1.3.0, `readfrom=1` in SYSINFO) | x = path length, w/h = first byte high/low | path | `u32 size` (what follows), data |
 | 23 | WRITE | 1 = append | x = path length, w/h = size high/low | path, data | |
 | 24 | DIR | | x = path length | path | text |
 | 25 | STAT | | x = path length | path | text |
@@ -506,7 +515,8 @@ separated by tabs.
   `inflate`, how many KB a second this Amiga packs (levels 1 and 2) and
   unpacks, measured once on text-like data at the first SYSINFO; `text` and
   `debug`, `1` while amigentd records screen text and debug output; `note`,
-  `1` when it takes [NOTE](#monitor); `ports` and `tasks`, the names of all
+  `1` when it takes [NOTE](#monitor); `readfrom`, `1` when READ can start at an
+  offset (1.3.0); `ports` and `tasks`, the names of all
   public message ports and of all other tasks, separated by `|` (a Shell
   process by the command it runs), at most 4 KB each. With them a client
   notices other remote control software on the Amiga, such as a second AI
