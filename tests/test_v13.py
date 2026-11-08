@@ -648,3 +648,38 @@ def test_moves_off_the_screen_stop_at_its_edge():
     a.width, a.height = 640, 256
     a.move(-20, 300)
     assert sent[-1][2:] == (0, 255)
+
+
+def test_drag_moves_the_mouse_by_default_so_window_gadgets_follow(monkeypatch):
+    """A drag bar or size gadget ignores a pointer jump; mouse movement moves it."""
+    from amigent import amigentd as ad
+    monkeypatch.setattr(ad.time, "sleep", lambda s: None)
+    calls = []
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a._sock, a.protocol = object(), 5
+    a.planar, a.width, a.height = False, 1920, 1080
+    a.move = lambda x, y: calls.append(("move", x, y))
+    a.button = lambda b, down: calls.append(("button", down))
+    a.move_relative = lambda dx, dy: calls.append(("rel", dx, dy))
+    a.pointer = lambda: None  # can't tell where it ended: a jump makes the end exact
+    a.drag(1866, 576, 1600, 420)
+    rel = [c for c in calls if c[0] == "rel"]
+    assert calls[1] == ("button", True) and calls[-1] == ("button", False)
+    assert sum(c[1] for c in rel) == -266 and sum(c[2] for c in rel) == -156
+    assert calls[-2] == ("move", 1600, 420)
+    calls.clear()
+    a.pointer = lambda: (1600, 420)  # landed: no jump after the movement
+    a.drag(1866, 576, 1600, 420)
+    assert [c for c in calls if c[0] == "move"] == [("move", 1866, 576)]
+
+
+def test_drag_jumps_on_an_old_amigentd(monkeypatch):
+    from amigent import amigentd as ad
+    monkeypatch.setattr(ad.time, "sleep", lambda s: None)
+    calls = []
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a._sock, a.protocol = object(), 1
+    a.move = lambda x, y: calls.append(("move", x, y))
+    a.button = lambda b, down: calls.append(("button", down))
+    a.drag(10, 10, 50, 60)
+    assert calls == [("move", 10, 10), ("button", True), ("move", 50, 60), ("button", False)]

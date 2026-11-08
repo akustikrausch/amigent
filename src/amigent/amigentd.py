@@ -590,18 +590,30 @@ class Amigentd:
             time.sleep(0.05)
 
     def drag(self, x1: int, y1: int, x2: int, y2: int, button: str = "left",
-             relative: bool = False) -> None:
-        """relative: the way there as mouse movement in small steps, for programs that
-        follow the mouse themselves (ProTracker 4 moves its window only so)."""
+             relative: bool | None = None) -> None:
+        """relative=True: the way there only as mouse movement in small steps, for
+        programs that follow the mouse themselves (ProTracker 4 moves its window only so).
+        relative=False: one jump of the pointer, as before 1.3.0.
+        None (default): mouse movement, then a jump to the exact end if the pointer
+        isn't there. A single jump (IECLASS_NEWPOINTERPOS) puts the pointer at the end
+        but window drag bars and size gadgets on OS 3.2 stay put: they follow mouse
+        movement (RAWMOUSE) with the button held, as menus and icons need not."""
+        if relative is None:
+            if not self._sock:
+                self._retry(lambda: None)  # connect: the protocol decides
+            if self.protocol < 2:
+                relative = False  # no mouse deltas before protocol 2
         self.move(x1, y1)
         time.sleep(0.05)
         self.button(button, True)
-        time.sleep(0.05)
-        if relative:
-            self.walk_relative(x2 - x1, y2 - y1)
-            self.settle_pointer(x2, y2)
-        else:
+        time.sleep(0.1)
+        if relative is False:
             self.move(x2, y2)
+        else:
+            self.walk_relative(x2 - x1, y2 - y1)
+            at = self.settle_pointer(x2, y2)
+            if relative is None and (at is None or abs(at[0] - x2) > 1 or abs(at[1] - y2) > 1):
+                self.move(x2, y2)  # icons and menus go by where the pointer is
         time.sleep(0.05)
         self.button(button, False)
 
