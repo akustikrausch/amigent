@@ -3,7 +3,7 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
-## 1.3.0 (not released yet)
+## 1.3.0 (2026-11-08)
 
 ### Text instead of pictures
 
@@ -21,15 +21,18 @@ Versions follow [semver](https://semver.org). The number lives in
   most programs without GadTools have) appear in the screen text at their
   place. GadTools button labels on OS 3.2 sit in a private image class and
   stay invisible to it: take a picture of that part.
-- `amiga_drag(relative=True)` moves the way as mouse movement in small steps,
-  for windows and programs that follow the mouse themselves and ignore where
-  the pointer is put, such as ProTracker 4's window. On chipset screens the
+- `amiga_drag` moves and sizes windows. It goes the way as mouse movement
+  in small steps with the button held, as a hand on the mouse would; a jump
+  of the pointer left drag bars and size gadgets where they were, and
+  programs that follow the mouse themselves, such as ProTracker 4's window,
+  ignored it. Before it presses the button it walks the way once with the
+  button up and measures where the pointer really went, so the Amiga's
+  mouse acceleration doesn't make it overshoot. On chipset screens the
   distance is converted to Intuition's mouse units (lores, superhires, no
-  interlace), and the Amiga's mouse acceleration is taken back by reading
-  where the pointer really went. `amiga_mouse_relative` says where the
+  interlace). `relative=False` jumps as before.
+- `amiga_mouse_relative` moves the mouse by a distance, says where the
   pointer is afterwards and with `exact=True` lands on the spot. UITREE's
   screen line carries the pointer position (`mousex`, `mousey`).
-- `amiga_drag` moves and sizes windows: by default it goes as mouse movement with the button held (a pointer jump left drag bars and size gadgets in place); `relative=False` jumps as before.
 - `amiga_ui_tree(screen_id=...)` looks at a screen behind the front one
   without bringing it forward.
 - `amiga_mouse_move` and the clicks put a point off the screen on its edge
@@ -145,7 +148,6 @@ Versions follow [semver](https://semver.org). The number lives in
   after a restart.
 - `amiga_button` says that programs reading the mouse buttons straight from
   the hardware (ProTracker, many games) don't see them.
-
 - A volume that isn't there makes a command or a file transfer fail at once.
   Before, AmigaDOS opened an "insert volume" requester that waited for
   someone at the Amiga and held up the command until then.

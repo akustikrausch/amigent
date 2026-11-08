@@ -354,8 +354,9 @@ see [the protocol](PROTOCOL.md#arexx)), and `amigent-status` shows the same in a
 window. `amigent-monitor` opens a window that lists what the agent does: each tool
 it calls and the commands, files, clicks and keys that reach `amigentd`. Its tool
 types: `NAME` (for the greeting), `WIDTH`, `HEIGHT`, `LEFT`, `TOP`, `FONT`, `SIZE`
-(a fixed-width font). Esc or the close gadget ends it, C
-clears the log.
+(a fixed-width font). The window can be sized, and its zoom gadget switches
+to a compact size; below 56 columns the side panel gives way to the log. Esc
+or the close gadget ends it, C clears the log.
 
 ## Security
 

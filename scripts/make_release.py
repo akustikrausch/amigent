@@ -75,8 +75,8 @@ KEY=<file> (default S:amigent.key), PORT=<n> (default 6801), QUIET, TLSONLY.
 amigent-monitor opens a window that shows, line by line, what the agent
 does on this Amiga: the tools it calls, commands, files, clicks and keys,
 next to the data rates and totals. Tool types: NAME=<your name> for the
-greeting, WIDTH, HEIGHT, LEFT, TOP, FONT, SIZE. Esc or the close gadget
-ends it, C clears the log.
+greeting, WIDTH, HEIGHT, LEFT, TOP, FONT, SIZE. The window can be sized
+and zoomed. Esc or the close gadget ends it, C clears the log.
 
 amigent-status shows a small window with amigentd's state and its
 connections, refreshed every 2 seconds. amigentd also answers ARexx on the
@@ -153,7 +153,10 @@ NEW IN THIS VERSION
 - Data travel packed when the Amiga packs faster than its network carries,
   such as a PiStorm behind a plipbox: several times as fast.
 - amigent-monitor, a window on the Amiga, shows line by line what the AI
-  agent does, with the traffic of the link; it fits an A500 screen too.
+  agent does, with the traffic of the link; it fits an A500 screen too and
+  can be sized.
+- The AI agent moves and sizes windows by mouse movement, as a hand would,
+  so drag bars, size gadgets and programs that follow the mouse react.
 - Other AI agent bridges on the same Amiga, such as amimcp, are noticed and
   reported before the first click; nothing of theirs is touched.
 - Installations can be taken back; Aminet archives install from the PC,

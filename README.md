@@ -146,6 +146,11 @@ All numbers, how they were taken and how to repeat them are in
 - **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
 - **Watching from the Amiga?** `amigent-monitor` in the Amigent folder opens a
   window there that lists, line by line, what the agent is doing.
+- **Trying out software?** The agent can record an installation and take it
+  back completely, and fetch programs from Aminet straight from the PC.
+- **Developing for the Amiga?** The agent builds and runs your program and
+  reads its kprintf and Enforcer output, and keeps a copy of a growing log on
+  the PC that survives a crash.
 - **Running a test or a benchmark?** *Pause the picture* in the remote desktop
   (or `PAUSE` by ARexx) gives the Amiga's CPU back to it for a while; mouse,
   keys and files keep working.
