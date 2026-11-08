@@ -15,7 +15,8 @@
  *
  * OS 2.04 and up, any screen: with 16 colours or more on OS 3 it takes its own
  * shades of green, on a 4 or 8 colour Workbench the screen's pens. The window
- * fits itself to the screen and leaves out what has no room. It draws only
+ * fits itself to the screen and leaves out what has no room; it can be sized,
+ * WIDTH and HEIGHT give the size it opens with. It draws only
  * what changed, five times a second at most. MIT licence, see LICENSE.
  */
 
@@ -30,12 +31,15 @@
 #include <graphics/rastport.h>
 #include <graphics/text.h>
 #include <graphics/view.h>
+#include <graphics/regions.h>
+#include <graphics/clip.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
 #include <proto/graphics.h>
+#include <proto/layers.h>
 #include <proto/diskfont.h>
 #include <proto/icon.h>
 #include <string.h>
@@ -44,7 +48,7 @@ const char version[] = "$VER: amigent-monitor 1.3.0 (06.11.2026)";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
-struct Library *DiskfontBase, *IconBase;
+struct Library *DiskfontBase, *IconBase, *LayersBase;
 
 #define AUTHOR "AKUSTIKRAUSCH"
 #define MON_PORT "Amigent.monitor"
@@ -339,6 +343,9 @@ static LONG pen_of(UBYTE kind, LONG age)
 static struct Window *win;
 static struct TextFont *font, *big;
 static LONG fw, fh, base;  /* font cell and baseline */
+static struct Region *clip;  /* the inner box: nothing lands on the borders */
+static BOOL clip_ok;
+static LONG cur_w, cur_h;    /* the outer size the layout is for */
 static LONG W, H, head_h, log_x, log_y, log_w, log_h, side_x, side_w, side_end, stamp;
 
 static void text_at(LONG x, LONG y, LONG fg, LONG bg, const char *s, LONG n)
@@ -394,6 +401,8 @@ static void draw_log(void)
 
     if (cols > LINE_LEN + 40)
         cols = LINE_LEN + 40;
+    if (cols <= stamp + 6)
+        return;
     for (r = 0; r < rows; r++) {
         LONG idx = nlines - rows + r, y = log_y + r * fh + base, n, at = stamp + 6;
         struct line *l;
@@ -432,7 +441,7 @@ static void draw_cursor(BOOL on)
     LONG rows = log_h / fh, cols = log_w / fw, n, x, y;
     struct line *l;
 
-    if (!nlines)
+    if (!nlines || rows < 1)
         return;
     l = &lines[(nlines - 1) % LINES];
     n = stamp + 6 + strlen(l->text) + (l->count > 1 ? 7 : 0);
@@ -464,11 +473,13 @@ static LONG row(LONG y, const char *label, const char *value, LONG fg)
     return y + fh;
 }
 
-static LONG title(LONG y, const char *text)
+/* A section's title; when the section (need pixels below the title) has no
+ * room, neither it nor anything after it is drawn. */
+static LONG title(LONG y, const char *text, LONG need)
 {
     LONG n = strlen(text);
 
-    if (y + fh + 6 > side_end)
+    if (y + fh + 4 + need > side_end)
         return side_end;
     y += 3;
     box(side_x + 6, y + fh / 2, side_x + side_w - 7, y + fh / 2, dim);
@@ -519,8 +530,10 @@ static void draw_side(void)
     LONG y = log_y - 3, i;
     ULONG now = seconds_now(), sum = 0;
 
+    if (!side_w)  /* too narrow for the panel */
+        return;
     box(side_x, log_y - 4, side_x + side_w - 1, side_end + 1, panel);
-    y = title(y, "LINK");
+    y = title(y, "LINK", 2 * fh);
     if (!st.heard || now - st.link_seen > 3)
         y = row(y, "amigentd", "not heard", red);
     else if (st.link_since) {
@@ -533,7 +546,7 @@ static void draw_side(void)
         strcat(buf, " + screen");
     y = row(y, "links", buf, bright);
 
-    y = title(y, "TRAFFIC");
+    y = title(y, "TRAFFIC", 9 * fh + 11);
     put_bytes(buf, (ULONG)st.rate_out[st.at] * 100);
     strcat(buf, "/s");
     y = row(y, "to the PC", buf, green);
@@ -550,7 +563,7 @@ static void draw_side(void)
     strcat(buf, "/s");
     y = row(y, "fastest out", buf, mid);
 
-    y = title(y, "AGENT");
+    y = title(y, "AGENT", 7 * fh);
     for (i = 0; i < HISTORY; i++)
         sum += st.work[i];
     put_dec(buf, sum);
@@ -570,13 +583,116 @@ static void draw_side(void)
     put_dec(buf, st.errors);
     y = row(y, "failures", buf, st.errors ? red : mid);
 
-    y = title(y, "AMIGA");
+    y = title(y, "AMIGA", 3 * fh);
     put_bytes(buf, AvailMem(MEMF_CHIP));
     y = row(y, "chip free", buf, bright);
     put_bytes(buf, AvailMem(MEMF_FAST));
     y = row(y, "fast free", buf, bright);
     put_clock(buf, now - st.started);
     row(y, "watching", buf, mid);
+}
+
+/* Where everything goes for an inner size of W x H; again after each resize. */
+static void layout(void)
+{
+    LONG side_cols = W / fw >= 90 ? 30 : W / fw >= 72 ? 26 : 22;
+
+    head_h = big->tf_YSize + 10;
+    log_x = 8;
+    log_y = head_h + 5;
+    if (W / fw >= 56) {
+        side_w = side_cols * fw + 12;
+        side_x = W - side_w - 6;
+        log_w = side_x - log_x - 8;
+    } else {  /* no room for the panel: the log alone */
+        side_w = 0;
+        side_x = W;
+        log_w = W - log_x - 8;
+    }
+    log_h = (H - 6 - log_y) / fh * fh;
+    if (log_h < 0)
+        log_h = 0;
+    side_end = H - 6;
+    stamp = log_w / fw >= 52 ? 9 : 0;
+}
+
+/* Called without the layer locked: the layout and the clip region follow the
+ * window's size. */
+static void fit_size(void)
+{
+    struct Rectangle r;
+
+    cur_w = win->Width;
+    cur_h = win->Height;
+    W = cur_w - win->BorderLeft - win->BorderRight;
+    H = cur_h - win->BorderTop - win->BorderBottom;
+    layout();
+    clip_ok = FALSE;
+    if (clip) {
+        ClearRegion(clip);
+        r.MinX = win->BorderLeft;
+        r.MinY = win->BorderTop;
+        r.MaxX = win->BorderLeft + W - 1;
+        r.MaxY = win->BorderTop + H - 1;
+        clip_ok = OrRectRegion(clip, &r) != 0;
+    }
+}
+
+/* Locks the window's layer for drawing, so Intuition can't size it meanwhile;
+ * a size that changed before the lock is laid out first, TRUE then. While
+ * locked the clip region keeps all drawing inside the borders; it is taken
+ * off again in unlock_drawing(), as Intuition draws the frame in the same
+ * layer. */
+static BOOL lock_for_drawing(void)
+{
+    BOOL resized = FALSE;
+
+    for (;;) {
+        LockLayer(0, win->WLayer);
+        if (win->Width == cur_w && win->Height == cur_h)
+            break;
+        UnlockLayer(win->WLayer);
+        fit_size();
+        resized = TRUE;
+    }
+    if (clip_ok)
+        InstallClipRegion(win->WLayer, clip);
+    return resized;
+}
+
+static void unlock_drawing(void)
+{
+    if (clip_ok)
+        InstallClipRegion(win->WLayer, NULL);
+    UnlockLayer(win->WLayer);
+}
+
+/* A zoom or a size larger than the room from where the window stands would
+ * leave part of it off the screen: move it back, shrink it if it must (the
+ * new size is laid out when it has come). */
+static void keep_on_screen(void)
+{
+    struct Screen *s = win->WScreen;
+    LONG l = win->LeftEdge, t = win->TopEdge, w = win->Width, h = win->Height;
+
+    if (w > s->Width)
+        w = s->Width;
+    if (h > s->Height)
+        h = s->Height;
+    if (l + w > s->Width)
+        l = s->Width - w;
+    if (t + h > s->Height)
+        t = s->Height - h;
+    if (l < 0)
+        l = 0;
+    if (t < 0)
+        t = 0;
+    if (l == win->LeftEdge && t == win->TopEdge && w == win->Width && h == win->Height)
+        return;
+    if (w == win->Width && h == win->Height)
+        MoveWindow(win, l - win->LeftEdge, t - win->TopEdge);
+    else
+        ChangeWindowBox(win, l, t, w, h);
 }
 
 static void draw_all(void)
@@ -641,17 +757,19 @@ int main(int argc, char **argv)
     struct MsgPort *port = NULL;
     struct Screen *scr = NULL;
     struct TextAttr ta, tb;
+    WORD zoom[4];
     struct monmsg *m;
     ULONG ticks = 0;
-    BOOL running = TRUE, changed;
-    LONG rc = 20, room_w, room_h, side_cols;
+    BOOL running = TRUE, changed, full, resized;
+    LONG rc = 20, room_w, room_h, min_w, min_h;
 
     if (argc == 0)
         tool_types((struct WBStartup *)argv);
     else if (!shell_args())
         return 10;
     if (!(IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37)) ||
-        !(GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37)))
+        !(GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37)) ||
+        !(LayersBase = OpenLibrary("layers.library", 37)))
         goto done;
     DiskfontBase = OpenLibrary("diskfont.library", 36);
 
@@ -696,9 +814,15 @@ int main(int argc, char **argv)
      * the time column goes first, then the side panel narrows. */
     room_w = scr->Width - scr->WBorLeft - scr->WBorRight - 8;
     room_h = scr->Height - scr->BarHeight - 1 - scr->WBorTop - scr->Font->ta_YSize - 1 - scr->WBorBottom - 4;
+    min_w = 40 * fw;
+    min_h = 12 * fh;
     W = opt_w < room_w ? opt_w : room_w;
     H = opt_h < room_h ? opt_h : room_h;
-    if (W < 40 * fw || H < 12 * fh)
+    if (W < min_w)
+        W = min_w;
+    if (H < min_h)
+        H = min_h;
+    if (W > room_w || H > room_h)
         goto done;
     big = NULL;
     if (H >= 300 && DiskfontBase) {  /* a larger title where there is room */
@@ -712,16 +836,15 @@ int main(int argc, char **argv)
     }
     if (!big)
         big = OpenFont(&ta);  /* the same, drawn bold */
-    head_h = big->tf_YSize + 10;
-    side_cols = W / fw >= 90 ? 30 : W / fw >= 72 ? 26 : 22;
-    side_w = side_cols * fw + 12;
-    side_x = W - side_w - 6;
-    log_x = 8;
-    log_y = head_h + 5;
-    log_w = side_x - log_x - 8;
-    log_h = (H - 6 - log_y) / fh * fh;
-    side_end = H - 6;
-    stamp = log_w / fw >= 52 ? 9 : 0;
+    layout();
+    /* The zoom gadget switches to the smallest size, in place on OS 3 (~0);
+     * without this Intuition zooms to the largest size and the window hangs
+     * off the screen. The outer size is a guess at the borders, a few pixels
+     * more than the least is harmless. */
+    zoom[0] = ((struct Library *)IntuitionBase)->lib_Version >= 39 ? ~0 : 0;
+    zoom[1] = ((struct Library *)IntuitionBase)->lib_Version >= 39 ? ~0 : scr->BarHeight + 1;
+    zoom[2] = min_w + scr->WBorLeft + scr->WBorRight + 18;
+    zoom[3] = min_h + scr->WBorTop + scr->Font->ta_YSize + 1 + scr->Font->ta_YSize + 3;
     win = OpenWindowTags(NULL,
         WA_Left, opt_left >= 0 ? opt_left : scr->Width - W - scr->WBorLeft - scr->WBorRight - (scr->Width > 1000 ? 40 : 0),
         WA_Top, opt_top >= 0 ? opt_top : scr->BarHeight + 1 + (scr->Height > 600 ? 24 : 0),
@@ -729,11 +852,16 @@ int main(int argc, char **argv)
         WA_Title, (ULONG)"Amigent Monitor",
         WA_ScreenTitle, (ULONG)"Amigent Monitor: what the agent does",
         WA_DragBar, TRUE, WA_DepthGadget, TRUE, WA_CloseGadget, TRUE,
+        WA_SizeGadget, TRUE, WA_SizeBBottom, TRUE,
+        WA_MaxWidth, ~0UL, WA_MaxHeight, ~0UL, WA_Zoom, (ULONG)zoom,
         WA_SmartRefresh, TRUE, WA_Activate, FALSE, WA_RMBTrap, TRUE,
-        WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_VANILLAKEY,
+        WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW | IDCMP_NEWSIZE | IDCMP_VANILLAKEY,
         WA_PubScreen, (ULONG)scr, TAG_END);
     if (!win)
         goto done;
+    /* The borders are known now: no smaller than the least the layout needs. */
+    WindowLimits(win, min_w + win->BorderLeft + win->BorderRight,
+                 min_h + win->BorderTop + win->BorderBottom, ~0UL, ~0UL);
     cmap = scr->ViewPort.ColorMap;
     get_pens(scr);
     UnlockPubScreen(NULL, scr);
@@ -753,7 +881,10 @@ int main(int argc, char **argv)
         add_line('A', hello);
         st.tools = 0;
     }
+    clip = NewRegion();
+    lock_for_drawing();
     draw_all();
+    unlock_drawing();
     rc = 0;
 
     while (running) {
@@ -763,6 +894,7 @@ int main(int argc, char **argv)
         ticks++;
         if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C)
             running = FALSE;
+        full = changed = FALSE;
         while ((im = (struct IntuiMessage *)GetMsg(win->UserPort))) {
             ULONG cls = im->Class;
             UWORD code = im->Code;
@@ -772,25 +904,38 @@ int main(int argc, char **argv)
                 running = FALSE;
             else if (cls == IDCMP_VANILLAKEY && (code == 'c' || code == 'C')) {
                 nlines = 0;
-                draw_log();
+                changed = TRUE;
+            } else if (cls == IDCMP_NEWSIZE) {
+                keep_on_screen();  /* the size itself is picked up below */
+                full = TRUE;
             } else if (cls == IDCMP_REFRESHWINDOW) {
                 BeginRefresh(win);
                 EndRefresh(win, TRUE);
-                draw_all();
+                full = TRUE;
             }
         }
-        changed = FALSE;
         while ((m = (struct monmsg *)GetMsg(port))) {
             if (m->kind != 'K')
                 changed = TRUE;
             add_line(m->kind, m->text);
             FreeVec(m);
         }
-        if (changed)
-            draw_log();
-        if (changed || ticks % 5 == 0)
-            draw_side();
+        /* Everything is drawn with the layer locked and for the size the
+         * window has now; after a new size the whole inner box is cleared
+         * and drawn again, then the frame, in case something reached it. */
+        resized = lock_for_drawing();
+        if (resized || full)
+            draw_all();
+        else {
+            if (changed)
+                draw_log();
+            if (changed || ticks % 5 == 0)
+                draw_side();
+        }
         draw_cursor((ticks / 3) & 1);
+        unlock_drawing();
+        if (resized)
+            RefreshWindowFrame(win);
     }
 
 done:
@@ -814,8 +959,12 @@ done:
         CloseFont(big);
     if (font)
         CloseFont(font);
+    if (clip)
+        DisposeRegion(clip);
     if (DiskfontBase)
         CloseLibrary(DiskfontBase);
+    if (LayersBase)
+        CloseLibrary(LayersBase);
     if (GfxBase)
         CloseLibrary((struct Library *)GfxBase);
     if (IntuitionBase)

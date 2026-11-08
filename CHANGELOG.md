@@ -29,6 +29,7 @@ Versions follow [semver](https://semver.org). The number lives in
   where the pointer really went. `amiga_mouse_relative` says where the
   pointer is afterwards and with `exact=True` lands on the spot. UITREE's
   screen line carries the pointer position (`mousex`, `mousey`).
+- `amiga_drag` moves and sizes windows: by default it goes as mouse movement with the button held (a pointer jump left drag bars and size gadgets in place); `relative=False` jumps as before.
 - `amiga_ui_tree(screen_id=...)` looks at a screen behind the front one
   without bringing it forward.
 - `amiga_mouse_move` and the clicks put a point off the screen on its edge
@@ -54,6 +55,11 @@ Versions follow [semver](https://semver.org). The number lives in
   colour screen; it fits itself to a 640x256 Workbench and runs on OS 2.04
   and a 68000. The window never takes the input focus. NOTE (37) carries
   the tool names; it has no answer and costs no round trip.
+- The amigent-monitor window can be sized; the log and the side panel
+  follow the new size, and below 56 columns the side panel gives way to the
+  log. WIDTH and HEIGHT set the size it opens with. The zoom gadget switches
+  to a compact size in place, and the window never ends up partly off the
+  screen.
 
 ### Another agent on the same Amiga
 
