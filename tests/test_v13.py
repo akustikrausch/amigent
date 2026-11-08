@@ -667,10 +667,40 @@ def test_drag_moves_the_mouse_by_default_so_window_gadgets_follow(monkeypatch):
     assert calls[1] == ("button", True) and calls[-1] == ("button", False)
     assert sum(c[1] for c in rel) == -266 and sum(c[2] for c in rel) == -156
     assert calls[-2] == ("move", 1600, 420)
-    calls.clear()
-    a.pointer = lambda: (1600, 420)  # landed: no jump after the movement
+
+
+def test_drag_calibrates_against_mouse_acceleration(monkeypatch):
+    """The pointer covers 0.85 of the steps across and 1.6 down (as measured on a
+    PiStorm); a dry walk with the button up finds the distance to send."""
+    from amigent import amigentd as ad
+    monkeypatch.setattr(ad.time, "sleep", lambda s: None)
+    calls, pos, held = [], [0.0, 0.0], []
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    a._sock, a.protocol = object(), 5
+    a.planar, a.width, a.height = False, 1920, 1080
+
+    def move(x, y):
+        pos[:] = [x, y]
+        calls.append(("move", x, y))
+
+    def rel(dx, dy):
+        pos[0] += dx * 0.85
+        pos[1] += dy * 1.6
+        calls.append(("rel", dx, dy, bool(held)))
+
+    def button(b, down):
+        held[:] = [1] if down else []
+        calls.append(("button", down))
+
+    a.move, a.move_relative, a.button = move, rel, button
+    a.pointer = lambda: (round(pos[0]), round(pos[1]))
     a.drag(1866, 576, 1600, 420)
-    assert [c for c in calls if c[0] == "move"] == [("move", 1866, 576)]
+    pressed = calls.index(("button", True))
+    walked = [c for c in calls[pressed:] if c[0] == "rel"]
+    assert walked and all(c[3] for c in walked)
+    sent_x, sent_y = sum(c[1] for c in walked), sum(c[2] for c in walked)
+    assert abs(sent_x * 0.85 + 266) <= 2 and abs(sent_y * 1.6 + 156) <= 2
+    assert [c for c in calls[pressed:] if c[0] == "move"] == []  # landed: no jump
 
 
 def test_drag_jumps_on_an_old_amigentd(monkeypatch):

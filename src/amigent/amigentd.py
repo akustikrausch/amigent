@@ -603,6 +603,9 @@ class Amigentd:
                 self._retry(lambda: None)  # connect: the protocol decides
             if self.protocol < 2:
                 relative = False  # no mouse deltas before protocol 2
+        dx, dy = x2 - x1, y2 - y1
+        if relative is not False:
+            dx, dy = self.calibrate_walk(x1, y1, dx, dy)
         self.move(x1, y1)
         time.sleep(0.05)
         self.button(button, True)
@@ -610,12 +613,49 @@ class Amigentd:
         if relative is False:
             self.move(x2, y2)
         else:
-            self.walk_relative(x2 - x1, y2 - y1)
-            at = self.settle_pointer(x2, y2)
+            self.walk_relative(dx, dy)
+            time.sleep(0.05)
+            at = self.pointer()
             if relative is None and (at is None or abs(at[0] - x2) > 1 or abs(at[1] - y2) > 1):
                 self.move(x2, y2)  # icons and menus go by where the pointer is
         time.sleep(0.05)
         self.button(button, False)
+
+    def calibrate_walk(self, x: int, y: int, dx: int, dy: int, rounds: int = 3) -> tuple[int, int]:
+        """The distance to walk so that the pointer really covers dx, dy.
+
+        Mouse acceleration depends on the step size and isn't the same across and
+        down, so no fixed factor fits. Walk the way with the button up from the start,
+        see where the pointer got, scale, try again. While a drag bar or size gadget
+        is held, Intuition's pointer position can't be trusted for a correction; the
+        same steps without the button cover the same distance. Unchanged when the
+        pointer position can't be read (amigentd before 1.3.0)."""
+        want_x, want_y = dx, dy
+        if self.pointer() is None:
+            return want_x, want_y
+        for _ in range(rounds):
+            self.move(x, y)
+            time.sleep(0.05)
+            start = self.pointer()
+            if start is None:
+                return want_x, want_y
+            self.walk_relative(dx, dy)
+            time.sleep(0.05)
+            end = self.pointer()
+            if end is None:
+                return want_x, want_y
+            got_x, got_y = end[0] - start[0], end[1] - start[1]
+            if abs(got_x - want_x) <= 1 and abs(got_y - want_y) <= 1:
+                break
+            if got_x and want_x:
+                dx = round(dx * want_x / got_x)
+            elif want_x and not got_x:
+                dx = want_x  # stuck at an edge: keep it plain
+            if got_y and want_y:
+                dy = round(dy * want_y / got_y)
+            elif want_y and not got_y:
+                dy = want_y
+        return dx, dy
 
     # protocol 2: screens, true colour, relative mouse, the GUI as data
 
