@@ -1391,7 +1391,7 @@ def amiga_follow(source: str = "debug", local_path: str = "", stop: bool = False
     own = Commands(HOST, CTL_PORT, SCREEN_PORT, timeout=15)
     if source == follow.DEBUG:
         try:
-            start, _ = own.debug_log(0)
+            start, _ = own.debug_log(0xFFFFFFFF)  # only the count; the old output stays there
         except AttributeError:
             raise AmigaError("debug output needs amigentd 1.3.0; run amigent-setup --update") from None
         fetch = follow.debug_fetch(own.debug_log)
@@ -1698,6 +1698,13 @@ def amiga_aminet_readme(path: str) -> str:
         raise AmigaError(str(e)) from e
 
 
+def _member_parts(member: str) -> list[str]:
+    """The path parts of an archive member that can't leave the folder it is unpacked into:
+    both slashes split, no . or .., nothing with a drive letter or an Amiga volume."""
+    parts = [p for p in re.split(r"[/\\]", member) if p not in ("", ".", "..")]
+    return [] if any(":" in p for p in parts) else parts
+
+
 @mcp.tool()
 def amiga_aminet_install(path: str, target: str) -> str:
     """Fetch an Aminet archive on the PC and unpack it on the Amiga into target.
@@ -1753,7 +1760,10 @@ def amiga_aminet_install(path: str, target: str) -> str:
                              "unpack it either; install that tool first")
         with tempfile.TemporaryDirectory() as tmp:
             for member, body in members.items():
-                local = Path(tmp, *[p for p in member.split("/") if p not in ("", ".", "..")])
+                parts = _member_parts(member)
+                if not parts:
+                    continue
+                local = Path(tmp, *parts)
                 local.parent.mkdir(parents=True, exist_ok=True)
                 local.write_bytes(body)
             _with_ctl(lambda: files.put(ctl, Path(tmp), target))

@@ -555,9 +555,18 @@ class Amigentd:
     def move(self, x: int, y: int) -> None:
         """Put the pointer at x, y; points off the screen go to its nearest edge
         (a window partly outside the screen gives such coordinates)."""
-        hi_x = self.width - 1 if self.width else 0xFFFF
-        hi_y = self.height - 1 if self.height else 0xFFFF
-        self._ok(CMD_MOVE, 0, max(0, min(int(x), hi_x)), max(0, min(int(y), hi_y)))
+        x, y = int(x), int(y)
+        w, h = self.width, self.height  # of the last picture: another screen may be in front now
+        if w and h and (x >= w or y >= h) and self.protocol >= 2:
+            try:
+                front = next((s for s in self.screens() if s["front"]), None)
+                if front:
+                    w, h = front["width"], front["height"]
+            except (AmigentdError, OSError):
+                pass
+        hi_x = w - 1 if w else 0xFFFF
+        hi_y = h - 1 if h else 0xFFFF
+        self._ok(CMD_MOVE, 0, max(0, min(x, hi_x)), max(0, min(y, hi_y)))
 
     def button(self, name: str, down: bool) -> None:
         mask = BUTTONS[name]

@@ -97,10 +97,16 @@ class Disk:
             raise AdfError(f"file at block {header} is shorter than its size says")
         return bytes(data[:size])
 
-    def walk(self, dir_block: int | None = None, prefix: str = "") -> dict[str, bytes]:
+    def walk(self, dir_block: int | None = None, prefix: str = "",
+             seen: set[int] | None = None) -> dict[str, bytes]:
         """{path: data} of every file below a directory (the root by default)."""
         out: dict[str, bytes] = {}
-        for key in self.entries(self.root if dir_block is None else dir_block):
+        dir_block = self.root if dir_block is None else dir_block
+        seen = set() if seen is None else seen
+        if dir_block in seen:
+            raise AdfError(f"directory at block {dir_block} contains itself")
+        seen.add(dir_block)
+        for key in self.entries(dir_block):
             b = self.block(key)
             l = _longs(b)
             name = _name(b)
@@ -108,7 +114,7 @@ class Disk:
                 continue
             path = prefix + name
             if l[127] == ST_USERDIR:
-                out.update(self.walk(key, path + "/"))
+                out.update(self.walk(key, path + "/", seen))
             elif l[127] == ST_FILE:
                 out[path] = self.file_data(key)
         return out

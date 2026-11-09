@@ -2879,6 +2879,11 @@ struct monmsg {
     char text[2];
 };
 
+/* The monitor's task, so its own lines don't count as text on the screen
+ * (amiga_wait_text would find them). Refreshed by every mon_say, the
+ * statistics among them once a second. */
+static struct Task *volatile mon_task;
+
 static void mon_say(UBYTE kind, const char *what, const char *arg)
 {
     struct MsgPort *port;
@@ -2887,6 +2892,7 @@ static void mon_say(UBYTE kind, const char *what, const char *arg)
 
     Forbid();
     port = FindPort(MON_PORT);
+    mon_task = port ? port->mp_SigTask : NULL;
     Permit();
     if (!port)
         return;
@@ -4812,6 +4818,8 @@ static void tx_record(struct RastPort *rp, const UBYTE *s, LONG n, LONG x, LONG 
 
     if (!ly || !ly->Window || !f || n <= 0 || !tx_pool)
         return;
+    if (mon_task && FindTask(NULL) == mon_task)
+        return;  /* amigent-monitor's log repeats what the agent looks for */
     if (n > 1024)
         n = 1024;
     /* Fixed width fonts may carry kerning tables too, all alike: the flag decides. */
@@ -5672,7 +5680,8 @@ static BOOL c_tree(struct link *l, BOOL with_crc, UWORD len, UWORD most)
 /* ---- DEBUGLOG: what went through RawPutChar -------------------------------- */
 
 /* w/h = the count to start from (high/low word), as the last answer told;
- * answers u32 count now, u32 length, the bytes since then (at most the ring). */
+ * answers u32 count now, u32 length, the bytes since then (at most the ring).
+ * 0xFFFFFFFF asks for the count alone. */
 static BOOL c_debuglog(struct link *l, ULONG since)
 {
     UBYTE head[9], *copy;
@@ -5683,7 +5692,7 @@ static BOOL c_debuglog(struct link *l, ULONG since)
     if (!dbg_ring)
         return c_fail(l, 1, "no debug capture");
     total = dbg_total;
-    from = since > total || total - since > DBG_SIZE ? (total > DBG_SIZE ? total - DBG_SIZE : 0) : since;
+    from = since == 0xFFFFFFFFUL ? total : since > total || total - since > DBG_SIZE ? (total > DBG_SIZE ? total - DBG_SIZE : 0) : since;
     n = total - from;
     if (!(copy = AllocVec(n + 1, MEMF_ANY)))
         return c_fault(l, ERROR_NO_FREE_STORE);

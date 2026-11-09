@@ -23,6 +23,26 @@ If NOT EXISTS $build
   Skip done
 EndIf
 Echo "Installing $build from this drawer."
+; amigent-status and amigent-monitor go to the Amigent folder; icons only when missing
+Set home SYS:amigent
+If EXISTS ENVARC:amigent-home
+  Set home `Type ENVARC:amigent-home`
+EndIf
+If EXISTS "$home"
+  If EXISTS amigent-status
+    Copy amigent-status "$home/" QUIET
+  EndIf
+  If EXISTS amigent-monitor
+    Copy amigent-monitor "$home/" QUIET
+  EndIf
+  If NOT EXISTS "$home/amigent-status.info"
+    Copy amigent-status.info "$home/" QUIET
+  EndIf
+  If NOT EXISTS "$home/amigent-monitor.info"
+    Copy amigent-monitor.info "$home/" QUIET
+  EndIf
+EndIf
+UnSet home
 Copy $build C:amigentd.new QUIET
 Run >NIL: RexxMast >NIL:
 Wait 1

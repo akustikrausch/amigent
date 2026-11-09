@@ -137,7 +137,11 @@ def update_windows(channel, home: str | None) -> None:
         if there == local.read_bytes() or (there is not None and name.endswith(".info")):
             continue
         print(f"uploading {name}")
-        channel.write_file(target, local.read_bytes())
+        try:
+            channel.write_file(target, local.read_bytes())
+        except AmigaError as e:  # a missing or full folder must not stop the update itself
+            print(f"  {name} not copied to {home}: {e}")
+            return
 
 
 def update(host: str, home: str | None) -> int:

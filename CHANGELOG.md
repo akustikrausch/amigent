@@ -15,6 +15,8 @@ Versions follow [semver](https://semver.org). The number lives in
   open before amigentd started), so the agent takes a picture of just that
   part. `amiga_screenshot(text=True)` gives both. The remote desktop stays
   a picture.
+- amigent-monitor's own log lines are not part of the screen text, so
+  waiting for or clicking on a text never finds the monitor's copy of it.
 - `amiga_click_text` clicks on visible text, such as a button label that
   `amiga_ui_tree` can't name.
 - Gadget labels that Intuition draws itself (an IntuiText in the gadget, as
@@ -150,7 +152,8 @@ Versions follow [semver](https://semver.org). The number lives in
   the hardware (ProTracker, many games) don't see them.
 - A volume that isn't there makes a command or a file transfer fail at once.
   Before, AmigaDOS opened an "insert volume" requester that waited for
-  someone at the Amiga and held up the command until then.
+  someone at the Amiga and held up the command until then. Programs started
+  through amigentd get the same: they see an error instead of the requester.
 - `amiga_wait_change` said the link was slow when its time ran out on a quiet
   screen over a fast link; now it says there was no change.
 - Writing a file that a program watches or keeps locked, such as
@@ -158,6 +161,13 @@ Versions follow [semver](https://semver.org). The number lives in
   now the new content goes into the file in place.
 - Reading a file that opens but can't be read gives an error instead of
   dropping the connection.
+- `amigent-setup --update` goes on when the Amigent folder can't take
+  amigent-status or amigent-monitor (gone, full or write-protected) and says
+  so; before, that stopped the update. Amigent-Update on the Amiga now also
+  brings the two windows into the Amigent folder.
+- Archives unpacked on the PC can't write outside their temporary folder,
+  also on Windows with backslashes or drive letters in member names; a disk
+  image whose directory contains itself ends with an error.
 - Repair modules written after an installation also put back files it
   changed (when they are missing or of another size), and restore new folders
   as a whole.

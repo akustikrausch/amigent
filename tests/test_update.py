@@ -108,3 +108,24 @@ def test_an_unknown_cpu_stops_before_anything_changes(run):
     amiga = Amiga(cpu_rc=20)
     assert run(amiga) == 1
     assert "C:amigentd.new" not in amiga.files
+
+
+def test_a_home_that_cannot_be_written_does_not_stop_the_update(run, capsys):
+    amiga = Amiga()
+    original = channel_for(amiga)
+
+    class Stubborn(original):
+        def write_file(self, path, data):
+            if path.startswith("Work:gone/"):
+                raise AmigaError("object not found [205]")
+            super().write_file(path, data)
+
+    import amigent.setup as s
+    s_channel = s.AmigaChannel
+    try:
+        s.AmigaChannel = Stubborn
+        assert s.update("192.0.2.1", "Work:gone") == 0
+    finally:
+        s.AmigaChannel = s_channel
+    assert amiga.files["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
+    assert "not copied" in capsys.readouterr().out

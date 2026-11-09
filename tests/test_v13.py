@@ -645,9 +645,25 @@ def test_moves_off_the_screen_stop_at_its_edge():
     a = ad.Amigentd.__new__(ad.Amigentd)
     sent = []
     a._ok = lambda *args: sent.append(args)
-    a.width, a.height = 640, 256
+    a.width, a.height, a.protocol = 640, 256, 5
+    a.screens = lambda: [{"front": True, "width": 640, "height": 256}]
     a.move(-20, 300)
     assert sent[-1][2:] == (0, 255)
+
+
+def test_the_edge_is_the_front_screens_not_the_last_pictures():
+    """An interlaced screen came to the front after the last picture of a 640x256 one."""
+    from amigent import amigentd as ad
+    a = ad.Amigentd.__new__(ad.Amigentd)
+    sent = []
+    a._ok = lambda *args: sent.append(args)
+    a.width, a.height, a.protocol = 640, 256, 5
+    a.screens = lambda: [{"front": True, "width": 640, "height": 512},
+                         {"front": False, "width": 640, "height": 256}]
+    a.move(320, 400)
+    assert sent[-1][2:] == (320, 400)
+    a.move(320, 900)
+    assert sent[-1][2:] == (320, 511)
 
 
 def test_drag_moves_the_mouse_by_default_so_window_gadgets_follow(monkeypatch):
