@@ -98,6 +98,7 @@
  "status_free": "{size} libres",
  "screen_select": "Écran",
  "screen_untitled": "Écran sans nom",
+ "pc_outdated": "L'Amiga a un Amigent plus récent que ce PC. Mettez-le aussi à jour ici : pipx upgrade amigent",
  "rel_mouse": "Souris pour les jeux",
  "rel_mouse_tip": "Capture la souris et envoie ses mouvements, pour les jeux. Échap la libère.",
  "rel_mouse_on": "Souris capturée. Échap la libère.",

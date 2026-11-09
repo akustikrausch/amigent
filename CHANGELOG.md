@@ -144,6 +144,10 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ### Fixes
 
+- The PC notices when the Amiga was updated on its own, with a newer amigentd
+  than it knows: the agent's next answer starts with a note, `amiga_status`
+  has it under `update_pc`, and the remote desktop shows a message. The
+  update instructions say in every place that both halves need it.
 - A screen without a title, such as SysInfo's, is listed in the remote
   desktop as "Untitled screen" instead of "?".
 - Errors from AmigaDOS carry their number (`Objekt ist in Gebrauch [202]` on

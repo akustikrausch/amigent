@@ -98,6 +98,7 @@
  "status_free": "{size} vapaana",
  "screen_select": "Näyttö",
  "screen_untitled": "Nimetön näyttö",
+ "pc_outdated": "Amigassa on uudempi Amigent kuin tässä tietokoneessa. Päivitä se myös täällä: pipx upgrade amigent",
  "rel_mouse": "Hiiri peleihin",
  "rel_mouse_tip": "Kaappaa hiiren ja lähettää sen liikkeet, peleihin. Esc vapauttaa sen.",
  "rel_mouse_on": "Hiiri kaapattu. Esc vapauttaa sen.",

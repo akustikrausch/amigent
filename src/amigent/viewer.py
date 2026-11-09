@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
-from .channel import Commands
+from .channel import Commands, pc_outdated
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -315,7 +315,8 @@ class Viewer:
         return {**self._system, "tcp": info.get("bsdsocket", ""),
                 "chip_free": number("chip_free"), "chip_total": number("chip_total"),
                 "fast_free": number("fast_free"), "fast_total": number("fast_total"),
-                "volumes": sorted(volumes, key=lambda v: v["name"].lower())}
+                "volumes": sorted(volumes, key=lambda v: v["name"].lower()),
+                "pc_outdated": bool(pc_outdated(getattr(getattr(self.ctl, "backend", None), "protocol", 0)))}
 
     def _answers(self) -> bool:
         """Is the Amiga there? Asked on the command line, which leaves the screen alone."""

@@ -98,6 +98,7 @@
  "status_free": "{size} szabad",
  "screen_select": "Képernyő",
  "screen_untitled": "Névtelen képernyő",
+ "pc_outdated": "Az Amigán újabb Amigent fut, mint ezen a gépen. Frissítse itt is: pipx upgrade amigent",
  "rel_mouse": "Egér játékokhoz",
  "rel_mouse_tip": "Elkapja az egeret és elküldi a mozgását, játékokhoz. Az Esc elengedi.",
  "rel_mouse_on": "Egér elkapva. Az Esc elengedi.",

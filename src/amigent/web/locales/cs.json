@@ -98,6 +98,7 @@
  "status_free": "{size} volné",
  "screen_select": "Obrazovka",
  "screen_untitled": "Obrazovka bez názvu",
+ "pc_outdated": "Amiga má novější Amigent než tento počítač. Aktualizujte ho i zde: pipx upgrade amigent",
  "rel_mouse": "Myš pro hry",
  "rel_mouse_tip": "Zachytí myš a posílá její pohyb, pro hry. Esc ji uvolní.",
  "rel_mouse_on": "Myš zachycena. Esc ji uvolní.",

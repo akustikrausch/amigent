@@ -98,6 +98,7 @@
  "status_free": "{size} ledigt",
  "screen_select": "Skärm",
  "screen_untitled": "Namnlös skärm",
+ "pc_outdated": "Amigan har en nyare Amigent än den här datorn. Uppdatera den här också: pipx upgrade amigent",
  "rel_mouse": "Mus för spel",
  "rel_mouse_tip": "Fångar musen och skickar dess rörelser, för spel. Esc släpper den.",
  "rel_mouse_on": "Musen fångad. Esc släpper den.",

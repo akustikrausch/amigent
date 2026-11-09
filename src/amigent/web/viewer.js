@@ -138,8 +138,14 @@
     return `${Math.round(n / 1024)} KB`;
   }
 
+  let toldOutdated = false;
+
   function showAmiga(info) {
     amiga = info;
+    if (info.pc_outdated && !toldOutdated) {
+      toldOutdated = true;
+      toast(t("pc_outdated"), true);
+    }
     const system = [info.os, info.kickstart && `Kickstart ${info.kickstart}`, info.workbench && `Workbench ${info.workbench}`]
       .filter(Boolean).join(", ");
     const cpu = [info.cpu, info.fpu].filter(Boolean).join(" + ");

@@ -55,15 +55,18 @@ On the PC or Mac
 
    The full guide is on the project page above.
 
-Updating from an earlier Amigent, either way keeps key, certificate and the
-start line in S:User-Startup:
+Updating from an earlier Amigent: Amigent has two halves, amigentd on the
+Amiga and the program on the PC or Mac. Update both:
 
-- On the Amiga: copy this drawer over, double-click Amigent-Update.
-- From the PC or Mac: "pipx upgrade amigent", then "amigent-setup --update".
-  That puts the new amigentd on the Amiga by network.
+- From the PC or Mac, both at once: "pipx upgrade amigent", then
+  "amigent-setup --update", which puts the new amigentd on the Amiga.
+- Or on the Amiga: copy this drawer over, double-click Amigent-Update.
+  Then on the PC or Mac: "pipx upgrade amigent".
 
-Should the new amigentd not start, the old one starts again. New features
-need both sides updated; one side alone keeps working as before.
+Afterwards restart the AI app and the remote desktop. Key, certificate and
+the start line in S:User-Startup stay; should the new amigentd not start,
+the old one starts again. One side alone keeps working as before, the new
+features need both. From 1.3.0 on the PC tells you when the Amiga is ahead.
 
 Requirements: AmigaOS 2.04 or newer (encryption needs OS 3.0 and AmiSSL),
 any CPU from the 68000 on (a Vampire's 68080 runs the plain amigentd), a
@@ -195,11 +198,17 @@ TYPE, KEY, BUSY, HELP, QUIT).
 
 UPDATING FROM AN EARLIER AMIGENT
 
-On the Amiga: unpack the archive, double-click Amigent-Update in its drawer.
-From the PC or Mac: pipx upgrade amigent, then amigent-setup --update.
-Key, certificate and the start line in S:User-Startup stay. Should the new
-amigentd not start, the old one starts again. New features need both sides
-updated; one side alone keeps working as before.
+Amigent has two halves, amigentd on the Amiga and the program on the PC or
+Mac. Update both:
+
+From the PC or Mac, both at once: pipx upgrade amigent, then
+amigent-setup --update. Or on the Amiga: unpack the archive, double-click
+Amigent-Update in its drawer, then run pipx upgrade amigent on the PC.
+
+Afterwards restart the AI app and the remote desktop. Key, certificate and
+the start line in S:User-Startup stay. Should the new amigentd not start, the
+old one starts again. One side alone keeps working as before; the new
+features need both. From 1.3.0 on the PC tells you when the Amiga is ahead.
 
 
 REQUIREMENTS

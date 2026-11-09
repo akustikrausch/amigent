@@ -33,6 +33,16 @@ WAIT_WINDOW, WAIT_WINDOW_GONE, WAIT_TEXT, WAIT_TEXT_GONE, WAIT_NEW, WAIT_KNOWN =
 PACK_WRITE_MIN = 512  # bytes; below this packing a WRITE is not worth the bother
 PAUSE = 19  # also on the screen connection: x = seconds, 0 ends it
 PAUSE_PROTOCOL = 4
+NEWEST_PROTOCOL = PACK_PROTOCOL  # the newest amigentd this Amigent knows
+
+
+def pc_outdated(protocol: int) -> str:
+    """A note when the Amiga runs a newer amigentd than this PC knows, else ''."""
+    if protocol <= NEWEST_PROTOCOL:
+        return ""
+    from . import __version__
+    return (f"amigentd on the Amiga is newer than Amigent {__version__} on this PC. Update the PC "
+            "side too: run \"pipx upgrade amigent\", then restart the AI app and the remote desktop.")
 PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
 PLAIN_CLOSED = 4  # hello flag: amigentd runs TLSONLY, plain is for localhost only
 PLAIN_CLOSED_TEXT = ("amigentd takes only encrypted connections from other computers. Copy its "

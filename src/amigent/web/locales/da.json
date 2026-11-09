@@ -98,6 +98,7 @@
  "status_free": "{size} ledig",
  "screen_select": "Skærm",
  "screen_untitled": "Unavngivet skærm",
+ "pc_outdated": "Amigaen har en nyere Amigent end denne pc. Opdater den også her: pipx upgrade amigent",
  "rel_mouse": "Mus til spil",
  "rel_mouse_tip": "Fanger musen og sender dens bevægelser, til spil. Esc slipper den.",
  "rel_mouse_on": "Musen fanget. Esc slipper den.",

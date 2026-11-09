@@ -74,22 +74,30 @@ Without an AI agent: see the [manual installation](https://github.com/akustikrau
 
 ### Updating
 
+Amigent has two halves, amigentd on the Amiga and the program on your PC or
+Mac. Update both; either order works.
+
 Paste this into your AI agent:
 
     Update Amigent for me: run "pipx upgrade amigent", then
     "amigent-setup --update", which puts the new amigentd on my Amiga over
-    the network. Tell me if you need to be restarted.
+    the network. Then tell me to restart you, so you get the new tools.
 
 Or in a terminal:
 
     pipx upgrade amigent
     amigent-setup --update
 
-At the Amiga instead: unpack the new archive from the
+Then restart your AI app and the remote desktop, so they run the new version.
+
+Updated the Amiga first, at the Amiga? Unpack the new archive from the
 [releases](https://github.com/akustikrausch/amigent/releases) or Aminet and
-double-click *Amigent-Update* in its drawer. Key, encryption and the start
-line stay as they are. New features such as the screen pause need both sides
-updated; one side alone keeps working as before.
+double-click *Amigent-Update* in its drawer. Then run `pipx upgrade amigent`
+on the PC and restart the AI app. From 1.3.0 on, the PC notices a newer
+amigentd and says so, in the agent's answers and in the remote desktop.
+
+Key, encryption and the start line stay as they are. One side alone keeps
+working as before; the new features need both.
 
 ## What you need
 

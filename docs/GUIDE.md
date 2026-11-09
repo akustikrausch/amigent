@@ -144,11 +144,16 @@ amigent-setup --update
 ```
 
 It needs nobody at the Amiga. With several Amigas, give the name:
-`amigent-setup --update A1200`.
+`amigent-setup --update A1200`. Afterwards restart the AI app (in Claude Code
+`/mcp`, or the app itself) and the remote desktop, so they load the new version.
 
 At the Amiga it works without the PC: unpack the new archive from Aminet and
 double-click *Amigent-Update* in its drawer. (Double-clicking amigentd itself
-only says that one runs already.)
+only says that one runs already.) That updates only the Amiga half: run
+`pipx upgrade amigent` on the PC as well and restart the AI app. From 1.3.0 on
+the PC notices a newer amigentd: the agent's next answer starts with a note,
+`amiga_status` lists it under `update_pc`, and the remote desktop shows a
+message.
 
 Either way key, certificate and the start line in `S:User-Startup` (`TLSONLY`
 included) stay, and so does the copy for `amigent-repair` in the scripts folder,

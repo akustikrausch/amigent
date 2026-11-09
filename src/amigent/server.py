@@ -15,7 +15,7 @@ from . import secret, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
-from .channel import Commands, Request, perform
+from .channel import Commands, Request, pc_outdated, perform
 from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_port, flush_volumes, reboot, wait_gone
 from .power import available as power_available
 from .viewer import Viewer, open_window
@@ -124,6 +124,20 @@ def _others_note() -> str:
     return text
 
 
+_outdated_told = False
+
+
+def _outdated_note() -> str:
+    """Once per session: 'Note: ...' when the Amiga's amigentd is newer than this PC's Amigent."""
+    global _outdated_told
+    backend = getattr(ctl, "backend", None)  # tests put simple stand-ins in place
+    if _outdated_told or backend is None or not getattr(backend, "_sock", None):
+        return ""
+    _outdated_told = True
+    text = pc_outdated(getattr(backend, "protocol", 0))
+    return f"Note: {text}\n" if text else ""
+
+
 def _noted(fn):
     import functools
     import inspect
@@ -140,6 +154,8 @@ def _noted(fn):
         finally:
             if not sent:  # the tool may have brought the link up
                 _note(line)
+        if isinstance(result, str):
+            result = _outdated_note() + result
         if fn.__name__ in INPUT_TOOLS:
             warn = _others_note()
             if warn and isinstance(result, str):
@@ -233,6 +249,9 @@ def amiga_status() -> str:
     if said:
         report["notes"] = said
     report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
+    outdated = pc_outdated(getattr(getattr(ctl, "backend", None), "protocol", 0))
+    if outdated:
+        report["update_pc"] = outdated
     if "text" in info:
         report["recording"] = {"screen_text": info.get("text") == "1",
                                "debug_output": info.get("debug") == "1"}

@@ -98,6 +98,7 @@
  "status_free": "{size} wolne",
  "screen_select": "Ekran",
  "screen_untitled": "Ekran bez nazwy",
+ "pc_outdated": "Amiga ma nowszy Amigent niż ten komputer. Zaktualizuj go także tutaj: pipx upgrade amigent",
  "rel_mouse": "Mysz do gier",
  "rel_mouse_tip": "Przechwytuje mysz i wysyła jej ruch, do gier. Esc ją zwalnia.",
  "rel_mouse_on": "Mysz przechwycona. Esc ją zwalnia.",
