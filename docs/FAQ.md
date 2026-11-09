@@ -70,6 +70,16 @@ That Amiga was set up for TLS only. Copy the files for it from
 `tls-<name>.pem`) to the same folder on the other one, or run `amigent-setup`
 there again with `amigentd SETUP` running.
 
+**How do I update?**
+Both halves, the PC and the Amiga. Paste this into your AI agent:
+
+    Update Amigent for me, both halves: run "pipx upgrade amigent" on this
+    computer, then "amigent-setup --update" for the amigentd on my Amiga.
+    Then tell me to restart you, so you get the new tools.
+
+By hand: [Updating](GUIDE.md#updating) in the guide. Updated only the Amiga,
+with *Amigent-Update*? The PC says so from 1.3.0 on; run the prompt anyway.
+
 **How do I add a second Amiga?**
 Run `amigent-setup --name A500` with its address. Each Amiga gets its own key and
 shows up in `amigent-fleet`. The AI agent works with one Amiga per MCP server

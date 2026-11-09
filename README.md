@@ -79,9 +79,9 @@ Mac. Update both; either order works.
 
 Paste this into your AI agent:
 
-    Update Amigent for me: run "pipx upgrade amigent", then
-    "amigent-setup --update", which puts the new amigentd on my Amiga over
-    the network. Then tell me to restart you, so you get the new tools.
+    Update Amigent for me, both halves: run "pipx upgrade amigent" on this
+    computer, then "amigent-setup --update" for the amigentd on my Amiga.
+    Then tell me to restart you, so you get the new tools.
 
 Or in a terminal:
 
@@ -92,8 +92,8 @@ Then restart your AI app and the remote desktop, so they run the new version.
 
 Updated the Amiga first, at the Amiga? Unpack the new archive from the
 [releases](https://github.com/akustikrausch/amigent/releases) or Aminet and
-double-click *Amigent-Update* in its drawer. Then run `pipx upgrade amigent`
-on the PC and restart the AI app. From 1.3.0 on, the PC notices a newer
+double-click *Amigent-Update* in its drawer. Then give your agent the same
+prompt as above, or run `pipx upgrade amigent` on the PC and restart the AI app. From 1.3.0 on, the PC notices a newer
 amigentd and says so, in the agent's answers and in the remote desktop.
 
 Key, encryption and the start line stay as they are. One side alone keeps

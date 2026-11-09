@@ -136,6 +136,15 @@ set an address you tell it. A fixed address in the router saves the search.
 
 ### Updating
 
+Easiest with the AI agent. Paste this:
+
+    Update Amigent for me, both halves: run "pipx upgrade amigent" on this
+    computer, then "amigent-setup --update" for the amigentd on my Amiga.
+    Then tell me to restart you, so you get the new tools.
+
+It updates the PC side and the Amiga, whichever is behind, and needs nobody at
+the Amiga. By hand:
+
 Update the PC side as you installed it, for example `pipx upgrade amigent`.
 When a new version brings a new amigentd, bring the Amiga along by network:
 

@@ -56,7 +56,14 @@ On the PC or Mac
    The full guide is on the project page above.
 
 Updating from an earlier Amigent: Amigent has two halves, amigentd on the
-Amiga and the program on the PC or Mac. Update both:
+Amiga and the program on the PC or Mac. Update both. Easiest: paste this
+into your AI agent:
+
+     Update Amigent for me, both halves: run "pipx upgrade amigent" on this
+     computer, then "amigent-setup --update" for the amigentd on my Amiga.
+     Then tell me to restart you, so you get the new tools.
+
+Or by hand:
 
 - From the PC or Mac, both at once: "pipx upgrade amigent", then
   "amigent-setup --update", which puts the new amigentd on the Amiga.
@@ -199,9 +206,13 @@ TYPE, KEY, BUSY, HELP, QUIT).
 UPDATING FROM AN EARLIER AMIGENT
 
 Amigent has two halves, amigentd on the Amiga and the program on the PC or
-Mac. Update both:
+Mac. Update both. Easiest: paste this into your AI agent:
 
-From the PC or Mac, both at once: pipx upgrade amigent, then
+  Update Amigent for me, both halves: run "pipx upgrade amigent" on this
+  computer, then "amigent-setup --update" for the amigentd on my Amiga.
+  Then tell me to restart you, so you get the new tools.
+
+By hand, from the PC or Mac, both at once: pipx upgrade amigent, then
 amigent-setup --update. Or on the Amiga: unpack the archive, double-click
 Amigent-Update in its drawer, then run pipx upgrade amigent on the PC.
 
