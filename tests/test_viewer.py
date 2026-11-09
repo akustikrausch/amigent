@@ -185,3 +185,32 @@ def test_clipboard_text_round_trip():
     assert data[:4] == b"FORM" and data[8:12] == b"FTXT" and len(data) % 2 == 0
     assert ftxt_text(data) == "Grüße\nvom PC"
     assert ftxt_text(b"FORM\0\0\0\4ILBM") == ""
+
+
+def test_powerpc_systems_are_named():
+    from amigent.system import describe_system, native_ppc
+
+    os4 = describe_system("Kickstart 53.73, Workbench 53.12\n", "CPU: PowerPC 7447/7457 G4\n")
+    assert os4["os"] == "AmigaOS 4" and os4["cpu"].startswith("PowerPC 7447")
+    assert native_ppc(os4)
+    named = describe_system("AmigaOS 4.1 Final Edition Update 2\nKickstart 54.30\n", "")
+    assert named["os"] == "AmigaOS 4.1"
+    mos = describe_system("MorphOS version 3.18\nKickstart 51.37\n", "")
+    assert mos["os"] == "MorphOS 3.18" and native_ppc(mos)
+    assert not native_ppc(describe_system("Kickstart 47.115, Workbench 47.5\n", "System: 68040"))
+
+
+def test_ppc_software_reads_only_version_strings():
+    from amigent.system import ppc_software
+
+    asked = []
+
+    def run(command):
+        asked.append(command)
+        if "powerpc.library" in command:
+            return 0, "powerpc.library 17.10\n"
+        return 20, "Version: object not found\n"
+
+    assert ppc_software(run) == "WarpOS powerpc.library 17.10"
+    assert all(c.startswith("Version FILE ") for c in asked)
+    assert ppc_software(lambda c: (20, "")) == ""

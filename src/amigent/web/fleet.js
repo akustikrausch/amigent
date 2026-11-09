@@ -40,7 +40,7 @@
     const i = a.info || {};
     const rows = [
       [t("about_system"), [i.os, i.kickstart && `Kickstart ${i.kickstart}`, i.workbench && `Workbench ${i.workbench}`].filter(Boolean).join(", ")],
-      [t("about_cpu"), [i.cpu, i.fpu].filter(Boolean).join(" + ")],
+      [t("about_cpu"), [i.cpu, i.fpu, i.ppc].filter(Boolean).join(" + ")],
       [t("about_memory"), i.chip_total ? `Chip ${bytes(i.chip_free)} / ${bytes(i.chip_total)}, Fast ${bytes(i.fast_free)} / ${bytes(i.fast_total)}` : ""],
       [t("about_network"), i.tcp ? `bsdsocket.library ${i.tcp}` : ""],
       ...(i.volumes || []).map((v) => [v.name + ":", `${bytes(v.free)} / ${bytes(v.size)}`]),

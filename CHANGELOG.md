@@ -144,6 +144,11 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ### Fixes
 
+- `amiga_status` names the system: AmigaOS 3.x, AmigaOS 4 or MorphOS, the CPU,
+  and the PowerPC software of a WarpOS or PowerUP board, read from the
+  libraries' version strings without opening them. On AmigaOS 4 and MorphOS
+  it adds that amigentd runs there under 68k emulation and is untested. The
+  remote desktop shows the PowerPC software next to the CPU.
 - The PC notices when the Amiga was updated on its own, with a newer amigentd
   than it knows: the agent's next answer starts with a note, `amiga_status`
   has it under `update_pc`, and the remote desktop shows a message. The

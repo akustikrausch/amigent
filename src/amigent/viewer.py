@@ -33,6 +33,7 @@ from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd
 from .channel import Commands, pc_outdated
+from .system import OS_NAMES, describe_system, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
 from .power import flush_volumes, reboot
@@ -44,25 +45,6 @@ UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
 CLIPBOARD = "CLIPS:0"  # clipboard.device keeps unit 0 there as IFF FTXT
-
-
-OS_NAMES = {47: "AmigaOS 3.2", 46: "AmigaOS 3.1.4", 45: "AmigaOS 3.9", 44: "AmigaOS 3.5",
-            40: "AmigaOS 3.1", 39: "AmigaOS 3.0", 37: "AmigaOS 2.04", 36: "AmigaOS 2.0", 34: "AmigaOS 1.3"}
-
-
-def describe_system(version: str, cpu: str) -> dict:
-    """Turn the output of the Version and CPU commands into a few named facts."""
-    kick = re.search(r"Kickstart (\d+)\.(\d+)", version)
-    bench = re.search(r"Workbench (\d+\.\d+)", version)
-    chips = re.findall(r"\b(680[0-9]0|6888[12])\b", cpu)
-    major = int(kick.group(1)) if kick else 0
-    return {
-        "os": OS_NAMES.get(major, f"Kickstart {major}" if major else ""),
-        "kickstart": f"{kick.group(1)}.{kick.group(2)}" if kick else "",
-        "workbench": bench.group(1) if bench else "",
-        "cpu": next((c for c in chips if not c.startswith("688")), ""),
-        "fpu": next((c for c in chips if c.startswith("688")), ""),
-    }
 
 
 def tiles_message(tiles) -> bytes:
@@ -84,6 +66,10 @@ def pixels_message(regions) -> bytes:
 
 
 _join = join_path
+
+
+def _rc_out(result) -> tuple[int, str]:
+    return result.rc, result.output
 
 
 def _amiga_name(name: str) -> str:
@@ -308,6 +294,10 @@ class Viewer:
         if not self._system:
             self._system = describe_system(self._ctl(lambda: self.ctl.exec("Version").output),
                                            self._ctl(lambda: self.ctl.exec("CPU").output))
+            if not native_ppc(self._system):
+                ppc = ppc_software(lambda c: self._ctl(lambda: _rc_out(self.ctl.exec(c))))
+                if ppc:
+                    self._system["ppc"] = ppc
         info = self._ctl(self.ctl.sysinfo)
         volumes = [{"name": v["name"].rstrip(":"), "free": v["free"], "size": v["capacity"]}
                    for v in self._ctl(self.ctl.volumes)]

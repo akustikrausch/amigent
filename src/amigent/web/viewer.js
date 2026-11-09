@@ -148,7 +148,7 @@
     }
     const system = [info.os, info.kickstart && `Kickstart ${info.kickstart}`, info.workbench && `Workbench ${info.workbench}`]
       .filter(Boolean).join(", ");
-    const cpu = [info.cpu, info.fpu].filter(Boolean).join(" + ");
+    const cpu = [info.cpu, info.fpu, info.ppc].filter(Boolean).join(" + ");
     const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
     $("about-system").textContent = system || "–";
     $("about-cpu").textContent = cpu || "–";

@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from mcp.server.fastmcp import FastMCP, Image as McpImage
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
-from . import secret, uptime, watch
+from . import secret, system, uptime, watch
 from .client import join_path
 from .errors import AmigaError
 from .amigentd import Amigentd, AmigentdError
@@ -248,6 +248,7 @@ def amiga_status() -> str:
     said = seen.check(machines.name_of(HOST) or machines.address(HOST) or "", info)
     if said:
         report["notes"] = said
+    report["system"] = _system_facts()
     report.update({"sysinfo": info, "volumes": _with_ctl(ctl.volumes)})
     outdated = pc_outdated(getattr(getattr(ctl, "backend", None), "protocol", 0))
     if outdated:
@@ -257,6 +258,24 @@ def amiga_status() -> str:
                                "debug_output": info.get("debug") == "1"}
         report["packing"] = pack.policy_for(HOST).describe()
     return json.dumps(report, indent=1)
+
+
+_system_seen: dict = {}
+
+
+def _system_facts() -> dict:
+    """OS, CPU and PowerPC software, asked once per session; the system doesn't change while it runs."""
+    if not _system_seen:
+        run = lambda c: (lambda r: (r.rc, r.output))(_with_ctl(lambda: ctl.exec(c)))  # noqa: E731
+        facts = system.describe_system(run("Version")[1], run("CPU")[1])
+        if system.native_ppc(facts):
+            facts["note"] = system.EMULATED_NOTE
+        else:
+            ppc = system.ppc_software(run)
+            if ppc:
+                facts["ppc"] = ppc
+        _system_seen.update({k: v for k, v in facts.items() if v})
+    return dict(_system_seen)
 
 
 def _clear_hold() -> str:
