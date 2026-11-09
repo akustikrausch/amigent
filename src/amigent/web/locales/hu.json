@@ -97,6 +97,7 @@
  "free_of": "{free} / {size} szabad",
  "status_free": "{size} szabad",
  "screen_select": "Képernyő",
+ "screen_untitled": "Névtelen képernyő",
  "rel_mouse": "Egér játékokhoz",
  "rel_mouse_tip": "Elkapja az egeret és elküldi a mozgását, játékokhoz. Az Esc elengedi.",
  "rel_mouse_on": "Egér elkapva. Az Esc elengedi.",

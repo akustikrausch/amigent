@@ -97,6 +97,7 @@
  "free_of": "{free} z {size} wolne",
  "status_free": "{size} wolne",
  "screen_select": "Ekran",
+ "screen_untitled": "Ekran bez nazwy",
  "rel_mouse": "Mysz do gier",
  "rel_mouse_tip": "Przechwytuje mysz i wysyła jej ruch, do gier. Esc ją zwalnia.",
  "rel_mouse_on": "Mysz przechwycona. Esc ją zwalnia.",

@@ -97,6 +97,7 @@
  "free_of": "{free} av {size} ledigt",
  "status_free": "{size} ledigt",
  "screen_select": "Skärm",
+ "screen_untitled": "Namnlös skärm",
  "rel_mouse": "Mus för spel",
  "rel_mouse_tip": "Fångar musen och skickar dess rörelser, för spel. Esc släpper den.",
  "rel_mouse_on": "Musen fångad. Esc släpper den.",

@@ -97,6 +97,7 @@
  "free_of": "{free} z {size} voľné",
  "status_free": "{size} voľné",
  "screen_select": "Obrazovka",
+ "screen_untitled": "Obrazovka bez názvu",
  "rel_mouse": "Myš pre hry",
  "rel_mouse_tip": "Zachytí myš a posiela jej pohyb, pre hry. Esc ju uvoľní.",
  "rel_mouse_on": "Myš zachytená. Esc ju uvoľní.",

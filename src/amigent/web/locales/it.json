@@ -97,6 +97,7 @@
  "free_of": "{free} liberi su {size}",
  "status_free": "{size} liberi",
  "screen_select": "Schermo",
+ "screen_untitled": "Schermo senza nome",
  "rel_mouse": "Mouse per giochi",
  "rel_mouse_tip": "Cattura il mouse e ne invia il movimento, per i giochi. Esc lo rilascia.",
  "rel_mouse_on": "Mouse catturato. Esc lo rilascia.",

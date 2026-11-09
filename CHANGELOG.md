@@ -144,6 +144,8 @@ Versions follow [semver](https://semver.org). The number lives in
 
 ### Fixes
 
+- A screen without a title, such as SysInfo's, is listed in the remote
+  desktop as "Untitled screen" instead of "?".
 - Errors from AmigaDOS carry their number (`Objekt ist in Gebrauch [202]` on
   the wire), so the PC explains the common ones in any language: a file
   another program has open for writing, a volume or assign that is gone

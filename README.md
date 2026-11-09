@@ -30,6 +30,12 @@ any moment.
 
 ![Amigent with a Workbench screen and the keyboard panel](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/viewer.png)
 
+Programs that open their own screen, such as SysInfo on the chipset next to a
+graphics-card Workbench, show up as they are. The list at the top brings any
+screen to the front, from the PC.
+
+![SysInfo on its own chipset screen in the remote desktop, with the screen list at the top](https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/screens.png)
+
 ## Installation
 
 ### On the Amiga
@@ -157,6 +163,8 @@ All numbers, how they were taken and how to repeat them are in
 - **After a big OS update**, `amigent-repair` puts back what the update removed.
 - **Safe at home.** A key keeps other computers on the network out, and the
   connection can be encrypted. Don't open the Amiga to the internet.
+
+<p align="center"><img src="https://raw.githubusercontent.com/akustikrausch/amigent/main/docs/screenshots/monitor.png" width="772" alt="amigent-monitor on the Amiga: the agent's tool calls, commands and screen reads line by line, next to link, traffic and memory figures"></p>
 
 More in the [guide](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md) and the [FAQ](https://github.com/akustikrausch/amigent/blob/main/docs/FAQ.md).
 

@@ -169,7 +169,7 @@
     select.hidden = list.length < 2;
     select.innerHTML = "";
     for (const s of list) {
-      const option = new Option(`${s.title} · ${s.w}×${s.h}`, String(s.handle));
+      const option = new Option(`${s.title || t("screen_untitled")} · ${s.w}×${s.h}`, String(s.handle));
       option.selected = s.front;
       select.append(option);
     }

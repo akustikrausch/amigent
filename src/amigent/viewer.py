@@ -297,7 +297,7 @@ class Viewer:
 
     def _show_screens(self, found: list) -> None:
         """Tell the pages about the Amiga's screens when the list changes."""
-        listing = [{"handle": s["handle"], "title": s["title"] or "?", "front": s["front"],
+        listing = [{"handle": s["handle"], "title": s["title"], "front": s["front"],
                     "w": s["width"], "h": s["height"]} for s in found]
         if listing != self.screen_list:
             self.screen_list = listing

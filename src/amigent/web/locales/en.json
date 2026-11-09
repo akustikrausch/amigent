@@ -97,6 +97,7 @@
  "free_of": "{free} of {size} free",
  "status_free": "{size} free",
  "screen_select": "Screen",
+ "screen_untitled": "Untitled screen",
  "rel_mouse": "Mouse for games",
  "rel_mouse_tip": "Captures the mouse and sends its movement, for games. Esc releases it.",
  "rel_mouse_on": "Mouse captured. Esc releases it.",

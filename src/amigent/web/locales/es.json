@@ -97,6 +97,7 @@
  "free_of": "{free} libres de {size}",
  "status_free": "{size} libres",
  "screen_select": "Pantalla",
+ "screen_untitled": "Pantalla sin nombre",
  "rel_mouse": "Ratón para juegos",
  "rel_mouse_tip": "Captura el ratón y envía su movimiento, para juegos. Esc lo libera.",
  "rel_mouse_on": "Ratón capturado. Esc lo libera.",
