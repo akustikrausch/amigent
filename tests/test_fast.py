@@ -60,6 +60,17 @@ def test_tree_goes_up_once_and_only_changes_go_again(amiga, tmp_path):
     assert amiga.counts[23] == writes + 1
 
 
+def test_a_folder_with_only_folders_in_it_is_made_before_theirs(amiga, tmp_path):
+    """Snoopy/Offsets/x needs Snoopy first: MakeDir doesn't make parents."""
+    src = tmp_path / "src"
+    (src / "Snoopy" / "Offsets").mkdir(parents=True)
+    (src / "Snoopy" / "Offsets" / "toccata").write_bytes(b"x")
+    (src / "ReadMe").write_bytes(b"r")
+    ch = channel(amiga.port)
+    assert files.put(ch, src, "RAM:a").startswith("copied 2 file(s)")
+    assert amiga.files["RAM:a/Snoopy/Offsets/toccata"] == b"x"
+
+
 def test_tree_comes_back_and_a_folder_get_needs_no_extra_round_trip(amiga, tmp_path):
     for i in range(5):
         amiga.add(f"Work:g/sub{i % 2}/x{i}", bytes([i]) * 50)

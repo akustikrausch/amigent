@@ -165,7 +165,11 @@ Versions follow [semver](https://semver.org). The number lives in
   amigent-status or amigent-monitor (gone, full or write-protected) and says
   so; before, that stopped the update. Amigent-Update on the Amiga now also
   brings the two windows into the Amigent folder.
-- Archives unpacked on the PC can't write outside their temporary folder,
+- Copying a folder to the Amiga failed when a new folder held only other new
+  folders (`a/b/file` with neither `a` nor `a/b` there yet).
+- Archives unpacked on the PC keep their folders: LhA names with
+  backslashes became single files named `Dir\File` before. They can't
+  write outside their temporary folder,
   also on Windows with backslashes or drive letters in member names; a disk
   image whose directory contains itself ends with an error.
 - Repair modules written after an installation also put back files it

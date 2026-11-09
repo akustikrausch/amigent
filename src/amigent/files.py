@@ -96,7 +96,8 @@ def _same_on_amiga(ch: AmigaChannel, path: str, size: int, crc: int) -> bool:
 
 def _put_tree(ch: AmigaChannel, src: Path, target: str) -> str:
     files = sorted(p.relative_to(src).as_posix() for p in src.rglob("*") if p.is_file())
-    folders = sorted({str(PurePosixPath(f).parent) for f in files} - {"."},
+    # every folder on the way, so a/b/c.txt makes a before a/b
+    folders = sorted({str(p) for f in files for p in PurePosixPath(f).parents} - {"."},
                      key=lambda f: (f.count("/"), f))
     sizes, present = _remote_sizes(ch, target, folders)
     unchanged = _unchanged(ch, target, [f for f in files if sizes.get(f) == (src / f).stat().st_size],
