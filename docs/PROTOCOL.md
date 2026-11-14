@@ -157,8 +157,12 @@ the seconds left. After the pause the next frame sends what changed meanwhile.
 Data is RGB332, row by row, as pairs of `u8 length-1`, `u8 colour`. If packing
 doesn't help, `bytes` equals `w*h` and the data is raw.
 
-The service remembers the last frame across connections, so a dropped link doesn't
-cost a full transfer. A client without a picture asks with arg 1.
+The service remembers the last frame while it has a screen client, and across a
+takeover, so a client that reconnects before its old link is gone doesn't pay a
+full transfer. When the screen client goes away and no newcomer takes its place
+(it closes, breaks off or is dropped as idle), the service frees the picture to
+give the memory back: the next frame sends every tile and CLIENT answers `1`. A
+client without a picture asks with arg 1.
 
 That only works while one client gets all the frames. CLIENT tells which one is
 asking: right after connecting, a client sends an id it picked at random, the

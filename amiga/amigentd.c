@@ -136,7 +136,8 @@ static LONG secret_len;
 static UWORD buttons;
 static UBYTE prev_code[2], prev_qual[2];
 
-/* The reference: what the clients were last sent, kept across connections.
+/* The reference: what the clients were last sent, kept across a takeover and
+ * freed when the last screen client is gone (free_pictures).
  * valid[] holds one byte per tile: bit 0 once ref has it, SEND while it is queued,
  * DIFF while cur (the screen as last read) differs from ref. */
 #define SEND 2
@@ -2503,6 +2504,31 @@ static void drop_client(void)
         memset(want, 0, cols * rows);
     wanted = 0;
     ReleaseSemaphore(&picture);
+}
+
+/* Nobody looks at the screen any more: both pictures and the frame packer go
+ * back to free memory, so an idle amigentd costs a small Amiga next to
+ * nothing. The next frame starts from scratch, as after a new screen size,
+ * and CLIENT answers 1. The reader only touches the classic picture, under
+ * the semaphore, and with nothing wanted it doesn't fit a new one. */
+static void free_pictures(void)
+{
+    ObtainSemaphore(&picture);
+    free_frame();
+    ReleaseSemaphore(&picture);
+    free_planar();
+    z_free(frame_z);
+    frame_z = NULL;
+    owner = powner = 0;
+    cconn = pconn = 0;
+}
+
+/* The screen client went away of itself (closed, broke off or fell silent)
+ * and no newcomer took its place. */
+static void lose_client(void)
+{
+    drop_client();
+    free_pictures();
 }
 
 /* First line of the key file, at most KEY_MAX bytes, trailing blanks cut. Read for
@@ -6045,15 +6071,15 @@ static void serve(void)
             conn_serial++;  /* a new face: pref is not its picture yet */
             heard = now_ms();
             if (!command(pend[i].cmd) || !send_acks())
-                drop_client();
+                lose_client();
             continue;
         }
         if (client >= 0 && now_ms() - heard > IDLE_SECONDS * 1000)
-            drop_client();  /* idle */
+            lose_client();  /* idle */
         if (client >= 0 && in_have == sizeof(in_cmd)) {  /* came in during the last reply */
             in_have = 0;
             if (!command(in_cmd) || !send_acks())
-                drop_client();
+                lose_client();
             continue;
         }
         FD_ZERO(&r);
@@ -6074,7 +6100,7 @@ static void serve(void)
         if (n < 0 && Errno() == EWOULDBLOCK)
             continue;
         if (n <= 0) {
-            drop_client();
+            lose_client();
             continue;
         }
         heard = now_ms();
@@ -6082,7 +6108,7 @@ static void serve(void)
         if (in_have == sizeof(in_cmd)) {
             in_have = 0;
             if (!command(in_cmd) || !send_acks())
-                drop_client();
+                lose_client();
         }
     }
 }
@@ -7182,6 +7208,7 @@ out:
         FreeSignal(reader_gone);
     ((struct Process *)server)->pr_WindowPtr = old_window;
     free_frame();
+    free_planar();
     if (input_io) {
         CloseDevice((struct IORequest *)input_io);
         DeleteIORequest((struct IORequest *)input_io);
