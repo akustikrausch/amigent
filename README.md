@@ -202,7 +202,8 @@ All numbers, how they were taken and how to repeat them are in
 
 - **New address after a restart?** Amigent finds the Amiga again by itself. It
   takes only the one that proves to be yours.
-- **Several Amigas?** `amigent-fleet` shows them side by side with a preview.
+- **Several Amigas?** `amigent-viewer` opens **Your Amigas**, with a machine
+  selector, connection status and controls to rename or manage each machine.
 - **Watching from the Amiga?** `amigent-monitor` in the Amigent folder opens a
   window there that lists, line by line, what the agent is doing.
 - **Trying out software?** The agent can record an installation and take it

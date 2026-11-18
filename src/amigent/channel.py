@@ -7,6 +7,8 @@ otherwise. See docs/PROTOCOL.md.
 
 from __future__ import annotations
 
+from .roster import identity, RegistryError
+
 import socket
 import re
 import struct
@@ -235,7 +237,7 @@ class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None):
-        self.host = host
+        self.host = identity(host)
         self.port = port
         self.timeout = timeout
         self.key = key
@@ -685,7 +687,7 @@ class Commands:
 
     def __init__(self, host: str, ctl_port: int = 6800, screen_port: int = 6801,
                  timeout: float = 30.0):
-        self.host, self.ctl_port, self.screen_port, self.timeout = host, ctl_port, screen_port, timeout
+        self.host, self.ctl_port, self.screen_port, self.timeout = identity(host), ctl_port, screen_port, timeout
         self.backend: AmigaChannel | AmigaCtl | None = None
 
     def connect(self) -> None:
@@ -695,6 +697,8 @@ class Commands:
                 channel.connect()
                 self.backend = channel
                 return
+            except RegistryError:
+                raise
             except AmigaError as e:
                 if "refused the key" in str(e) or "wants a key" in str(e):
                     raise

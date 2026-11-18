@@ -20,7 +20,12 @@ from .power import BOOT_WAIT, RESTART_WAIT, power_cycle, set_power, wait_for_por
 from .power import available as power_available
 from .viewer import Viewer, open_window
 
-HOST = machines.pick()  # AMIGENT_HOST (a name or an address), else the known Amiga
+registry_error = ""
+try:
+    HOST = machines.identity(machines.pick())
+except machines.RegistryError as exc:
+    HOST = ""
+    registry_error = str(exc)
 CTL_PORT = int(os.environ.get("AMIGENT_CTL_PORT", "6800"))
 SCREEN_PORT = int(os.environ.get("AMIGENT_SCREEN_PORT", "6801"))
 AMIGA_DIR = os.environ.get("AMIGENT_AMIGA_DIR", "SYS:amigent")
@@ -33,7 +38,7 @@ SLOW_COMMAND = re.compile(r"^\s*(list|search|dir)\b.*\bALL\b", re.IGNORECASE)
 
 def inventory_folder() -> Path:
     """One shelf per Amiga for its scans, next to keys and certificates."""
-    return secret.FOLDER / "inventory" / secret.safe(machines.name_of(HOST) or "Amiga")
+    return secret.FOLDER / "inventory" / secret.safe(machines.identity(HOST) or "Amiga")
 
 
 INSTRUCTIONS = """Amigent operates a real Amiga.
@@ -160,6 +165,8 @@ def _noted(fn):
 
     @functools.wraps(fn)
     def run(*args, **kwargs):
+        if registry_error:
+            raise machines.RegistryError(registry_error)
         line = note_line(fn.__name__, kwargs, defaults)
         sent = _note(line)
         ok = False
@@ -249,7 +256,7 @@ UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "am
 
 
 def _amiga_name() -> str:
-    return machines.name_of(HOST) or machines.address(HOST) or HOST or "amiga"
+    return machines.identity(HOST) or "amiga"
 
 
 @mcp.tool()
@@ -273,7 +280,7 @@ def amiga_status() -> str:
             report["warning"] = _others_seen["text"]
     if "uptime" in info:
         report["running_for"] = uptime.duration(int(info["uptime"]))
-    name = machines.name_of(HOST) or machines.address(HOST) or ""
+    name = machines.identity(HOST) or ""
     before = seen.previous(name)
     said = seen.check(name, info, tasks=tasks)
     if said:
@@ -2046,7 +2053,7 @@ def amiga_power(action: str) -> str:
 # ---- 1.3.0: text instead of pictures, steps in one call, waiting on the Amiga
 
 def _amiga() -> str:
-    return machines.name_of(HOST) or machines.address(HOST) or "Amiga"
+    return machines.identity(HOST) or "Amiga"
 
 
 def _screen_text() -> screentext.ScreenText:
@@ -2801,7 +2808,7 @@ def amiga_aminet_install(path: str, target: str) -> str:
 
 
 def main() -> None:
-    if not HOST:
+    if not HOST and not registry_error:
         raise SystemExit("no Amiga known yet: run amigent-setup, or set AMIGENT_HOST")
     mcp.run()
 

@@ -6,6 +6,8 @@ docs/protocol-commands.md in the amigactl project), not a rip of its client code
 
 from __future__ import annotations
 
+from .roster import identity
+
 import socket
 
 from .client import ExecResult, VolumeFlush, join_path
@@ -21,7 +23,7 @@ MAX_LINE = 4096
 
 class AmigaCtl(VolumeFlush):
     def __init__(self, host: str, port: int = 6800, timeout: float = 30.0):
-        self.host = host
+        self.host = identity(host)
         self.port = port
         self.timeout = timeout
         self._sock: socket.socket | None = None

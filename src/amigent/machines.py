@@ -20,7 +20,8 @@ import time
 
 from . import net, secret, tls
 from .roster import (address, aliases, default, find, forget, list_file, load, name_of,  # noqa: F401
-                     pick, remember, rename, save, stems, unique_name)
+                     pick, remember, rename, save, stems, unique_name, identity, edit,
+                     conflicts, is_id, validate_address, RegistryError)
 
 GREETING_PORT = net.PORT
 SEARCH_EVERY = 30.0  # seconds between two sweeps for the same Amiga; a /24 scan is no free lunch
@@ -35,7 +36,7 @@ def move(host: str, new: str) -> dict:
     if not entry:  # pre-name address: keep it as an alias so its key/cert files still match
         entry = remember(unique_name("Amiga", load()), host)
     forget_search(host)
-    return remember(entry["name"], new)
+    return edit(entry["id"], address=new)
 
 
 def forget_search(host: str) -> None:
@@ -118,7 +119,7 @@ def relocate(host: str) -> str | None:
         elif key:
             match = next((h for h in found if _proves_key(h, key)), None)
         else:
-            match = found[0] if len(found) == 1 else None
+            match = None  # no credentials means no proof of machine identity
         if match:
             move(host, match)
         return match

@@ -931,8 +931,10 @@
     const address = $("find-address").value.trim();
     if (!address) return;
     const reply = await fetch(api("/api/address"), { method: "POST", body: address }).catch(() => null);
-    if (!reply || !reply.ok) return toast(t("find_bad"), true);
-    toast(t("find_trying", { address }));
+    if (!reply) return toast(t("find_bad"), true);
+    const result = await reply.json();
+    if (!reply.ok) return toast(result.error || t("find_bad"), true);
+    location.assign(result.url);
   });
 
   // ---------------------------------------------------------------- clipboard

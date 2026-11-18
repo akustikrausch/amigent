@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines
+from . import __version__, machines, roster
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import Commands, pc_outdated
@@ -108,7 +108,10 @@ class Viewer:
     def __init__(self, host: str, screen: Amigentd | None = None, lock=None,
                  ctl_port: int = 6800, screen_port: int = 6801, restart=None,
                  flush_volumes=("SYS:",), remember: bool = False):
+        host = machines.identity(host)
         self.host = host
+        self.manager = None
+        self.enabled = True
         self.screen = screen or Amigentd(host, screen_port)
         self._thread_lock = threading.Lock()
         self.lock = lock or (lambda: self._thread_lock)
@@ -159,7 +162,8 @@ class Viewer:
             STATE.parent.mkdir(parents=True, exist_ok=True)
             handle = os.open(STATE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(handle, "w") as out:
-                out.write(json.dumps({"url": self.url, "host": self.host}))
+                out.write(json.dumps({"url": self.url, "host": self.host,
+                                      "direct": isinstance(self.host, roster.DirectAddress)}))
         except OSError:
             pass
         for target in (self.httpd.serve_forever, self.feed.run, self._upload_worker, self._stats):
@@ -194,7 +198,7 @@ class Viewer:
 
     def _watching(self) -> bool:
         with self.clients_lock:
-            return bool(self.clients)
+            return self.enabled and bool(self.clients)
 
     def unused_for(self) -> float:
         """Seconds without an open page, or 0 while one is open."""
@@ -225,6 +229,8 @@ class Viewer:
     # input: queued here, played by the feed on its pipeline
 
     def submit(self, op: dict) -> None:
+        if not self.enabled:
+            return
         if op.get("t") == "restart":
             threading.Thread(target=self._restart, daemon=True).start()
             return
@@ -238,18 +244,27 @@ class Viewer:
         self.inputs.put(op)
         self.feed.ring()
 
-    def set_address(self, new: str) -> None:
-        """The user says where the Amiga is now."""
-        new = new.strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:\-]{0,252}", new):
-            raise ValueError("not an address")
-        machines.move(self.host, new)
+    def machine_manager(self):
+        if self.manager is None:
+            from .fleet import Fleet
+            with self.clients_lock:
+                if self.manager is None:
+                    self.manager = Fleet(machines.load(), existing=self)
+                    self.manager.start(0)
+        return self.manager
+
+    def set_address(self, new: str) -> str:
+        """Connect elsewhere without rewriting the current saved machine."""
+        return self.machine_manager().connect(new)
+
+    def retire(self):
+        """An address edit or removal invalidates this connection, not its jobs' target."""
+        self.enabled = False
+        self.event("online", online=False, reason="Machine changed; select it again in Your Amigas.")
         with self.lock():
             self.screen.close()
         with self.ctl_lock:
             self.ctl.close()
-        self.event("address", address=new)
-        self.feed.ring()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
         if online != self.online:
@@ -330,6 +345,8 @@ class Viewer:
 
     def _ctl(self, fn):
         with self.ctl_lock:
+            if not self.enabled:
+                raise AmigaError("Machine changed; select it again in Your Amigas.")
             if not self.ctl.connected:
                 self.ctl.connect()
             try:
@@ -543,7 +560,12 @@ def running_viewer(host: str) -> str | None:
     """The address of a viewer for host that already runs on this PC, if any."""
     try:
         state = json.loads(STATE.read_text())
-        if machines.name_of(state.get("host", "")) != machines.name_of(host):
+        saved_host = state.get("host", "")
+        if state.get("direct"):
+            saved_host = roster.DirectAddress(saved_host)
+        if isinstance(saved_host, roster.DirectAddress) != isinstance(host, roster.DirectAddress):
+            return None
+        if machines.identity(saved_host) != machines.identity(host):
             return None
         with urllib.request.urlopen(state["url"], timeout=2) as reply:
             return state["url"] if reply.status == 200 else None
@@ -569,14 +591,32 @@ def main() -> None:
         for path in uninstall():
             print(f"removed {path}")
         return
-    host = machines.pick(args.host)
-    if not host:
-        parser.error("no Amiga known yet: run amigent-setup, or give the Amiga's address")
+    explicit = args.host or os.environ.get("AMIGENT_HOST", "")
     if args.install:
         from .desktop import install
-        for path in install(machines.name_of(host)):
+        for path in install(machines.identity(explicit) if explicit else ""):
             print(f"created {path}")
         return
+    known = machines.load()
+    if not explicit and len(known) != 1:
+        from .fleet import Fleet
+        overview = Fleet(known)
+        url = overview.start(args.port)
+        print(f"Your Amigas: {url}\nCtrl+C to stop.", flush=True)
+        if not args.no_window:
+            open_window(url)
+        try:
+            while True:
+                time.sleep(1)
+                if args.exit_when_closed and overview.unused_for() > (15 if overview.ever_joined else 90):
+                    break
+        except KeyboardInterrupt:
+            pass
+        return
+    host = machines.identity(machines.pick(explicit))
+    selected = machines.find(explicit) if explicit else None
+    if explicit and (not selected or explicit.casefold() == selected["host"].casefold()):
+        host = roster.DirectAddress(machines.validate_address(explicit))
     if url := running_viewer(host):
         if not args.no_window:
             show(url, host)
@@ -599,8 +639,9 @@ def main() -> None:
         while True:
             time.sleep(1)
             if args.exit_when_closed:
-                idle = viewer.unused_for()
-                if idle > (15 if viewer.ever_joined else 90):
+                owner = viewer.manager or viewer
+                idle = owner.unused_for()
+                if idle > (15 if owner.ever_joined else 90):
                     break  # the window is gone; a reload comes back within seconds
     except KeyboardInterrupt:
         pass

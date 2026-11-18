@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import secret
+from . import secret, roster
 from .errors import AmigaError
 
 SYSTEM = ["C:", "LIBS:", "DEVS:", "S:", "L:", "ENVARC:", "SYS:WBStartup", "SYS:Classes"]
@@ -71,7 +71,7 @@ class Record:
 
 
 def folder_for(amiga: str) -> Path:
-    return secret.FOLDER / "installs" / secret.safe(amiga or "Amiga")
+    return secret.FOLDER / "installs" / secret.safe(roster.identity(amiga) or "Amiga")
 
 
 def load(amiga: str, name: str) -> Record:

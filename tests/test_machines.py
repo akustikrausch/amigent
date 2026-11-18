@@ -10,10 +10,10 @@ def test_names_and_addresses(private_config):
     machines.remember("A1200", "10.0.0.5")
     assert machines.default() == "A1200" and machines.pick() == "A1200"
     assert machines.address("a1200") == "10.0.0.5" and machines.name_of("10.0.0.5") == "A1200"
-    machines.remember("A1200", "10.0.0.9")
+    machines.edit("A1200", address="10.0.0.9")
     assert machines.address("A1200") == "10.0.0.9"
-    assert machines.name_of("10.0.0.5") == "A1200"  # the old address still means this Amiga
-    assert machines.stems("A1200") == ["A1200", "10.0.0.9", "10.0.0.5"]
+    assert machines.name_of("10.0.0.5") == "10.0.0.5"  # an old IP may now belong to someone else
+    assert machines.stems("A1200") == [machines.identity("A1200")]
     machines.remember("A500", "10.0.0.7")
     assert machines.default() == "A1200"
     assert machines.rename("A500", "A500 Plus") and machines.address("A500 Plus") == "10.0.0.7"
@@ -31,7 +31,8 @@ def test_key_and_certificate_follow_the_amiga(private_config):
 
 def test_an_address_from_before_names_gets_one(private_config):
     machines.move("10.0.0.5", "10.0.0.9")
-    assert machines.name_of("10.0.0.5") == "Amiga" and machines.address("10.0.0.5") == "10.0.0.9"
+    assert machines.name_of("10.0.0.9") == "Amiga"
+    assert machines.address("10.0.0.5") == "10.0.0.5"
 
 
 def fake_amigentd(key: str):
@@ -89,5 +90,5 @@ def test_one_lookup_for_keys_and_certificates(private_config):
     from amigent import roster
     machines.remember("A1200", "localhost")
     assert machines.find is roster.find
-    assert roster.aliases("localhost") == ["A1200", "localhost", "127.0.0.1"]  # DNS joins in last
+    assert roster.aliases("localhost") == [roster.identity("A1200")]
     assert roster.aliases("nowhere.invalid") == ["nowhere.invalid"]
