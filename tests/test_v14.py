@@ -88,9 +88,9 @@ def test_job_numbers_continue_after_those_in_ram(monkeypatch):
         def list_dir(self, path):
             return [{"name": "amigent-job-4.cmd"}, {"name": "amigent-job-9.out"},
                     {"name": "amigent-job-2.cmd"}]
-    monkeypatch.setattr(server, "ctl", Ctl())
+    monkeypatch.setattr(server._session(), "ctl", Ctl())
     monkeypatch.setattr(server, "_with_ctl", lambda f: f())
-    monkeypatch.setattr(server, "_job_numbers", [])
+    monkeypatch.setattr(server._session(), "job_numbers", [])
     assert server._known_jobs() == [2, 4]
     assert server._next_job() == 5 and server._next_job() == 6
 
@@ -261,7 +261,7 @@ def test_rsp_details():
 
 
 def test_no_emulator_set_says_how(monkeypatch):
-    monkeypatch.setattr(server, "HOST", "")
+    monkeypatch.setattr(server._session(), "host", "")
     monkeypatch.delenv("AMIGENT_GDB", raising=False)
     with pytest.raises(AmigaError, match="amigas.json"):
         server._emulator()

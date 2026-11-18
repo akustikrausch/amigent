@@ -11,11 +11,11 @@ def restart_with(monkeypatch, answers: bool, power: bool, has_reboot: bool = Tru
             raise s.AmigaError("object not found", 205)
         return {"type": "file"}
 
-    monkeypatch.setattr(s, "ctl", type("Ctl", (), {"flush": lambda self, v: None, "stat": stat,
+    monkeypatch.setattr(s._session(), 'ctl', type("Ctl", (), {"flush": lambda self, v: None, "stat": stat,
                                                     "exec": lambda self, c, timeout=None: None,
                                                     "close": lambda self: None})())
     monkeypatch.setattr(s, "wait_gone", lambda h, p: goes_down)
-    monkeypatch.setattr(s.screen, "close", lambda: None)
+    monkeypatch.setattr(s._session().screen, "close", lambda: None)
     monkeypatch.setattr(s, "_exclusive", contextlib.nullcontext)
     monkeypatch.setattr(s.time, "sleep", lambda n: None)
     monkeypatch.setattr(s, "wait_for_port", lambda h, p, w: calls.append(("wait", w)) or answers)

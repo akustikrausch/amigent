@@ -118,21 +118,51 @@ default_tools_approval_mode = "approve"
 
 Antigravity reads its servers from `~/.gemini/antigravity/mcp_config.json`, in
 the usual `mcpServers` format. Other agents need the command `amigent-server`.
-With several
-Amigas, give each entry `AMIGENT_HOST` with the Amiga's name.
+One MCP server can operate every registered Amiga. The agent calls
+`amiga_machines()` to discover names, stable IDs, addresses and reachability,
+then passes `machine` on each machine-specific tool call. For example:
+
+```python
+amiga_aminet_install(machine="Amiga3000", path="util/misc/example.lha", target="Work:Utilities")
+amiga_aminet_install(machine="Amiga4000", path="util/misc/example.lha", target="Work:Utilities")
+```
+
+Read the package readme and check compatibility on each target first. Wrap
+each machine's installation in `amiga_install_begin` and `amiga_install_end`;
+run any required installer separately. Results identify the target, and each
+machine keeps its own installation and undo records. A failure on one machine
+does not roll back a successful installation on another.
+
+Calls for different machines can run concurrently. Calls for the same machine
+are serialized. Screen caches, connections, background log followers and
+window tracking stay with their machine; there is no shared active-machine
+switch. An omitted `machine` uses `AMIGENT_HOST` first, then the saved default,
+then the sole registered machine. If several machines have no unique default,
+pass the name or ID explicitly. Default-target calls retain their usual output and JSON format.
+With several machines registered, an explicit target adds its name and address
+to the reply. `amiga_everywhere` runs on all registered machines.
+
+`AMIGENT_POWER_CMD` remains bound to the machine named by `AMIGENT_HOST` when
+multiple machines are registered. It cannot switch another machine's outlet.
+
+After updating Amigent, reconnect the MCP client so it reloads the tool schemas.
+Existing separate MCP server entries with `AMIGENT_HOST` continue to work.
 
 ### When the address changes
 
-Amigent keeps every Amiga under its name in `~/.config/amigent/amigas.json`,
-with the address it last had. If the Amiga stops answering there, for example
-because the router gave it a new address, Amigent searches the local /24 network
-for amigentd and takes only the Amiga whose certificate (or, without TLS, whose
-key) matches, so a second Amiga on the network is never mistaken for yours. The
-new address is remembered for the AI agent, the remote desktop and the fleet.
+Amigent keeps each saved Amiga under a stable internal ID in
+`~/.config/amigent/amigas.json`. Renaming it preserves its credentials, notes,
+installation records and inventory. Older registries migrate automatically;
+the original registry and credential files are retained for recovery.
 
-When the Amiga sits in another network, the remote desktop offers a field for its
-address while it does not answer, and the agent has `amiga_find` to search or to
-set an address you tell it. A fixed address in the router saves the search.
+If a saved Amiga stops answering, Amigent searches the local /24 network and
+accepts a new address only when its certificate or key matches. To change an
+address yourself, use **Manage → Edit address**. Duplicate addresses are flagged
+and must be resolved before selecting either saved machine.
+
+Typing an IP address into **Connect** opens a one-off connection. It does not
+change a saved machine's address, even when another machine was selected.
+Previous addresses are migration hints, not aliases that redirect connections.
 
 ### Updating
 
@@ -349,18 +379,34 @@ signed app, `--install` builds an unsigned one with the Xcode tools.
 
 ## Several Amigas
 
+Run `amigent-viewer` to see **Your Amigas** when several machines are registered.
+With one saved machine it opens that desktop directly. An explicit name, such
+as `amigent-viewer "Amiga 2"`, opens that machine.
+
+The selector remains available in every desktop and overview. It lists each
+machine's name, address and connection status. **Manage** provides **Rename**,
+**Set default**, **Edit address** and **Remove**. Removing an entry keeps its
+credentials and history on disk. The default is used by tools that need one
+machine; the viewer still shows the overview when several are registered.
+
+Reachability refreshes every 20 seconds without taking over another viewer's
+screen connection. The fleet overview also samples previews, OS, CPU and memory
+while the page is open. Each Amiga needs its own credentials from `amigent-setup`.
+
+The same controls are available from the command line:
+
 ```bash
 amigent-fleet --add A1200 192.168.1.50
+amigent-fleet --rename A1200 "Desk Amiga"
+amigent-fleet --default "Desk Amiga"
+amigent-fleet --address "Desk Amiga" 192.168.1.51
+amigent-fleet --list
+amigent-fleet --remove "Desk Amiga"
 ```
 
-```bash
-amigent-fleet
-```
-
-The overview shows every Amiga, whether it is on, its CPU, free memory and a
-preview renewed every 20 seconds. A click opens its remote desktop. `--list` and
-`--remove NAME` manage the list. Each Amiga needs its own key from
-`amigent-setup`.
+Adding a machine never replaces an existing machine's address. Use the explicit
+address control to correct a saved mapping. `amigent-fleet` also opens the
+overview directly.
 
 ## How it works
 

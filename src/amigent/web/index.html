@@ -8,6 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
 <link rel="stylesheet" href="viewer.css">
+<link rel="stylesheet" href="machines.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -58,9 +59,9 @@
     <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen" data-i18n-aria="screen_label"></canvas>
     <div id="overlay" class="overlay"><div class="spinner"></div><p id="overlay-text"></p><p id="overlay-reason" class="reason"></p>
       <form id="find" class="find" hidden>
-        <p data-i18n="find_hint">If the Amiga got a new address, Amigent finds it again by itself. Or enter it here:</p>
+        <p data-i18n="find_hint">Connect to another Amiga by saved name or address. This does not change saved addresses:</p>
         <div class="find-row">
-          <input id="find-address" autocomplete="off" spellcheck="false" data-i18n-placeholder="find_placeholder" placeholder="for example 192.168.1.20">
+          <input id="find-address" autocomplete="off" spellcheck="false" data-i18n-placeholder="find_placeholder" placeholder="Amiga name or IP address">
           <button id="find-go" class="primary" type="submit" data-i18n="find_connect">Connect</button>
         </div>
       </form>
@@ -256,5 +257,6 @@
 
 <div id="toasts" aria-live="polite"></div>
 <script src="viewer.js"></script>
+<script src="machines.js"></script>
 </body>
 </html>

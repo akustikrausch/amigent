@@ -220,8 +220,8 @@ def test_unchanged_screenshot_comes_back_as_a_note(monkeypatch):
             return 0
 
     fake = Screen()
-    monkeypatch.setattr(server, "screen", fake)
-    monkeypatch.setattr(server, "_last_shot", None)
+    monkeypatch.setattr(server._session(), 'screen', fake)
+    monkeypatch.setattr(server._session(), 'last_shot', None)
     assert len(server.amiga_screenshot()) == 2
     assert len(server.amiga_screenshot()) == 1  # nothing new: a note, no picture
     assert len(server.amiga_screenshot()) == 2  # asked again: the picture after all
@@ -233,7 +233,7 @@ def test_amiga_put_and_get_through_the_tools(amiga, tmp_path, monkeypatch):
     from amigent.channel import Commands
 
     ctl = Commands("127.0.0.1", 1, amiga.port, timeout=5)
-    monkeypatch.setattr(server, "ctl", ctl)
+    monkeypatch.setattr(server._session(), 'ctl', ctl)
     monkeypatch.setattr(server, "_exclusive", lambda name=None: threading.Lock())
     src = tree(tmp_path / "src", 4)
     assert server.amiga_put(str(src), "RAM:w").startswith("copied 4")

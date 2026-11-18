@@ -3,6 +3,12 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## Unreleased
+
+- Saved Amigas now keep credentials, settings and history under a stable ID.
+  Migration keeps the original files. After a downgrade, older versions see
+  the pre-migration history. Later writes remain under the machine ID.
+
 ## 1.4.0 (2026-11-18)
 
 ### After a crash

@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path, PurePosixPath
 
-from . import secret
+from . import secret, roster
 
 MAX_NOTES = 200  # per topic; the oldest go first
 
@@ -87,4 +87,4 @@ class Notes:
 
 
 def for_amiga(name: str) -> Notes:
-    return Notes(secret.FOLDER / "notes" / f"{secret.safe(name or 'Amiga')}.json")
+    return Notes(secret.FOLDER / "notes" / f"{secret.safe(roster.identity(name) or 'Amiga')}.json")

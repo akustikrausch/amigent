@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .roster import identity
+
 import math
 import random
 import select
@@ -124,7 +126,7 @@ def unpack_rgb(data: bytes, pixels: int) -> bytes:
 class Amigentd:
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0,
                  key: str | None = None):
-        self.host = host
+        self.host = identity(host)
         self.key = key
         self.client_id = random.getrandbits(32)  # lets amigentd tell us if others took frames
         self.changes = deque(maxlen=4096)  # (time, x, y, w, h) of tiles received, by anyone

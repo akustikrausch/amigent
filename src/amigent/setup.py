@@ -34,8 +34,11 @@ SCRIPTS = ("amigent-repair", "amigent-scan", "menu-add.rexx")
 
 
 def find_amiga() -> str | None:
-    """Sweep the local /24 for amigentd; first one to say hello wins."""
+    """Find the only amigentd on the local /24; require an address if ambiguous."""
     hits = machines.scan()
+    if len(hits) > 1:
+        print("Several Amigas found: " + ", ".join(hits) + ". Give setup an explicit address.")
+        return None
     return hits[0] if hits else None
 
 
@@ -222,7 +225,7 @@ def main() -> int:
                         help="replace the amigentd that already runs with this version's, by network")
     args = parser.parse_args()
     if args.update:
-        return update(machines.address(machines.pick(args.host or "")), args.home)
+        return update(machines.identity(machines.pick(args.host or "")), args.home)
     args.home = args.home or "SYS:amigent"
     if args.serve:
         from .serve import serve
@@ -234,6 +237,14 @@ def main() -> int:
         return 1
     known = machines.find(host)
     name = args.name or (known["name"] if known else machines.unique_name("Amiga", machines.load()))
+    # Reject a conflicting name before installing anything on the Amiga.
+    named = machines.find(name)
+    if named and (not known or named["id"] != known["id"]):
+        print(f"{name!r} already belongs to another Amiga. Choose another name.")
+        return 1
+    if known and name != known["name"]:
+        print("Rename the saved Amiga in Your Amigas before running setup.")
+        return 1
     host = machines.address(host)
     print(f"Amiga at {host}")
     allow = None if args.no_allow else args.allow

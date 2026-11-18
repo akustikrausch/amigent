@@ -10,7 +10,7 @@ class FakeCommands:
 
     log: list = []
 
-    def __init__(self, host):
+    def __init__(self, host, ctl_port=6800, screen_port=6801):
         self.host = host
 
     def exec(self, command, cd=None, timeout=None):

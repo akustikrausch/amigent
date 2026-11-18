@@ -34,7 +34,7 @@ class HoldScreen:
 def test_popup_is_closed_before_a_start(monkeypatch):
     fake = HoldScreen(["held", ""])
     ran = []
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     monkeypatch.setattr(server, "_with_ctl", lambda fn: ran.append(fn) or None)
     monkeypatch.setattr(server.time, "sleep", lambda s: None)
     said = server.amiga_start("NewShell")
@@ -45,21 +45,21 @@ def test_popup_is_closed_before_a_start(monkeypatch):
 
 def test_a_menu_someone_holds_is_left_alone(monkeypatch):
     fake = HoldScreen(["menu"])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     assert "A menu is open" in server._clear_hold()
     assert fake.calls == []  # letting go of a button we didn't press could pick an item
 
 
 def test_our_own_right_button_is_let_go(monkeypatch):
     fake = HoldScreen(["menu", ""], right=True)
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     monkeypatch.setattr(server.time, "sleep", lambda s: None)
     assert server._clear_hold() == "let go of the right mouse button first. "
     assert fake.calls == [("button", "right", False)]
 
 
 def test_nothing_held_says_nothing(monkeypatch):
-    monkeypatch.setattr(server, "screen", HoldScreen([""]))
+    monkeypatch.setattr(server._session(), 'screen', HoldScreen([""]))
     assert server._clear_hold() == ""
 
 
@@ -121,7 +121,7 @@ class TypeScreen:
 
 def test_lines_go_in_one_by_one(monkeypatch):
     fake = TypeScreen()
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     monkeypatch.setattr(server, "SETTLE_FIRST", 0)
     monkeypatch.setattr(server, "SETTLE_QUIET", 0.01)
     said = server.amiga_type("Echo a\nWait 2\nEcho b\n")
@@ -131,7 +131,7 @@ def test_lines_go_in_one_by_one(monkeypatch):
 
 def test_a_window_that_keeps_changing_is_reported(monkeypatch):
     fake = TypeScreen(polls=[5] * 10000)
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     monkeypatch.setattr(server, "SETTLE_FIRST", 0)
     said = server.amiga_type("List\nEcho b\n", settle=0.05)
     assert fake.typed == ["List\n", "Echo b\n"] and "1 line(s) went on" in said
@@ -139,7 +139,7 @@ def test_a_window_that_keeps_changing_is_reported(monkeypatch):
 
 def test_one_line_or_settle_zero_types_at_once(monkeypatch):
     fake = TypeScreen()
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     server.amiga_type("Echo a\n")
     server.amiga_type("a\nb\n", settle=0)
     assert fake.typed == ["Echo a\n", "a\nb\n"]

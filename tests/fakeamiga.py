@@ -59,7 +59,7 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
-        self.pause_end = 0.0  # time.monotonic() at the end of a screen pause
+        self.pause_end_ns = 0
         self.lock = threading.Lock()
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -226,11 +226,11 @@ class FakeAmiga:
     # screen client
 
     def set_pause(self, seconds: int) -> None:
-        self.pause_end = time.monotonic() + seconds if seconds else 0.0
+        self.pause_end_ns = time.monotonic_ns() + seconds * 1_000_000_000
 
     def pause_left(self) -> int:
-        left = self.pause_end - time.monotonic()
-        return -int(-left // 1) if left > 0 else 0
+        left_ns = max(0, self.pause_end_ns - time.monotonic_ns())
+        return (left_ns + 999_999_999) // 1_000_000_000
 
     def _screen(self, me, cmd, arg, x, y, w, h) -> bytes:
         width, height = self.picture.size

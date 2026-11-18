@@ -13,13 +13,14 @@ hand: auto (the default), off, fast or best.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
 import time
 from pathlib import Path
 
-from . import secret
+from . import locks, secret
 
 MODES = ("auto", "off", "fast", "best")
 FAST_FACTOR = 2.0  # level 1 when the Amiga packs this many times faster than the line
@@ -192,7 +193,8 @@ class Policy:
             return {}
 
     def _save(self, chose: bool = False) -> None:
-        with _saving:  # the screen and command connections note from different threads
+        key = hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()[:20]
+        with _saving, locks.exclusive(f"amigent-link-{key}.lock"):
             try:
                 try:
                     everything = json.loads(self.path.read_text())

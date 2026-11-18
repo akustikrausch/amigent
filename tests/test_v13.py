@@ -499,7 +499,7 @@ class TreeCtl:
 def test_install_round_trip(monkeypatch):
     trees = {"C:": {"Dir": entry("FILE")}, "LIBS:": {}}
     fake = TreeCtl(trees)
-    monkeypatch.setattr(server, "ctl", fake)
+    monkeypatch.setattr(server._session(), 'ctl', fake)
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     monkeypatch.setattr(install, "SYSTEM", ["C:", "LIBS:"])
     monkeypatch.setattr(server.files, "makedirs", lambda ctl, path: None)
@@ -587,7 +587,7 @@ def test_wait_reports(monkeypatch):
                 raise AmigaError("timeout", 2)
             return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
 
-    monkeypatch.setattr(server, "ctl", C())
+    monkeypatch.setattr(server._session(), 'ctl', C())
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     assert server.amiga_wait_window("Req") == "window 'Req' 0000beef (1,2 30x40) active"
     assert server.amiga_wait_window("slow", timeout=3).startswith("timeout")
@@ -598,7 +598,7 @@ def test_changed_box_covers_the_new_tiles(monkeypatch):
     class S:
         changes = [(1.0, 0, 0, 64, 64), (5.0, 128, 64, 64, 64), (6.0, 192, 128, 64, 32)]
 
-    monkeypatch.setattr(server, "screen", S())
+    monkeypatch.setattr(server._session(), 'screen', S())
     assert server._changed_box(2.0) == (128, 64, 128, 96)
     assert server._changed_box(9.0) is None
 
@@ -607,7 +607,7 @@ def test_separate_changes_stay_separate(monkeypatch):
     class S:
         changes = [(5.0, 0, 0, 64, 64), (5.0, 64, 0, 64, 64), (5.0, 1856, 1024, 64, 56)]
 
-    monkeypatch.setattr(server, "screen", S())
+    monkeypatch.setattr(server._session(), 'screen', S())
     assert server._changed_boxes(1.0) == [(0, 0, 128, 64), (1856, 1024, 64, 56)]
 
 
@@ -628,7 +628,7 @@ def test_new_window_after_a_start_excludes_those_open_before(monkeypatch):
             seen["kind"], seen["known"] = kind, known
             return [f"W\t0000beef\t1\t2\t30\t40\ta\t{what}"]
 
-    monkeypatch.setattr(server, "ctl", C())
+    monkeypatch.setattr(server._session(), 'ctl', C())
     monkeypatch.setattr(server, "_with_ctl", lambda fn: fn())
     monkeypatch.setattr(server, "_clear_hold", lambda: "")
     monkeypatch.setattr(server, "_window_ids", lambda: [0x1000, 0x2000])

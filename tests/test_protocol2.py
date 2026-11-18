@@ -127,7 +127,7 @@ def test_ui_click_by_label(monkeypatch):
         {"kind": "gadget", "window": "w1", "id": "5", "label": "Cancel", "x": 200, "y": 80, "w": 60, "h": 14,
          "disabled": True, "selected": False, "type": "button"},
     ])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     server.amiga_ui_click("save")
     assert fake.calls == [("click", 50, 87)]
     with pytest.raises(Exception, match="disabled"):
@@ -141,7 +141,7 @@ def test_menu_select_drags_with_the_right_button(monkeypatch):
     fake = FakeScreen(menus=[entry("menu", [0], 0, 0, "Project"),
                              entry("item", [0, 0], 0, 20, "Save as"),
                              entry("sub", [0, 0, 0], 40, 20, "IFF")])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     monkeypatch.setattr(server.time, "sleep", lambda s: None)
     server.amiga_menu_select("Project/Save as/IFF")
     assert fake.calls == [("move", 10, 5), ("button", "right", True), ("move", 10, 25),
@@ -218,7 +218,7 @@ def test_ui_click_by_number(monkeypatch):
         {"kind": "gadget", "window": "08e7b714", "id": "6", "label": "", "x": 992, "y": 574,
          "w": 103, "h": 29, "disabled": False, "selected": False, "type": "other"},
     ])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     server.amiga_ui_click(number=6, window="Amigent")
     assert fake.calls == [("click", 1043, 588)]
 
@@ -231,7 +231,7 @@ def test_ui_click_takes_the_front_window_when_titles_repeat(monkeypatch):
         {"kind": "window", "id": "0a000001", "title": "GT Label Test"}, gadget("0a000001", 300),
         {"kind": "window", "id": "0a000002", "title": "GT Label Test"}, gadget("0a000002", 600),
     ])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     server.amiga_ui_click("close", window="GT Label Test")
     assert fake.calls == [("click", 314, 315)]
 
@@ -278,7 +278,7 @@ def test_unlabelled_gadgets_come_with_a_picture(monkeypatch):
         {"kind": "gadget", "window": "w1", "id": "5", "label": "OK", "type": "button", "x": 150, "y": 50,
          "w": 100, "h": 20, "disabled": False, "selected": False},
     ])
-    monkeypatch.setattr(server, "screen", fake)
+    monkeypatch.setattr(server._session(), 'screen', fake)
     result = server.amiga_ui_tree()
     assert "#4 other ''" in result[0] and len(result) == 2
     assert server.amiga_ui_tree(pictures=False) == [result[0]]

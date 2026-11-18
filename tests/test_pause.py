@@ -76,8 +76,8 @@ def test_the_feed_asks_for_no_frames_while_paused_but_input_goes_through(amiga, 
 def test_the_tools_stand_in_a_note_for_the_picture(amiga, monkeypatch):
     ctl = Commands("127.0.0.1", 1, amiga.port, timeout=5)
     screen = Amigentd("127.0.0.1", amiga.port, timeout=5)
-    monkeypatch.setattr(server, "ctl", ctl)
-    monkeypatch.setattr(server, "screen", screen)
+    monkeypatch.setattr(server._session(), 'ctl', ctl)
+    monkeypatch.setattr(server._session(), 'screen', screen)
     monkeypatch.setattr(server, "_exclusive", lambda name=None: threading.Lock())
     assert server.amiga_pause_screen(120).startswith("screen paused for 120 s")
     shot = server.amiga_screenshot()

@@ -31,7 +31,11 @@ def key_file(host: str = "") -> Path:
     The common key belongs to the first Amiga set up. With several Amigas on
     file it only covers a host that matches none of them.
     """
-    return (_own(host) if host else None) or FOLDER / "key"
+    own = _own(host) if host else None
+    if own:
+        return own
+    entry = roster.find(str(host))
+    return FOLDER / (f"key-{entry['id']}" if entry else "key")
 
 
 def load_key(host: str = "") -> str | None:
@@ -62,7 +66,7 @@ def _write(path: Path, key: str) -> None:
 
 def save_key(key: str, host: str) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = FOLDER / f"key-{safe(host)}"
+    path = FOLDER / f"key-{safe(roster.identity(host))}"
     _write(path, key)
     if not (FOLDER / "key").exists():
         _write(FOLDER / "key", key)

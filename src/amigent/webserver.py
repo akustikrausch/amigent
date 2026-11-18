@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from .amigactl import AmigaError
 
 WEB = Path(__file__).with_name("web")
-STATIC = {"viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
+STATIC = {"machines.js": "text/javascript", "machines.css": "text/css", "viewer.js": "text/javascript", "viewer.css": "text/css", "icon.svg": "image/svg+xml",
           "icon.png": "image/png", "amigent.ico": "image/x-icon"}
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_UPLOAD = 512 * 2**20
@@ -168,6 +168,10 @@ class _Handler(TokenHandler):
             return self._reply(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
         if url.path == "/ws":
             return self._websocket()
+        if url.path == "/api/machines":
+            manager = self.viewer.machine_manager()
+            return self._json(200, {"machines": manager.status(), "overview": manager.url,
+                                    "current": self.viewer.host})
         if url.path == "/api/folders":
             try:
                 return self._json(200, self.viewer.folders(query.get("path", [""])[0]))
@@ -201,7 +205,7 @@ class _Handler(TokenHandler):
     def do_POST(self) -> None:
         url = urlparse(self.path)
         query = parse_qs(url.query)
-        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address"):
+        if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address", "/api/machines", "/api/connect"):
             return self._reply(403, b"forbidden", "text/plain")
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -212,12 +216,19 @@ class _Handler(TokenHandler):
         if size > (MAX_UPLOAD if url.path == "/api/upload" else MAX_MESSAGE):
             return self._json(413, {"error": "file too large"})
         data = self.rfile.read(size)
-        if url.path == "/api/address":
+        if url.path in ("/api/machines", "/api/connect", "/api/address"):
             try:
-                self.viewer.set_address(data.decode("utf-8", "replace"))
-            except ValueError as e:
+                manager = self.viewer.machine_manager()
+                if url.path == "/api/address":
+                    result = {"url": self.viewer.set_address(data.decode("utf-8", "replace"))}
+                else:
+                    body = json.loads(data)
+                    if not isinstance(body, dict):
+                        raise ValueError("Expected an object.")
+                    result = manager.manage(body) if url.path == "/api/machines" else {"url": manager.connect(str(body.get("target", "")))}
+                return self._json(200, result)
+            except (ValueError, OSError) as e:
                 return self._json(400, {"error": str(e)})
-            return self._json(200, {})
         if url.path == "/api/clipboard":
             try:
                 self.viewer.write_clipboard(data.decode("utf-8", "replace"))

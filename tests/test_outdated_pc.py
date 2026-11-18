@@ -18,15 +18,15 @@ class _Backend:
 
 
 def test_the_agent_hears_it_once(monkeypatch):
-    monkeypatch.setattr(server.ctl, "backend", _Backend())
-    monkeypatch.setattr(server, "_outdated_told", False)
+    monkeypatch.setattr(server._session().ctl, "backend", _Backend())
+    monkeypatch.setattr(server._session(), 'outdated_told', False)
     first = server._outdated_note()
     assert first.startswith("Note: amigentd on the Amiga is newer")
     assert server._outdated_note() == ""
 
 
 def test_nothing_before_the_link_is_up(monkeypatch):
-    monkeypatch.setattr(server.ctl, "backend", None)
-    monkeypatch.setattr(server, "_outdated_told", False)
+    monkeypatch.setattr(server._session().ctl, "backend", None)
+    monkeypatch.setattr(server._session(), 'outdated_told', False)
     assert server._outdated_note() == ""
-    assert server._outdated_told is False  # asks again once connected
+    assert server._session().outdated_told is False  # asks again once connected

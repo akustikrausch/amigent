@@ -61,11 +61,14 @@
       el.className = "tile";
       el.innerHTML = `<button class="open"><div class="shot"><img alt=""></div>
         <div class="meta"><b></b><span class="state"><i></i><em></em></span><small></small></div></button>
-        <div class="tools"><button class="more" aria-expanded="false"></button><button class="reboot"></button></div>`;
+        <div class="tools"><button class="manage"></button><button class="more" aria-expanded="false"></button><button class="reboot"></button></div>`;
       el.querySelector(".open").addEventListener("click", async () => {
         const reply = await fetch(api(`/api/open/${a.id}`));
-        if (reply.ok) window.open((await reply.json()).url, `amiga-${a.id}`, "popup,width=1440,height=900");
+        if (reply.ok) location.assign((await reply.json()).url);
+        else window.amigentMachines?.open(a.id);
       });
+      el.querySelector(".manage").textContent = t("machines_manage");
+      el.querySelector(".manage").addEventListener("click", () => window.amigentMachines?.open(a.id));
       el.querySelector(".more").addEventListener("click", (event) => {
         const open = event.currentTarget.getAttribute("aria-expanded") !== "true";
         event.currentTarget.setAttribute("aria-expanded", String(open));
@@ -82,12 +85,12 @@
       tiles.set(a.id, el);
     }
     el.amiga = a;
-    el.querySelector("b").textContent = a.name;
+    el.querySelector("b").textContent = a.name + (a.default ? " ★" : "");
     const state = el.querySelector(".state");
     state.className = "state " + (a.online ? "ok" : a.online === false ? "bad" : "");
-    state.querySelector("em").textContent = a.online ? a.host : a.online === false ? t("fleet_offline") : t("connecting");
+    state.querySelector("em").textContent = a.conflicts?.length ? t("machines_conflict") : a.online ? a.host : a.online === false ? t("fleet_offline") : t("connecting");
     el.querySelector("small").textContent = a.online
-      ? [a.os, a.cpu, t("status_free", { size: bytes(a.free) })].filter(Boolean).join(" · ")
+      ? [a.os, a.cpu, a.free ? t("status_free", { size: bytes(a.free) }) : ""].filter(Boolean).join(" · ")
       : a.host;
     const open = el.querySelector(".open");
     open.title = t("fleet_open", { name: a.name });
@@ -99,7 +102,9 @@
       el.querySelector("dl")?.remove();
       el.append(details(a));
     }
-    if (a.online && a.seen) el.querySelector("img").src = api(`/api/preview/${a.id}`) + `&s=${a.seen}`;
+    const image = el.querySelector("img");
+    image.hidden = !a.preview;
+    if (a.preview) image.src = api(`/api/preview/${a.id}`) + `&s=${a.seen}`;
     el.classList.toggle("offline", a.online === false);
   }
 
@@ -140,6 +145,8 @@
     try {
       const list = await (await fetch(`/api/fleet?t=${encodeURIComponent(token)}`)).json();
       list.forEach(tile);
+      const live = new Set(list.map(a => a.id));
+      for (const [id, el] of tiles) if (!live.has(id)) { el.remove(); tiles.delete(id); }
       const up = list.filter((a) => a.online).length;
       $("summary").textContent = t("fleet_summary", { up, total: list.length });
     } catch { /* fleet process gone; freeze the last frame */ }

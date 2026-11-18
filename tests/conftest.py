@@ -14,3 +14,17 @@ def private_config(tmp_path, monkeypatch):
     monkeypatch.delenv("AMIGENT_HOST", raising=False)
     machines._searched.clear()
     return folder
+
+
+@pytest.fixture(autouse=True)
+def machine_session(private_config, monkeypatch):
+    from amigent import server
+    from amigent.sessions import MachineSession, Sessions, bound
+    monkeypatch.setattr(server, "sessions", Sessions())
+    with bound(MachineSession("test")) as session:
+        ctl, screen = session.ctl, session.screen
+        yield session
+        if ctl.backend is None or hasattr(ctl.backend, "close"):
+            ctl.close()
+        screen.close()
+        session.lookout._pool.shutdown(wait=True)

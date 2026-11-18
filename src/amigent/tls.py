@@ -26,10 +26,16 @@ from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLD
 def pinned(host: str) -> Path:
     """This Amiga's pinned cert: by name, by any address it ever had, or by what DNS says."""
     names = roster.aliases(host)
+    ident, blocked = roster.pin_conflicts(host)
     for name in names:
+        if safe(name) in blocked:
+            continue
         path = FOLDER / f"tls-{safe(name)}.pem"
         if path.exists():
             return path
+    if blocked:
+        raise roster.RegistryError(f"Ambiguous TLS pin for {host}. "
+                                  f"Save its verified certificate as tls-{ident}.pem.")
     return FOLDER / f"tls-{safe(names[0])}.pem"
 
 
@@ -63,10 +69,13 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     host is a name or an address. No answer there? One sweep of the local
     network, and the Amiga is picked up again at its new address.
     """
+    host = roster.identity(host)
     address = roster.address(host)  # machines is only rung when the line stays dead
     try:
         return _dial(address, host, port, timeout)
     except (OSError, ssl.SSLError):
+        if not roster.is_id(host):
+            raise  # a one-off address must never change the saved registry
         moved = machines.relocate(host)
         if not moved or moved == address:
             raise
@@ -104,7 +113,7 @@ def make_certificate(host: str) -> tuple[bytes, bytes] | None:
 
 def remember(host: str, certificate: bytes) -> Path:
     FOLDER.mkdir(parents=True, exist_ok=True)
-    path = FOLDER / f"tls-{safe(host)}.pem"
+    path = FOLDER / f"tls-{safe(roster.identity(host))}.pem"
     path.write_bytes(certificate)
     return path
 
