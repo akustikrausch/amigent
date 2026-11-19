@@ -1,0 +1,33 @@
+# the Amiga programs, cross-compiled with GCC 16 whenever their sources change;
+# the released binaries stay vbcc's, these are for trying a change on a real Amiga
+name: amiga
+
+on:
+  push:
+    paths: ["amiga/**", ".github/workflows/amiga.yml"]
+  pull_request:
+    paths: ["amiga/**", ".github/workflows/amiga.yml"]
+  workflow_dispatch:
+
+jobs:
+  gcc:
+    runs-on: ubuntu-latest
+    container: amigadev/crosstools:m68k-amigaos
+    steps:
+      - uses: actions/checkout@v4
+      - name: GCC 16 or newer
+        run: |
+          m68k-amigaos-gcc --version | head -1
+          test "$(m68k-amigaos-gcc -dumpversion | cut -d. -f1)" -ge 16
+      - name: build
+        run: |
+          mkdir -p out
+          m68k-amigaos-gcc -O2 -m68020 -noixemul -s -o out/amigentd amiga/amigentd.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigentd.000 amiga/amigentd.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-status amiga/amigent-status.c
+          m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-monitor amiga/amigent-monitor.c
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amiga-gcc
+          path: out/

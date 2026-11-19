@@ -459,9 +459,10 @@ build, `DEVPACK Work:DevPack` points it to another DevPack folder. `scripts/make
 archive with LhA on the Amiga. Tests for the PC side: `python3 -m pytest -q`.
 
 A cross compiler on the PC works too: `m68k-amigaos-gcc -O2 -m68020 -noixemul -s
--o amigentd amiga/amigentd.c` (checked with GCC 16 from the
-`amigadev/crosstools:m68k-amigaos` Docker image; `-m68000` for the 68000
-build). The released binaries are vbcc's.
+-o amigentd amiga/amigentd.c` (GCC 16 from the `amigadev/crosstools:m68k-amigaos`
+Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's.
+The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
+whenever something in `amiga/` changes and keeps them as an artifact of the run.
 
 ## Translations
 
