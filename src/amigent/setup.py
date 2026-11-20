@@ -23,6 +23,7 @@ import time
 from . import __version__, machines, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
+from .daemons import Machine, available_names, choose, consider_replacement, detect_cpu
 from .errors import AmigaError
 from .legacy import (UNDO_ALLOW, allow_script, fetch_amigactld,  # noqa: F401 (allow_script: old address)
                      reach_amigactld, same_network, startup_script)
@@ -50,21 +51,41 @@ def run(link: Amigentd, command: str) -> None:
         raise SystemExit(f"Amiga said {code} to: {command}")
 
 
+def _chosen(machine: Machine) -> str:
+    """The packaged daemon for ``machine``, or a stop when none can run there."""
+    chosen = choose(machine, available_names(AMIGA / "bin"))
+    if chosen is None:
+        raise SystemExit("this package has no compatible amigentd for this Amiga, so nothing was changed.")
+    return chosen.name
+
+
 def amigentd_build(link: Amigentd) -> str:
-    """amigentd.000 for a stock 68000/68010, amigentd for 68020 and up."""
-    code = link.run("CPU CHECK 68020")
-    if code not in (0, 5):
-        raise SystemExit(f"C:CPU answered {code}, so the CPU is unknown. Copy C:CPU from the "
-                         "Workbench disk and try again.")
-    return "amigentd.000" if code == 5 else "amigentd"
+    """The best packaged daemon that can run on this Amiga.
+
+    A missing 68020 build falls back to the 68000 build when that file is
+    packaged. An unknown CPU may take only the 68000 build on a fresh install.
+    """
+    return _chosen(Machine(detect_cpu(link.run)))
+
+
+def build_for_channel(channel) -> str:
+    """The build an Amiga that already runs amigentd should get.
+
+    An unknown CPU keeps the installed daemon. A fresh install may still use the
+    68000 build, because there is no installed daemon to preserve.
+    """
+    cpu = detect_cpu(lambda command: channel.exec(command).rc)
+    if cpu is None:
+        raise SystemExit("the CPU could not be identified, so the installed amigentd was left in place.")
+    return _chosen(Machine(cpu))
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
+    build = amigentd_build(link)
     if with_actld:
         binary = fetch_amigactld()
         print("uploading amigactld")
         link.put("C:amigactld", binary)
-    build = amigentd_build(link)
     print(f"uploading {build}")
     link.put("C:amigentd.new", (AMIGA / "bin" / build).read_bytes())
     run(link, f"MakeDir >NIL: {home}")
@@ -151,20 +172,28 @@ def update(host: str, home: str | None) -> int:
     channel = AmigaChannel(host, timeout=30)
     try:
         channel.connect()
-        cpu = channel.exec("CPU CHECK 68020").rc
-        if cpu not in (0, 5):
-            print(f"C:CPU answered {cpu}, so the CPU is unknown. Copy C:CPU from the Workbench "
-                  "disk and try again.")
+        try:
+            build = build_for_channel(channel)
+            new = (AMIGA / "bin" / build).read_bytes()
+        except SystemExit as e:
+            print(e)
+            channel.close()
             return 1
-        build = "amigentd.000" if cpu == 5 else "amigentd"
-        new = (AMIGA / "bin" / build).read_bytes()
+        try:
+            installed = channel.read_file("C:amigentd")
+        except AmigaError:
+            installed = None
+        replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
+        if not replace:
+            if installed == new:
+                print(f"amigentd on {host} is already the one from Amigent {__version__}.")
+            else:
+                print(reason)
+            channel.close()
+            return 0
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
         update_windows(channel, home)
-        if channel.read_file("C:amigentd") == new:
-            print(f"amigentd on {host} is already the one from Amigent {__version__}.")
-            channel.close()
-            return 0
         print(f"uploading {build} to {host}")
         channel.write_file("C:amigentd.new", new)
         channel.exec("Delete >NIL: T:amigent-update.done QUIET")
