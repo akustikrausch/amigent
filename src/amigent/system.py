@@ -8,6 +8,8 @@ OS_NAMES = {47: "AmigaOS 3.2", 46: "AmigaOS 3.1.4", 45: "AmigaOS 3.9", 44: "Amig
             40: "AmigaOS 3.1", 39: "AmigaOS 3.0", 37: "AmigaOS 2.04", 36: "AmigaOS 2.0", 34: "AmigaOS 1.3"}
 # Kickstart 3.0 is exec 39. C:Reboot shipped with that Workbench.
 OS3_EXEC = 39
+# ColdReboot() arrived with Kickstart 2.0. Exec 34 and 35 do not have it.
+COLDREBOOT_EXEC = 36
 
 # PowerPC boards on a 68k Amiga bring one of these; Version FILE reads the version string
 # without opening the library, which without a board could stop at a requester.
@@ -44,13 +46,29 @@ def describe_system(version: str, cpu: str) -> dict:
     }
 
 
+def _exec_major(version: str) -> int | None:
+    major = str(version).split(".", 1)[0]
+    return int(major) if major.isdigit() else None
+
+
 def exec_before_os3(version: str) -> bool:
     """True for an exec version older than 3.0, such as '37.175' (2.04).
 
     A blank or unreadable version is not treated as old.
     """
-    major = str(version).split(".", 1)[0]
-    return major.isdigit() and int(major) < OS3_EXEC
+    major = _exec_major(version)
+    return major is not None and major < OS3_EXEC
+
+
+def exec_coldreboot(version: str) -> bool:
+    """True when this exec has ColdReboot(), from 36 up, such as '36.16'.
+
+    A blank or unreadable version is not treated as having it. Exec 34 and
+    35 can still be handed the reset chord's key-downs; they do not reset,
+    and that chord never sends the key-ups.
+    """
+    major = _exec_major(version)
+    return major is not None and major >= COLDREBOOT_EXEC
 
 
 def native_ppc(facts: dict) -> bool:

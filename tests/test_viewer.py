@@ -233,6 +233,45 @@ def test_reset_chord_waits_until_the_amiga_is_connected():
     assert seen["toasts"][-1] == ("toast", {"key": "restart_failed", "text": "the Amiga is not connected"})
 
 
+def test_exec_below_36_is_not_sent_the_reset_chord():
+    from amigent.errors import AmigaError
+
+    for version in ("34.5", "35.0"):
+        viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": version})
+        assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+        assert viewer.inputs.take() == []
+        text = seen["toasts"][-1][1]["text"]
+        assert seen["toasts"][-1][1]["key"] == "restart_failed"
+        assert "cannot ColdReboot()" in text and version in text
+
+
+def test_exec_36_without_reboot_still_submits_the_reset_chord():
+    from amigent.amigentd import reset_chord
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {"exec_version": "36.16"})
+    assert seen["restart"] == 0
+    assert seen["flush"] == ["SYS:"] and seen["ring"] == 1
+    assert viewer.inputs.take() == reset_chord()
+
+
+def test_kickstart_below_36_is_not_sent_the_reset_chord():
+    from amigent.errors import AmigaError
+
+    viewer, seen = _restart_of(AmigaError("object not found", 205), {}, kickstart="34.1")
+    assert seen["flush"] is None and seen["ring"] == 0 and seen["restart"] == 0
+    assert viewer.inputs.take() == []
+    assert "34.1" in seen["toasts"][-1][1]["text"]
+
+
+def test_an_ordinary_key_is_not_the_reset_chord():
+    viewer = Viewer("127.0.0.1", screen_port=1)
+    viewer.feed.ring = lambda: None
+    key = {"t": "key", "code": 0x45, "down": True, "q": 0}
+    viewer.submit(key)
+    assert viewer.inputs.take() == [key]
+
+
 def test_a_lost_connection_is_not_a_missing_reboot():
     from amigent.errors import AmigaError
 
