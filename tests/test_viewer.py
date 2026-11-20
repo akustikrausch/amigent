@@ -301,3 +301,82 @@ def test_ppc_software_reads_only_version_strings():
     assert ppc_software(run) == "WarpOS powerpc.library 17.10"
     assert all(c.startswith("Version FILE ") for c in asked)
     assert ppc_software(lambda c: (20, "")) == ""
+
+
+def test_connection_reason_names_a_known_failure_and_drops_the_detail():
+    from amigent.channel import PLAIN_CLOSED_TEXT
+    from amigent.viewer import KEY_REFUSED, connection_reason
+
+    assert connection_reason("amigentd at 10.0.0.5:6801 not answering: timed out") == \
+        "The Amiga did not answer in time."
+    refused = ("amigentd at 10.0.0.5:6801 not answering: [WinError 10061] "
+               "No connection could be made because the target machine actively refused it")
+    assert connection_reason(refused) == "The Amiga refused the connection."
+    assert "10.0.0.5" not in connection_reason(refused)
+    windows_timeout = ("amigentd at amiga:6801 not answering: [WinError 10060] A connection "
+                       "attempt failed because the connected party did not properly respond "
+                       "after a period of time, or established connection failed because "
+                       "connected host has failed to respond")
+    assert connection_reason(windows_timeout) == "The Amiga did not answer in time."
+    assert connection_reason("connection closed by amigentd") == "connection closed by amigentd"
+    assert connection_reason("amigentd stopped answering") == "amigentd stopped answering."
+    greeting = "unexpected greeting b'HTTP/1.1 secret-key'"
+    assert connection_reason(greeting) == "The Amiga sent an unexpected greeting."
+    assert "secret-key" not in connection_reason(greeting)
+    assert connection_reason("refused the key hunter2") == KEY_REFUSED
+    assert "hunter2" not in connection_reason("refused the key hunter2")
+    assert connection_reason(PLAIN_CLOSED_TEXT) == PLAIN_CLOSED_TEXT
+    leaked = "amigentd at 10.1.2.3:6801 not answering: [Errno 13] Permission denied: '/home/x/secret'"
+    assert connection_reason(leaked) == ""
+    assert connection_reason("<img src=x onerror=alert(1)>") == ""
+    assert connection_reason("AMIGENT_KEY=supersecret") == ""
+    assert connection_reason("") == ""
+    assert connection_reason("tile at 1,2: bad packed data") == ""
+
+
+def test_set_online_reports_a_known_reason_and_a_successful_connection(capsys, monkeypatch):
+    from amigent.viewer import Viewer
+
+    monkeypatch.setattr("amigent.viewer.machines.name_of", lambda host: host)
+    viewer = Viewer.__new__(Viewer)
+    viewer.online = None
+    viewer.reason = ""
+    viewer.host = "amiga.local"
+    events = []
+    viewer.event = lambda kind, **fields: events.append((kind, fields))
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
+    assert events == [("online", {"online": False, "reason": "The Amiga did not answer in time."})]
+    err = capsys.readouterr().err
+    assert "the Amiga does not answer: The Amiga did not answer in time." in err
+    assert "10.0.0.8" not in err
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")
+    assert len(events) == 1
+    viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: connection refused")
+    assert events[-1][1] == {"online": False, "reason": "The Amiga refused the connection."}
+    assert "10.0.0.8" not in capsys.readouterr().err
+    viewer._set_online(False, "tile decoder blew up at /tmp/secret")
+    assert events[-1][1]["reason"] == ""
+    assert "no reason given" in capsys.readouterr().err
+    assert "secret" not in capsys.readouterr().err
+    viewer._set_online(True)
+    assert events[-1] == ("online", {"online": True, "reason": ""})
+    assert "connected to amiga.local" in capsys.readouterr().err
+    viewer._set_online(True)
+    assert len(events) == 4
+
+
+def test_page_shows_only_known_link_reasons():
+    import re
+    from pathlib import Path
+
+    from amigent.viewer import KNOWN_CONNECTION_REASONS
+
+    script = (Path(__file__).resolve().parents[1] / "src" / "amigent" / "web" / "viewer.js").read_text(encoding="utf-8")
+    body = script.split("const KNOWN_LINK_REASONS = [", 1)[1].split("];", 1)[0]
+    shown = tuple(re.findall(r'"([^"]*)"', body))
+    assert shown == KNOWN_CONNECTION_REASONS
+    show = script.split("function showState()", 1)[1].split("function showPaused(", 1)[0]
+    assert "shownLinkReason(reason)" in show
+    assert '$("overlay-text").textContent = message' in show
+    assert 't("offline")' in show
+    assert "innerHTML" not in show

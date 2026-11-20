@@ -32,7 +32,7 @@ from pathlib import Path
 from . import __version__, machines
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
-from .channel import Commands, pc_outdated
+from .channel import PLAIN_CLOSED_TEXT, Commands, pc_outdated
 from .system import OS_NAMES, describe_system, exec_before_os3, native_ppc, ppc_software  # noqa: F401 - tests import them from here
 from .screenfeed import Feed, InputQueue
 from .platform_util import in_wsl, windows_exe  # noqa: F401 - windows_exe is imported from here
@@ -41,6 +41,66 @@ from .webserver import (MAX_MESSAGE, MAX_UPLOAD, STATIC, WEB, WebSocket,  # noqa
                         _Handler, _Server)
 
 STATE = Path.home() / ".cache" / "amigent" / "viewer.json"
+
+# Shown as themselves. Anything else that fails the link stays the generic
+# "not answering" line, so a greeting, a path or an address is not printed.
+KEY_WANTED = "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY"
+KEY_REFUSED = ("amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ "
+               "must match S:amigent.key on the Amiga")
+CLOSED_BY_DAEMON = "connection closed by amigentd"
+STOPPED_ANSWERING = "amigentd stopped answering."
+UNEXPECTED_GREETING = "The Amiga sent an unexpected greeting."
+DID_NOT_ANSWER = "The Amiga did not answer in time."
+CONNECTION_REFUSED = "The Amiga refused the connection."
+CANNOT_BE_REACHED = "The Amiga cannot be reached on the network."
+CONNECTION_CLOSED = "The connection to the Amiga was closed."
+ADDRESS_UNRESOLVED = "The Amiga's address could not be resolved."
+KNOWN_CONNECTION_REASONS = (
+    KEY_WANTED, KEY_REFUSED, CLOSED_BY_DAEMON, STOPPED_ANSWERING, UNEXPECTED_GREETING,
+    DID_NOT_ANSWER, CONNECTION_REFUSED, CANNOT_BE_REACHED, CONNECTION_CLOSED, ADDRESS_UNRESOLVED,
+    PLAIN_CLOSED_TEXT,
+)
+
+
+def connection_reason(text: str) -> str:
+    """A connection or disconnection reason safe to show, or '' when it is not.
+
+    A known failure becomes one fixed sentence. An empty or unrecognised text,
+    including a greeting, a path or the Amiga's address, becomes no reason.
+    """
+    raw = text or ""
+    if "only encrypted connections" in raw:
+        return PLAIN_CLOSED_TEXT
+    if "wants a key" in raw:
+        return KEY_WANTED
+    if "refused the key" in raw:
+        return KEY_REFUSED
+    if CLOSED_BY_DAEMON in raw:
+        return CLOSED_BY_DAEMON
+    if "stopped answering" in raw:
+        return STOPPED_ANSWERING
+    if "unexpected greeting" in raw:
+        return UNEXPECTED_GREETING
+    if "not answering" not in raw:
+        return ""
+    low = raw.lower()
+    if any(part in low for part in ("timed out", "did not properly respond", "failed to respond",
+                                    "semaphore timeout")):
+        return DID_NOT_ANSWER
+    if any(part in low for part in ("actively refused", "connection refused", "winerror 10061")):
+        return CONNECTION_REFUSED
+    if any(part in low for part in ("no route to host", "network is unreachable", "host is unreachable",
+                                    "winerror 10065", "winerror 10051")):
+        return CANNOT_BE_REACHED
+    if any(part in low for part in ("connection reset", "forcibly closed", "connection aborted",
+                                    "broken pipe", "winerror 10054", "winerror 10053")):
+        return CONNECTION_CLOSED
+    if any(part in low for part in ("name or service not known", "nodename nor servname",
+                                    "getaddrinfo", "no such host", "winerror 11001")):
+        return ADDRESS_UNRESOLVED
+    return ""
+
+
 UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
@@ -252,16 +312,17 @@ class Viewer:
         self.feed.ring()
 
     def _set_online(self, online: bool, reason: str = "") -> None:
-        if online != self.online:
+        shown = "" if online else connection_reason(reason)
+        if online != self.online or shown != self.reason:
             self.online = online
-            self.reason = "" if online else reason
+            self.reason = shown
             self.event("online", online=online, reason=self.reason)
             # stderr: the terminal that started amigent-viewer (stdout is the MCP server's protocol)
             stamp = time.strftime("%H:%M:%S")
             if online:
                 print(f"{stamp} connected to {machines.name_of(self.host)}", file=sys.stderr, flush=True)
             else:
-                print(f"{stamp} the Amiga does not answer: {reason or 'no reason given'}",
+                print(f"{stamp} the Amiga does not answer: {self.reason or 'no reason given'}",
                       file=sys.stderr, flush=True)
 
     def _stats(self) -> None:

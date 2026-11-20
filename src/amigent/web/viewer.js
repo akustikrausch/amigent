@@ -92,6 +92,26 @@
   let address = "";
   let reason = "";  // why the Amiga does not answer, as the PC side says it
 
+  // Fixed sentences from the viewer. Exact match only: the text is inserted
+  // with textContent, and anything else stays off the page.
+  const KNOWN_LINK_REASONS = [
+    "amigentd wants a key: run amigent-setup, or set AMIGENT_KEY",
+    "amigentd refused the key; AMIGENT_KEY or the key in ~/.config/amigent/ must match S:amigent.key on the Amiga",
+    "connection closed by amigentd",
+    "amigentd stopped answering.",
+    "The Amiga sent an unexpected greeting.",
+    "The Amiga did not answer in time.",
+    "The Amiga refused the connection.",
+    "The Amiga cannot be reached on the network.",
+    "The connection to the Amiga was closed.",
+    "The Amiga's address could not be resolved.",
+    "amigentd takes only encrypted connections from other computers. Copy its certificate (tls-<name>.pem in ~/.config/amigent/ on the PC that set it up) to this one, or run amigent-setup again.",
+  ];
+
+  function shownLinkReason(text) {
+    return KNOWN_LINK_REASONS.includes(text) ? text : "";
+  }
+
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
   }
@@ -121,7 +141,7 @@
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
     // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
-    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? reason
+    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? shownLinkReason(reason)
       : amigaOnline === null && address ? (address !== host ? `${host} (${address})` : host) : "";
     $("find").hidden = !(socketOpen && amigaOnline === false);
     pill.className = "state " + (socketOpen && amigaOnline ? "ok" : socketOpen && amigaOnline === null ? "" : "bad");
