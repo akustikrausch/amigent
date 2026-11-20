@@ -49,7 +49,7 @@ class FakeAmiga:
     """amigentd on 127.0.0.1: one screen client, any number of command channels."""
 
     def __init__(self, picture: Image.Image | None = None, op_delay: float = 0.0,
-                 crc_rate: float = 0.0, exec_delay: float = 0.0):
+                 crc_rate: float = 0.0, exec_delay: float = 0.0, clock=None):
         self.picture = picture or Image.new("RGB", (640, 256), (170, 170, 170))
         self.op_delay, self.crc_rate, self.exec_delay = op_delay, crc_rate, exec_delay
         self.files: dict[str, bytes] = {}
@@ -59,7 +59,9 @@ class FakeAmiga:
         self.sent: dict[tuple, bytes] = {}  # tile reference, as amigentd keeps it
         self.owner = None
         self.protocol = 4
-        self.pause_end = 0.0  # time.monotonic() at the end of a screen pause
+        self.clock = time.monotonic if clock is None else clock  # pause only; sleeps stay real
+        self.pause_for = 0  # seconds asked for, not mixed into the clock
+        self.pause_started = 0.0
         self.lock = threading.Lock()
         self.listener = socket.socket()
         self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -226,11 +228,16 @@ class FakeAmiga:
     # screen client
 
     def set_pause(self, seconds: int) -> None:
-        self.pause_end = time.monotonic() + seconds if seconds else 0.0
+        # Keep the request beside the clock. Adding the seconds on and taking
+        # the ceiling reports one more than was asked: 31 for 30, 121 for 120.
+        self.pause_for = seconds if seconds else 0
+        self.pause_started = self.clock()
 
     def pause_left(self) -> int:
-        left = self.pause_end - time.monotonic()
-        return -int(-left // 1) if left > 0 else 0
+        if not self.pause_for:
+            return 0
+        elapsed = max(0.0, self.clock() - self.pause_started)
+        return max(0, self.pause_for - int(elapsed))
 
     def _screen(self, me, cmd, arg, x, y, w, h) -> bytes:
         width, height = self.picture.size

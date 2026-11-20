@@ -412,7 +412,7 @@ class Viewer:
         except (AmigaError, OSError, AttributeError) as e:  # AttributeError: amigactld only
             self.event("toast", key="pause_failed", text=str(e))
             return
-        self.screen.paused_until = time.monotonic() + left if left else 0.0
+        self.screen.note_pause(left)
         self.event("stats", kbps=0, rtt=round(self.rtt, 1), w=self.screen.width,
                    h=self.screen.height, paused=left)
         self.feed.ring()  # a resume wants a fresh look now, not in five seconds

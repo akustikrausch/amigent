@@ -1523,7 +1523,7 @@ def amiga_pause_screen(seconds: int = 300) -> str:
         left = _with_ctl(lambda: ctl.pause_screen(seconds))
     except AttributeError:
         raise AmigaError("pausing the screen needs amigentd's command channel; run amigent-setup --update") from None
-    screen.paused_until = time.monotonic() + left if left else 0.0
+    screen.note_pause(left)
     return f"screen paused for {left} s; amiga_pause_screen(0) ends it" if left else "screen pause ended"
 
 

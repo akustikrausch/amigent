@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import random
 import select
 import socket
@@ -123,9 +122,10 @@ def unpack_rgb(data: bytes, pixels: int) -> bytes:
 
 class Amigentd:
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0,
-                 key: str | None = None):
+                 key: str | None = None, clock=None):
         self.host = host
         self.key = key
+        self.clock = clock  # pause accounting only; None keeps time.monotonic
         self.client_id = random.getrandbits(32)  # lets amigentd tell us if others took frames
         self.changes = deque(maxlen=4096)  # (time, x, y, w, h) of tiles received, by anyone
         self.received = 0  # frame bytes off the wire, for the KB/s on the page
@@ -146,6 +146,8 @@ class Amigentd:
         self.policy: pack.Policy | None = None
         self.flags = 0
         self.paused_until = 0.0  # monotonic end of the screen pause, as INFO last told
+        self._pause_for = 0  # whole seconds last heard, not a sum folded into the clock
+        self._pause_heard = 0.0
         self.listeners: list = []  # called as listener("size", (w, h)) or ("tiles", [...])
 
     def connect(self) -> None:
@@ -194,8 +196,22 @@ class Amigentd:
         """INFO: the size, and from protocol 4 the seconds of screen pause left."""
         width, height, _, left = struct.unpack(">HHHH", raw)
         if self.protocol >= PAUSE_PROTOCOL:
-            self.paused_until = time.monotonic() + left if left else 0.0
+            self.note_pause(left)
         return width, height
+
+    def _pause_now(self) -> float:
+        return time.monotonic() if self.clock is None else self.clock()
+
+    def note_pause(self, seconds: int) -> None:
+        """Remember a pause as whole seconds from now.
+
+        The wire carries an integer. Adding it to the clock and ceiling the
+        gap can come out one second high: ``(2.002 + 30) - 2.002`` is just
+        over 30, and ``(8.002 + 120) - 8.002`` is just over 120.
+        """
+        self._pause_for = seconds if seconds else 0
+        self._pause_heard = self._pause_now()
+        self.paused_until = self._pause_heard + self._pause_for if self._pause_for else 0.0
 
     def pause_left(self, ask: bool = True) -> int:
         """Seconds the Amiga's screen pause still runs: asked anew, or as last heard."""
@@ -204,7 +220,10 @@ class Amigentd:
                 self._retry(lambda: None)
             if self.protocol >= PAUSE_PROTOCOL:
                 self._apply_size(*self._retry(self._info))
-        return max(0, math.ceil(self.paused_until - time.monotonic()))
+        if not self._pause_for:
+            return 0
+        elapsed = max(0.0, self._pause_now() - self._pause_heard)
+        return max(0, self._pause_for - int(elapsed))
 
     def pause(self, seconds: int) -> int:
         """Pause the screen for seconds (0 ends it) over this connection; seconds left after."""
