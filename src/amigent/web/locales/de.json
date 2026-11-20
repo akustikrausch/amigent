@@ -94,6 +94,7 @@
  "about_network": "Netzwerk-Stack",
  "about_volumes": "Laufwerke",
  "mem_line": "Chip {chip}, Fast {fast} frei",
+ "mem_fast_only": "Fast {fast} frei",
  "free_of": "{free} von {size} frei",
  "status_free": "{size} frei",
  "screen_select": "Bildschirm",

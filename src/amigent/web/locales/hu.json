@@ -94,6 +94,7 @@
  "about_network": "Hálózati verem",
  "about_volumes": "Kötetek",
  "mem_line": "Chip {chip}, Fast {fast} szabad",
+ "mem_fast_only": "Fast {fast} szabad",
  "free_of": "{free} / {size} szabad",
  "status_free": "{size} szabad",
  "screen_select": "Képernyő",

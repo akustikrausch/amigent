@@ -94,6 +94,7 @@
  "about_network": "Síťový zásobník",
  "about_volumes": "Svazky",
  "mem_line": "Chip {chip}, Fast {fast} volné",
+ "mem_fast_only": "Fast {fast} volné",
  "free_of": "{free} z {size} volné",
  "status_free": "{size} volné",
  "screen_select": "Obrazovka",

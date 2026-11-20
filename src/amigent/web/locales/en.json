@@ -94,6 +94,7 @@
  "about_network": "Network stack",
  "about_volumes": "Volumes",
  "mem_line": "Chip {chip}, Fast {fast} free",
+ "mem_fast_only": "Fast {fast} free",
  "free_of": "{free} of {size} free",
  "status_free": "{size} free",
  "screen_select": "Screen",

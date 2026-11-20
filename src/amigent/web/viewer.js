@@ -137,6 +137,14 @@
     $("paused-text").textContent = t("paused", { time: `${m}:${s}` });
   }
 
+  // null when SYSINFO did not send an integer. 0 is a real reading.
+  function knownBytes(value) {
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
+    if (typeof value === "number") return Number.isInteger(value) && value >= 0 ? value : null;
+    if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return null;
+    return Number(value.trim());
+  }
+
   function bytes(n) {
     if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
     if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`;
@@ -154,7 +162,11 @@
     const system = [info.os, info.kickstart && `Kickstart ${info.kickstart}`, info.workbench && `Workbench ${info.workbench}`]
       .filter(Boolean).join(", ");
     const cpu = [info.cpu, info.fpu, info.ppc].filter(Boolean).join(" + ");
-    const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
+    const chip = knownBytes(info.chip_free);
+    const fast = bytes(knownBytes(info.fast_free) ?? 0);
+    const memory = chip === null
+      ? t("mem_fast_only", { fast })
+      : t("mem_line", { chip: bytes(chip), fast });
     $("about-system").textContent = system || "–";
     $("about-cpu").textContent = cpu || "–";
     $("about-memory").textContent = memory;
@@ -170,7 +182,8 @@
       row.append(free);
       list.append(row);
     }
-    $("st-mem").textContent = t("status_free", { size: bytes(info.chip_free + info.fast_free) });
+    const chipCount = chip === null ? 0 : chip;
+    $("st-mem").textContent = t("status_free", { size: bytes(chipCount + (knownBytes(info.fast_free) ?? 0)) });
     $("state").title = [host, system, cpu, memory].filter(Boolean).join("\n");
     showState();
   }

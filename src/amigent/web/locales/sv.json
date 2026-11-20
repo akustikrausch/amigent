@@ -94,6 +94,7 @@
  "about_network": "Nätverksstack",
  "about_volumes": "Volymer",
  "mem_line": "Chip {chip}, Fast {fast} ledigt",
+ "mem_fast_only": "Fast {fast} ledigt",
  "free_of": "{free} av {size} ledigt",
  "status_free": "{size} ledigt",
  "screen_select": "Skärm",

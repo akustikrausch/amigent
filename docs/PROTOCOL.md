@@ -536,7 +536,10 @@ separated by tabs.
   E clock), `daemon_uptime`, the seconds since amigentd started, and
   `last_alert`, exec's last alert in 8 hex digits, when it kept one from before
   the last reset. A client compares the uptimes with its last look to tell a
-  restart of the Amiga or of amigentd from a network fault.
+  restart of the Amiga or of amigentd from a network fault. `chip_free` is
+  available Chip RAM, `AvailMem(MEMF_CHIP)`, on a classic Amiga and on ApolloOS.
+  `0` is a real amount of free Chip RAM. A daemon that omits the field has not
+  reported it, and a client must not show that absence as zero.
 - VOLUMES has one line per mounted volume: name with colon, used, free,
   capacity in bytes (also past 4 GB), block size.
 - From protocol 5 SYSINFO also has `deflate_fast`, `deflate_best` and

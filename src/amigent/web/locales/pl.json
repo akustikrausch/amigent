@@ -94,6 +94,7 @@
  "about_network": "Stos sieciowy",
  "about_volumes": "Woluminy",
  "mem_line": "Chip {chip}, Fast {fast} wolne",
+ "mem_fast_only": "Fast {fast} wolne",
  "free_of": "{free} z {size} wolne",
  "status_free": "{size} wolne",
  "screen_select": "Ekran",

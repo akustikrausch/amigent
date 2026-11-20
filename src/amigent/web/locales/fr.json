@@ -94,6 +94,7 @@
  "about_network": "Pile réseau",
  "about_volumes": "Volumes",
  "mem_line": "Chip {chip}, Fast {fast} libres",
+ "mem_fast_only": "Fast {fast} libres",
  "free_of": "{free} libres sur {size}",
  "status_free": "{size} libres",
  "screen_select": "Écran",

@@ -94,6 +94,7 @@
  "about_network": "Stack di rete",
  "about_volumes": "Volumi",
  "mem_line": "Chip {chip}, Fast {fast} liberi",
+ "mem_fast_only": "Fast {fast} liberi",
  "free_of": "{free} liberi su {size}",
  "status_free": "{size} liberi",
  "screen_select": "Schermo",

@@ -94,6 +94,7 @@
  "about_network": "Verkkopino",
  "about_volumes": "Taltiot",
  "mem_line": "Chip {chip}, Fast {fast} vapaana",
+ "mem_fast_only": "Fast {fast} vapaana",
  "free_of": "{free}/{size} vapaana",
  "status_free": "{size} vapaana",
  "screen_select": "Näyttö",
