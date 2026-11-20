@@ -1,0 +1,35 @@
+# 68000 ApolloOS probe. The 68080 daemon, AUDIO and PIP are later changes;
+# this file does not build them and does not install anything.
+# Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
+# `all` writes build/apollo/amigent-apollo-probe only.
+HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ROOT := $(abspath $(HERE)/..)
+BUILD := $(ROOT)/build/apollo
+APOLLO := $(HERE)/apollo
+
+GCC_FLAVOR ?= GCC-6.50-Stable
+PREFIX ?= $(APOLLOCROSSDEV)/Compilers/$(GCC_FLAVOR)
+CC := $(PREFIX)/bin/m68k-amigaos-gcc
+
+ifeq ($(wildcard $(CC)),)
+$(error m68k-amigaos-gcc was not found at $(CC). Set APOLLOCROSSDEV to your ApolloCrossDev checkout after its GCC install script (Compilers/$(GCC_FLAVOR)), or pass PREFIX= to that compiler tree)
+endif
+
+INCLUDES := -I$(APOLLO) \
+	-I$(PREFIX)/m68k-amigaos/libnix/include \
+	-I$(PREFIX)/m68k-amigaos/sys-include \
+	-I$(PREFIX)/m68k-amigaos/ndk-include
+PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
+
+.PHONY: all clean
+
+all: $(BUILD)/amigent-apollo-probe
+
+$(BUILD):
+	mkdir -p $(BUILD)
+
+$(BUILD)/amigent-apollo-probe: $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c | $(BUILD)
+	$(CC) $(PROBE_CFLAGS) $(INCLUDES) -o $@ $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c -lgcc
+
+clean:
+	rm -rf $(BUILD)
