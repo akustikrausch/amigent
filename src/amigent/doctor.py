@@ -17,7 +17,10 @@ from .amigentd import Amigentd, AmigentdError
 
 
 def main() -> int:
-    if len(sys.argv) > 2 or sys.argv[1:] in (["-h"], ["--help"]):
+    if sys.argv[1:] in (["-h"], ["--help"]):
+        print(__doc__)
+        return 0
+    if len(sys.argv) > 2:
         print(__doc__)
         return 2
     host = machines.pick(sys.argv[1] if len(sys.argv) == 2 else "")
