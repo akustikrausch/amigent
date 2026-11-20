@@ -3187,11 +3187,20 @@ static void free_pictures(void)
     cconn = pconn = 0;
 }
 
-/* The screen client went away of itself (closed, broke off or fell silent)
- * and no newcomer took its place. */
+/* The screen client went away of itself (closed, broke off or fell silent).
+ * serve() may already be holding a newcomer that asked for the screen, and
+ * the failure of its first command is one way this is reached. Freeing here
+ * would drop the picture that newcomer still uses. With nobody waiting,
+ * free_pictures() releases both pictures and, unless the ZZ9000 has been
+ * given up, its mirror. */
 static void lose_client(void)
 {
+    LONG i;
+
     drop_client();
+    for (i = 0; i < PENDING; i++)
+        if (pend[i].fd >= 0 && pend[i].screen)
+            return;
     free_pictures();
 }
 
