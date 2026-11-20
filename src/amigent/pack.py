@@ -29,6 +29,9 @@ LOCAL_LINE = 20000.0  # KB/s for an emulator on this PC
 MIN_SAMPLE = 8192  # bytes; smaller replies say more about latency than about the line
 ALPHA = 0.3  # weight of a new measurement
 EXPLORE = 30  # screens between tries of the way that lost, in case it pays now
+# deflate_fast at this rate is not a 68000. Packing before a real sample would
+# stick: the line is only timed while replies are raw.
+FAST_CPU = 1500.0
 
 
 def _file() -> Path:
@@ -76,6 +79,11 @@ class Policy:
             except ValueError:
                 self.rates[key] = 0
 
+    def _needs_probe(self) -> bool:
+        """Auto mode, fast CPU, line not timed yet: stay raw so the wire can show its speed."""
+        return (self.mode == "auto" and self.line_kbs is None
+                and self.rates.get("deflate_fast", 0) >= FAST_CPU)
+
     @property
     def known(self) -> bool:
         return bool(self.rates)
@@ -118,6 +126,8 @@ class Policy:
             return 1 if self.rates.get("deflate_fast") else 0
         if self.mode == "best":
             return 2 if self.rates.get("deflate_best") else 0
+        if self._needs_probe():
+            return 0
         line = self.line()
         if self.rates.get("deflate_best", 0) >= BEST_FACTOR * line:
             return 2
@@ -168,6 +178,8 @@ class Policy:
             return False
         if self.mode in ("fast", "best"):
             return True
+        if self._needs_probe():
+            return False
         return self.rates["inflate"] >= FAST_FACTOR * self.line()
 
     def describe(self) -> dict:

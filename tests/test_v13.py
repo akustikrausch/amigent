@@ -2,7 +2,9 @@
 installations that can be undone, Aminet, and several steps in one call."""
 
 import json
+import os
 import shutil
+from pathlib import Path
 import socket
 import struct
 import subprocess
@@ -167,6 +169,65 @@ def test_a_floor_alone_is_no_estimate(tmp_path):
     assert p.line_kbs is None
     p.note(1024 * 1024, 1.0)
     assert p.line_kbs == 1024.0
+
+
+def _fast(tmp_path, fast=pack.FAST_CPU, best=400, inflate=500, line=None, mode="auto", host="10.0.0.9"):
+    p = pack.Policy("fast", host, mode=mode, path=tmp_path / "link.json")
+    p.learn({"deflate_fast": str(int(fast)), "deflate_best": str(best), "inflate": str(inflate)})
+    p.line_kbs = line
+    return p
+
+
+def test_a_fast_cpu_stays_raw_until_a_real_sample(tmp_path):
+    """1500 KB/s against the assumed 100 KB/s line would pack at once, and a packed
+    reply is not allowed to start the measurement, so the guess would never end."""
+    p = _fast(tmp_path, best=200)
+    assert p.line_kbs is None
+    assert p.level() == 0 and p.upload() is False and p.frame_level() == 0
+    p.note(1024 * 1024, 1.0, at_least=True)
+    assert p.line_kbs is None and p.level() == 0
+    p.note(1024 * 1024, 10.0)  # a raw reply, about 102 KB/s
+    assert p.line_kbs == pytest.approx(102.4)
+    assert p.level() == 1 and p.upload()  # the measured line, not the assumption
+    p.note(1024 * 1024, 0.25)  # a later raw reply, about 4096 KB/s, blended in
+    assert p.level() == 0 and not p.upload()
+
+
+def test_a_slower_cpu_keeps_the_assumed_line(tmp_path):
+    p = _fast(tmp_path, fast=pack.FAST_CPU - 1, best=140, inflate=500)
+    assert p.line_kbs is None and p.level() == 1 and p.upload()
+
+
+def test_a_measured_link_does_not_wait_for_another_sample(tmp_path):
+    slow = _fast(tmp_path, fast=2000, best=900, line=40)
+    assert slow.level() == 2 and slow.upload()
+    quick = _fast(tmp_path, fast=2000, best=900, line=8000)
+    assert quick.level() == 0 and not quick.upload()
+
+
+def test_an_explicit_mode_is_not_held_for_a_sample(tmp_path):
+    assert _fast(tmp_path, mode="fast").level() == 1
+    assert _fast(tmp_path, mode="fast").upload()
+    assert _fast(tmp_path, mode="best", best=900).level() == 2
+    assert _fast(tmp_path, mode="off").level() == 0
+    assert _fast(tmp_path, mode="off").upload() is False
+
+
+def test_a_failed_save_removes_the_part_file(tmp_path, monkeypatch):
+    path = tmp_path / "link.json"
+    policy = pack.Policy("fast", "10.0.0.9", path=path)
+    real = Path.write_text
+
+    def fail(self, *args, **kwargs):
+        if self.name.endswith(".part"):
+            real(self, *args, **kwargs)
+            raise OSError("disk")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail)
+    policy.note(64 * 1024, 1.0)
+    assert not path.exists()
+    assert not path.with_name(f"{path.name}.{os.getpid()}.part").exists()
 
 
 def _screens(p, plain_kbs, packed_kbs, count):
