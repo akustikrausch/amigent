@@ -145,6 +145,28 @@ def test_every_language_has_every_text():
             assert set(re.findall(r"{\w+}", text)) == set(re.findall(r"{\w+}", english[key])), (code, key)
 
 
+def test_locale_catalogs_have_no_duplicate_keys():
+    import re
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[1] / "src" / "amigent" / "web"
+    folder = web / "locales"
+    for path in sorted(folder.glob("*.json")):
+        seen = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped.startswith('"'):
+                continue
+            seen.append(json.loads(stripped.split('":', 1)[0] + '"'))
+        assert len(seen) == len(set(seen)), path.name
+        json.loads(path.read_text(encoding="utf-8"))
+    fleet = (web / "fleet.js").read_text(encoding="utf-8")
+    codes = re.findall(r'"([a-z]{2})"', fleet.split("const LANGUAGES", 1)[1].split("];", 1)[0])
+    assert "ru" in codes
+    for code in codes:
+        assert (folder / f"{code}.json").is_file(), code
+
+
 def test_describe_system():
     from amigent.viewer import describe_system, exec_before_os3
 

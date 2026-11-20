@@ -21,6 +21,7 @@
   const LANGUAGES = {
     en: "English", de: "Deutsch", pl: "Polski", fr: "Français", es: "Español", it: "Italiano",
     fi: "Suomi", sv: "Svenska", da: "Dansk", cs: "Čeština", sk: "Slovenčina", hu: "Magyar",
+    ru: "Русский",
   };
 
   function pickLanguage() {

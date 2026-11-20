@@ -5,7 +5,7 @@
 
   const $ = (id) => document.getElementById(id);
   const token = new URLSearchParams(location.search).get("t") || "";
-  const LANGUAGES = ["en", "de", "pl", "fr", "es", "it", "fi", "sv", "da", "cs", "sk", "hu"];
+  const LANGUAGES = ["en", "de", "pl", "fr", "es", "it", "fi", "sv", "da", "cs", "sk", "hu", "ru"];
   let EN = {}, TEXT = {};
 
   function pick() {
