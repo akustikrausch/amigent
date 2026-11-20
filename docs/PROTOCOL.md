@@ -14,8 +14,8 @@ Running, it answers on the ARexx port `AMIGENT`, see [arexx](#arexx).
 `PORT` picks another port, handy for running a second copy next to the first.
 `SETUP` switches on PUT and RUN, see below. `KEY` names the key file, default
 `S:amigent.key`, see [key](#key). `QUIET` keeps it from saying anything, errors
-included. `TLSONLY` closes the plain port to other machines while the TLS port is
-open, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
+included. `TLSONLY` closes the plain port to other machines whether or not the TLS
+port opened, see [TLS](#tls). `NOTEXT` and `NODEBUG` leave out recording the text
 programs draw and their debug output, see [hooks](#hooks). The service runs at priority 2, waits at boot until
 `bsdsocket.library` is there, and quits on Ctrl-C.
 
@@ -778,13 +778,13 @@ Up to eight TLS connections at once.
 Each TLS connection is relayed to the plain port on 127.0.0.1, so it counts as
 an ordinary connection there.
 
-With `TLSONLY`, while the TLS port is open and amigentd is not in SETUP mode, a
-new plain connection from any address but 127.0.0.1 gets the hello with flag `4`
-and is closed at once. Connections already open stay. Without a certificate, or
-without AmiSSL, there is no TLS port and the plain port works as usual, so a lost
-certificate never locks you out. In SETUP mode the plain port stays open, so
-`amigent-setup` can deliver the certificate; after SETUP_END new plain connections
-from outside are turned away. TLS 1.2 and 1.3, as AmiSSL offers them.
+With `TLSONLY`, while amigentd is not in SETUP mode, a new plain connection from
+any address but 127.0.0.1 gets the hello with flag `4` and is closed at once,
+whether or not the TLS port is listening. Connections already open stay.
+127.0.0.1 stays open: the TLS pump connects there, and so can someone at the
+Amiga. In SETUP mode the plain port stays open, so `amigent-setup` can deliver
+the certificate; after SETUP_END new plain connections from outside are turned
+away. TLS 1.2 and 1.3, as AmiSSL offers them.
 
 ## arexx
 
