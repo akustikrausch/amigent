@@ -1,7 +1,8 @@
-# 68000 ApolloOS probe. The 68080 daemon, AUDIO and PIP are later changes;
-# this file does not build them and does not install anything.
+# 68000 ApolloOS probe, the 68080 daemon, and its ARNE audio. PIP and the
+# Apollo monitor are later changes; this file does not build them and does
+# not install anything.
 # Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
-# `all` writes build/apollo/amigent-apollo-probe only.
+# `all` writes build/apollo/amigent-apollo-probe and build/apollo/amigentd.apollo.
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/..)
 BUILD := $(ROOT)/build/apollo
@@ -15,18 +16,52 @@ ifeq ($(wildcard $(CC)),)
 $(error m68k-amigaos-gcc was not found at $(CC). Set APOLLOCROSSDEV to your ApolloCrossDev checkout after its GCC install script (Compilers/$(GCC_FLAVOR)), or pass PREFIX= to that compiler tree)
 endif
 
+CFLAGS := -noixemul -O2 -m68080 -fomit-frame-pointer -std=gnu99 -DAMIGENT_APOLLO
 INCLUDES := -I$(APOLLO) \
 	-I$(PREFIX)/m68k-amigaos/libnix/include \
 	-I$(PREFIX)/m68k-amigaos/sys-include \
 	-I$(PREFIX)/m68k-amigaos/ndk-include
 PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
 
+# No libnix: its startup opens "*" and the boot console stays up. The string
+# routines, qsort and the entry are in apollo_runtime.c and apollo_start.s.
+# libgcc.a in this tree is empty, so the 64-bit helpers are div64.c.
+OBJ_NAMES := amigentd.o apollo_detect.o apollo_mmio.o apollo_audio.o gcc_support.o div64.o apollo_runtime.o
+OBJS := $(addprefix $(BUILD)/,$(OBJ_NAMES))
+
 .PHONY: all clean
 
-all: $(BUILD)/amigent-apollo-probe
+all: $(BUILD)/amigentd.apollo $(BUILD)/amigent-apollo-probe
 
 $(BUILD):
 	mkdir -p $(BUILD)
+
+$(BUILD)/amigentd.apollo: $(OBJS) $(BUILD)/apollo_start.o
+	$(CC) $(CFLAGS) -nostartfiles -nostdlib -o $@ $(BUILD)/apollo_start.o $(OBJS)
+
+$(BUILD)/apollo_start.o: $(APOLLO)/apollo_start.s | $(BUILD)
+	$(CC) -c -o $@ $(APOLLO)/apollo_start.s
+
+$(BUILD)/apollo_runtime.o: $(APOLLO)/apollo_runtime.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_runtime.c
+
+$(BUILD)/amigentd.o: $(HERE)/amigentd.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(HERE)/amigentd.c
+
+$(BUILD)/apollo_detect.o: $(APOLLO)/apollo_detect.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_detect.c
+
+$(BUILD)/apollo_mmio.o: $(APOLLO)/apollo_mmio.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_mmio.c
+
+$(BUILD)/apollo_audio.o: $(APOLLO)/apollo_audio.c $(APOLLO)/apollo_audio.h | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_audio.c
+
+$(BUILD)/gcc_support.o: $(APOLLO)/gcc_support.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/gcc_support.c
+
+$(BUILD)/div64.o: $(APOLLO)/div64.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/div64.c
 
 $(BUILD)/amigent-apollo-probe: $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c | $(BUILD)
 	$(CC) $(PROBE_CFLAGS) $(INCLUDES) -o $@ $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c -lgcc

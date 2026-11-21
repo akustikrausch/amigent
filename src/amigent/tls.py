@@ -68,6 +68,14 @@ def plain_closed(flags: int, encrypted: bool) -> str:
         return ""
     return PLAIN_CLOSED_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
 
+TLS_UNAVAILABLE_TEXT = (
+    "amigentd accepts only encrypted connections, but its TLS port is not available. "
+    "The plain connection was closed before any key was sent."
+)
+TLS_HANDSHAKE_TEXT = (
+    "amigentd's TLS handshake failed. The connection was not retried in the clear."
+)
+
 
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     """TLS over sock; the pinned certificate gets in, nobody else."""

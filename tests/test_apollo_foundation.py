@@ -1,10 +1,13 @@
-"""ApolloOS identification for the installer, without an Apollo daemon in the package.
+"""ApolloOS identification for the installer, with the Apollo daemon in the package.
 
-The 68080 daemon, AUDIO and PIP are not part of this change. These tests check
-which packaged file the installer copies. They do not run on Apollo hardware.
+The packaged amigentd.apollo carries AUDIO; PIP is not part of it. These tests check
+which packaged file the installer copies and what is in the sources. They do not run
+on Apollo hardware.
 """
 
+import hashlib
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -17,7 +20,7 @@ from amigent.paths import AMIGA
 ROOT = Path(__file__).resolve().parent.parent
 PROTOCOL_6 = (
     "CMD_NOTE", "CMD_LOADED", "CMD_PEEK", "CMD_TASKS", "CMD_TASKCTL", "CMD_POKE",
-    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET", "CMD_EMU68",
+    "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET",
 )
 
 
@@ -154,17 +157,31 @@ def test_a_running_daemon_is_trusted_over_the_probe(tmp_path, monkeypatch):
     assert setup.build_for_channel(broken) == "amigentd"
 
 
-def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, capsys):
-    """The published package has no Apollo daemon. The one on an ApolloOS machine may be a
-    68080 build of its own, so an update leaves it; --force puts the classic one on."""
-    assert not (AMIGA / "bin" / "amigentd.apollo").is_file()
-    amiga = {"C:amigentd": b"old", "commands": []}
+APOLLO_SHA = "63db83ff021c47f7146e0872cd36bf90eb201f36a0cf455a58f3c518a84e8ef1"
+
+
+def test_the_apollo_daemon_is_packaged_with_the_validated_size_and_hash():
+    data = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    assert len(data) == 128744 and hashlib.sha256(data).hexdigest() == APOLLO_SHA
+    assert (AMIGA / "bin" / "amigent-apollo-probe").is_file()
+    assert b"arne.audio" in data and b"ApolloOS" in data
+    from amigent.daemons import SPECS, available_names
+
+    assert "amigentd.apollo" in available_names(AMIGA / "bin")
+    assert any(s.name == "amigentd.apollo" and s.verified for s in SPECS)
+
+
+def _live_apollo_update(installed, info=None):
+    """An Amiga that runs ``installed`` (ApolloOS unless ``info`` says otherwise); returns its
+    state and the channel class."""
+    amiga = {"C:amigentd": installed, "commands": []}
+    described = info or {"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"}
 
     class Live(Channel):
         protocol = 6
 
         def __init__(self, host, timeout=30):
-            super().__init__(info={"os": "ApolloOS", "exec_version": "51.1", "attn_flags": "0x400"})
+            super().__init__(info=described)
             self.host = host
 
         def connect(self):
@@ -189,24 +206,93 @@ def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, ca
                 amiga["T:amigent-update.done"] = b"new\n"
             return super().exec(command)
 
+    return amiga, Live
+
+
+def test_update_on_apolloos_installs_the_packaged_apollo_daemon(monkeypatch):
+    amiga, Live = _live_apollo_update(b"old")
     monkeypatch.setattr(setup.time, "sleep", lambda s: None)
+    monkeypatch.setattr(setup, "AmigaChannel", Live)
+    assert setup.update("192.0.2.1", None) == 0
+    assert amiga["C:amigentd"] == (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    assert "T:amigent-apollo-probe" not in amiga
+
+
+def _without_apollo_package(tmp_path, monkeypatch):
+    package = tmp_path / "amiga"
+    shutil.copytree(AMIGA, package)
+    (package / "bin" / "amigentd.apollo").unlink()
+    monkeypatch.setattr(setup, "AMIGA", package)
+    monkeypatch.setattr(setup.time, "sleep", lambda s: None)
+    return package
+
+
+def test_update_on_apolloos_keeps_the_daemon_there_unless_forced_when_not_packaged(
+        tmp_path, monkeypatch, capsys):
+    """The maintainer's policy (681e404): a package without amigentd.apollo leaves the daemon
+    on an ApolloOS machine alone; --force puts the classic one on."""
+    package = _without_apollo_package(tmp_path, monkeypatch)
+    amiga, Live = _live_apollo_update(b"old")
     monkeypatch.setattr(setup, "AmigaChannel", Live)
     assert setup.update("192.0.2.1", None) == 0
     assert amiga["C:amigentd"] == b"old" and "C:amigentd.new" not in amiga
     assert "has no amigentd.apollo" in capsys.readouterr().out
     assert setup.update("192.0.2.1", None, force=True) == 0
-    assert amiga["C:amigentd"] == (AMIGA / "bin" / "amigentd").read_bytes()
-    assert "T:amigent-apollo-probe" not in amiga
+    assert amiga["C:amigentd"] == (package / "bin" / "amigentd").read_bytes()
 
 
-def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
+def test_update_without_the_apollo_package_never_downgrades_an_installed_apollo(
+        tmp_path, monkeypatch, capsys):
+    _without_apollo_package(tmp_path, monkeypatch)
+    apollo = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    amiga, Live = _live_apollo_update(apollo)
+    monkeypatch.setattr(setup, "AmigaChannel", Live)
+    assert setup.update("192.0.2.1", None) == 0
+    assert amiga["C:amigentd"] == apollo and "C:amigentd.new" not in amiga
+    assert not any("amigent-update.rexx" in c for c in amiga["commands"])
+    assert "Apollo" in capsys.readouterr().out
+
+
+def test_force_may_put_classic_over_apollo_when_the_package_has_no_apollo(tmp_path, monkeypatch):
+    package = _without_apollo_package(tmp_path, monkeypatch)
+    apollo = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    amiga, Live = _live_apollo_update(apollo)
+    monkeypatch.setattr(setup, "AmigaChannel", Live)
+    assert setup.update("192.0.2.1", None, force=True) == 0
+    assert amiga["C:amigentd"] == (package / "bin" / "amigentd").read_bytes()
+
+
+def test_a_normal_update_keeps_a_recognised_apollo_when_detection_falls_back_to_classic(
+        monkeypatch, capsys):
+    """The package carries amigentd.apollo, but the running daemon describes a plain 68080 under
+    AmigaOS, so classic is selected; the installed Apollo build is still not downgraded."""
+    apollo = (AMIGA / "bin" / "amigentd.apollo").read_bytes()
+    info = {"os": "AmigaOS", "exec_version": "47.4", "attn_flags": "0x400"}
+    amiga, Live = _live_apollo_update(apollo, info)
+    monkeypatch.setattr(setup.time, "sleep", lambda s: None)
+    monkeypatch.setattr(setup, "AmigaChannel", Live)
+    assert setup.update("192.0.2.1", None) == 0
+    assert amiga["C:amigentd"] == apollo and "C:amigentd.new" not in amiga
+    assert "less specialised" in capsys.readouterr().out
+
+
+def test_update_on_apolloos_never_selects_the_experimental_080_build():
+    assert setup.select_build(0, {"os": "ApolloOS"}) == "amigentd.apollo"
+    assert setup.select_build(0, {}) == "amigentd"
+
+
+def test_protocol_6_ends_at_quiet_audio_is_apollo_only_and_the_probe_is_68000_only():
     daemon = (ROOT / "amiga" / "amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
     names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
-    assert names == list(PROTOCOL_6)
+    # Opcode 48 is AUDIO on Apollo builds and EMU68 on the others: one #ifdef/#else.
+    assert names == list(PROTOCOL_6) + ["CMD_AUDIO", "CMD_EMU68"]
     assert "PROTOCOL_VERSION 6" in daemon
-    assert "CMD_AUDIO" not in daemon and "CMD_PIP" not in daemon
-    assert "AMIGENT_APOLLO" not in daemon
+    assert re.search(r"#ifdef AMIGENT_APOLLO\s*CMD_AUDIO = 48.*?#else\s*CMD_EMU68", daemon, re.S)
+    assert "case CMD_AUDIO:" in daemon and "CMD_PIP" not in daemon
+    protocol = (ROOT / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "| 48 | AUDIO |" in protocol and "Apollo build only" in protocol
+    assert "| 48 | EMU68 |" in protocol
 
     detect = (ROOT / "amiga" / "apollo" / "apollo_detect.c").read_text(encoding="utf-8")
     probe = (ROOT / "amiga" / "apollo" / "apollo_probe.c").read_text(encoding="utf-8")
@@ -215,8 +301,11 @@ def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
     assert "RETURN_WARN" in probe and "m68080" not in probe
     assert "amigent-apollo-probe" in makefile
-    assert "amigentd.apollo" not in makefile and "apollo.c" not in makefile
-    assert "-m68080" not in makefile and "-m68000" in makefile
+    assert "$(BUILD)/amigentd.apollo" in makefile and "-DAMIGENT_APOLLO" in makefile
+    assert "apollo_audio.c" in makefile and "apollo_mmio.c" in makefile
+    probe_flags = makefile.split("PROBE_CFLAGS :=", 1)[1].splitlines()[0]
+    assert "-m68000" in probe_flags and "-m68080" not in probe_flags  # the probe stays 68000
+    assert "-m68080" in makefile and "apollo_pip" not in makefile
 
 
 def test_an_update_asks_nothing_about_apolloos_without_an_apollo_build(tmp_path, monkeypatch):

@@ -146,17 +146,28 @@
   function shownLinkReason(key) {
     return /^reason_[a-z_]+$/.test(key) && UI.knows(key) ? t(key) : "";
   }
+  // Bumped when the connection identity changes so a late amiga/SYSINFO
+  // payload from a previous session cannot re-offer Hear.
+  let capabilityEpoch = 0;
 
   function send(op) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(op));
   }
 
+  function invalidateHearCapabilities() {
+    capabilityEpoch += 1;
+    amiga = {};
+    showHear(null);
+  }
+
   function connect() {
     ws = new WebSocket(`ws://${location.host}/ws?t=${encodeURIComponent(token)}`);
     ws.binaryType = "arraybuffer";
-    ws.onopen = () => { socketOpen = true; showState(); };
+    ws.onopen = () => { socketOpen = true; showState(); showHear(amiga); };
     ws.onclose = () => {
       socketOpen = false;
+      stopHear(false);
+      invalidateHearCapabilities();
       showState();
       setTimeout(connect, 1000);
     };
@@ -223,9 +234,33 @@
 
   const cpuLine = UI.cpuLine;
 
+  function apolloMachine(info) {
+    return !!(info && (info.os === "ApolloOS" || String(info.cpu || "").includes("68080")));
+  }
+
+  // Hear is visible only for an active Apollo connection with protocol ≥ 6
+  // and SYSINFO audio=1. Protocol 6 alone is not Apollo evidence.
+  function infoHearEligible(info) {
+    if (!info || typeof info !== "object") return false;
+    if (!apolloMachine(info)) return false;
+    const proto = Number(info.daemon_protocol);
+    if (!Number.isFinite(proto) || proto < 6) return false;
+    return info.audio === "1";
+  }
+
+  function hearEligible(info) {
+    return !!(socketOpen && amigaOnline === true && infoHearEligible(info));
+  }
+
+
   let toldOutdated = false;
 
   function showAmiga(info) {
+    const epoch = capabilityEpoch;
+    if (!info || typeof info !== "object") {
+      showHear(null);
+      return;
+    }
     amiga = info;
     if (info.pc_outdated && !toldOutdated) {
       toldOutdated = true;
@@ -252,6 +287,9 @@
     if (!list.children.length) list.textContent = "–";
     $("st-mem").textContent = bytes((chip ?? 0) + (knownBytes(info.fast_free) ?? 0));
     $("st-free").hidden = false;
+    // Drop capabilities that arrived after a disconnect / address change.
+    if (epoch !== capabilityEpoch) return;
+    showHear(amiga);
     showLink();
     showState();
   }
@@ -273,6 +311,13 @@
 
   // The screen picker: Intuition's screens, front one first, plus the two Amiga screen keys.
   let screenMenu = null;
+
+  function showHear(info) {
+    const button = $("hear");
+    const offered = hearEligible(info);
+    button.hidden = !offered;
+    if (!offered && hearing) stopHear(true);
+  }
 
   function showScreens(list) {
     const pick = $("screen-pick");
@@ -307,15 +352,17 @@
         address = m.address || host;
         $("about-host").textContent = where();
         reason = m.reason || "";
-        if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
-        showScreens(m.screens || []);
         if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
         if (m.update) showUpdate(m.update);
         paintUpdate();
         amigaOnline = m.online;
+        showScreens(m.screens || []);
+        if (m.online && m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
+        else invalidateHearCapabilities();
         if (m.w) setSize(m.w, m.h);
         showLink();
         showState();
+        showHear(amiga);
         break;
       case "size":
         setSize(m.w, m.h);
@@ -324,6 +371,10 @@
         showUpdate(m.update);
         break;
       case "amiga":
+        if (amigaOnline !== true) {
+          // Stale capability while disconnected / connecting — ignore for Hear.
+          return;
+        }
         showAmiga(m);
         break;
       case "screens":
@@ -332,9 +383,20 @@
       case "online":
         amigaOnline = m.online;
         reason = m.reason || "";
+        if (!m.online) {
+          stopHear(false);
+          invalidateHearCapabilities();
+        } else {
+          showHear(amiga);
+        }
         showState();
         break;
+      case "audio":
+        if (!m.on) stopHear(false);
+        break;
       case "address":
+        stopHear(false);
+        invalidateHearCapabilities();
         address = m.address;
         $("about-host").textContent = where();
         showLink();
@@ -378,6 +440,10 @@
       drawing = drawing.then(() => drawTiles(buffer));
     } else if (kind === 3) {
       drawing = drawing.then(() => drawPixels(buffer));
+    } else if (false) {
+    } else if (kind === 5 && hearing && buffer.byteLength >= 5) {
+      const view = new DataView(buffer);
+      playPcm(view.getUint32(1), new Uint8Array(buffer, 5));
     } else if (kind === 2) {
       drawing = drawing
         .then(() => createImageBitmap(new Blob([new Uint8Array(buffer, 1)], { type: "image/png" })))
@@ -440,6 +506,116 @@
       }
       ctx.putImageData(image, x, y);
     }
+  }
+
+  let hearing = false;
+  let audioCtx = null, player = null, playerBoot = null;
+  const playerQueue = [];
+  const WORKLET = `
+class AmigentPcm extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cap = 48000 * 8;
+    this.L = new Float32Array(this.cap);
+    this.R = new Float32Array(this.cap);
+    this.w = 0;
+    this.r = 0;
+    this.rate = 48000;
+    this.started = false;
+    this.port.onmessage = (e) => {
+      const pcm = e.data.pcm;
+      const n = pcm.length >> 1;
+      if (e.data.rate) this.rate = e.data.rate;
+      if (this.w - this.r + n >= this.cap) this.r = this.w + n - this.cap + 1;
+      for (let i = 0; i < n; i++) {
+        const at = this.w % this.cap;
+        this.L[at] = pcm[i * 2];
+        this.R[at] = pcm[i * 2 + 1];
+        this.w++;
+      }
+    };
+  }
+  process(_inputs, outputs) {
+    const ch = outputs[0];
+    if (!ch || !ch[0]) return true;
+    const L = ch[0];
+    const R = ch[1] || ch[0];
+    if (!this.started) {
+      if (this.w - this.r < this.rate * 0.25) {
+        L.fill(0);
+        if (ch[1]) R.fill(0);
+        return true;
+      }
+      this.started = true;
+    }
+    const step = this.rate / sampleRate;
+    for (let i = 0; i < L.length; i++) {
+      if (this.w - this.r < 2) {
+        L[i] = 0;
+        if (ch[1]) R[i] = 0;
+        continue;
+      }
+      const i0 = Math.floor(this.r);
+      const f = this.r - i0;
+      const a = i0 % this.cap;
+      const b = (i0 + 1) % this.cap;
+      L[i] = this.L[a] * (1 - f) + this.L[b] * f;
+      if (ch[1]) R[i] = this.R[a] * (1 - f) + this.R[b] * f;
+      this.r += step;
+    }
+    return true;
+  }
+}
+registerProcessor("amigent-pcm", AmigentPcm);
+`;
+
+  function playPcm(rate, pcm) {
+    if (!hearing || !pcm.byteLength || pcm.byteLength % 4) return;
+    const samples = pcm.byteLength / 4;
+    const out = new Float32Array(samples * 2);
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+    for (let i = 0; i < samples; i++) {
+      out[i * 2] = view.getInt16(i * 4, true) / 32768;
+      out[i * 2 + 1] = view.getInt16(i * 4 + 2, true) / 32768;
+    }
+    const item = { rate: rate || 48000, pcm: out };
+    if (player) {
+      player.port.postMessage(item, [out.buffer]);
+      return;
+    }
+    playerQueue.push(item);
+    if (!playerBoot) {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+      playerBoot = audioCtx.audioWorklet.addModule(url).then(() => {
+        URL.revokeObjectURL(url);
+        if (!hearing) return;
+        player = new AudioWorkletNode(audioCtx, "amigent-pcm", { outputChannelCount: [2] });
+        player.connect(audioCtx.destination);
+        for (const queued of playerQueue) player.port.postMessage(queued, [queued.pcm.buffer]);
+        playerQueue.length = 0;
+      }).catch(() => { URL.revokeObjectURL(url); playerBoot = null; });
+    }
+  }
+
+
+  function stopHear(tell) {
+    hearing = false;
+    const button = $("hear");
+    if (button) button.setAttribute("aria-pressed", "false");
+    playerQueue.length = 0;
+    playerBoot = null;
+    if (player) {
+      try { player.disconnect(); } catch (_) {}
+      player = null;
+    }
+    if (audioCtx) {
+      const ctx = audioCtx;
+      audioCtx = null;
+      try { ctx.close(); } catch (_) {}
+    }
+    if (tell) send({ t: "audio", on: false });
   }
 
   function setSize(w, h) {
@@ -828,6 +1004,23 @@
   });
 
   // ---------------------------------------------------------------- view
+
+  $("hear").addEventListener("click", () => {
+    if (hearing) {
+      stopHear(true);
+      return;
+    }
+    // Visibility is not the only gate: refuse activation unless still eligible.
+    if (!hearEligible(amiga)) {
+      showHear(amiga);
+      return;
+    }
+    hearing = true;
+    $("hear").setAttribute("aria-pressed", "true");
+    if (!audioCtx) audioCtx = new AudioContext();
+    audioCtx.resume().catch(() => {});
+    send({ t: "audio", on: true });
+  });
 
   function toggleFit() {
     fit = !fit;

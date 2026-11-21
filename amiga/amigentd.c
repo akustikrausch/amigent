@@ -65,10 +65,39 @@ extern struct Library *CyberGfxBase;
 #define RECTFMT_RGB 0
 #define CYBRMATTR_BPPIX 0x80000002
 #define CYBRMATTR_ISCYBERGFX 0x80000008
-#else
+#elif !defined(AMIGENT_APOLLO)
+/* Classic and Emu68 GCC builds take the toolchain's own cybergraphics
+ * headers and inline stubs. */
 #include <proto/cybergraphics.h>
 #include <cybergraphx/cybergraphics.h>
 #include <inline/macros.h>
+#else
+/* ApolloCrossDev's GCC 6.50 Stable ships no cybergraphics headers. The four
+ * calls below are the ones this file makes, implemented in gcc_support.c at
+ * the same offsets as the vbcc stubs. Apollo builds only. */
+#include <inline/macros.h>
+#include <utility/tagitem.h>
+ULONG GetCyberMapAttr(struct BitMap *bm, ULONG attr);
+void ReadPixelArray(APTR dest, ULONG destx, ULONG desty, ULONG destmod, struct RastPort *rp,
+                    ULONG srcx, ULONG srcy, ULONG sizex, ULONG sizey, ULONG format);
+APTR LockBitMapTagList(APTR bitmap, struct TagItem *tags);
+void UnLockBitMap(APTR handle);
+#define RECTFMT_RGB 0
+#define CYBRMATTR_BPPIX 0x80000002
+#define CYBRMATTR_ISCYBERGFX 0x80000008
+#endif
+
+#ifdef AMIGENT_APOLLO
+/* The 68000 probe and this daemon share the identification. AUDIO is opcode
+ * 48 on this build. Opcode 49 is reserved for PIP and is not implemented. */
+#include "apollo_audio.h"
+BOOL apollo_os_here(void);
+UWORD apollo_board(void);
+const char *apollo_board_name(UWORD board);
+BOOL apollo_mmio_hit(ULONG at, ULONG n);
+static volatile LONG audio_hold;
+static volatile LONG audio_wait;
+static struct Task *volatile audio_task;
 #endif
 
 #define PROTOCOL_VERSION 6
@@ -106,6 +135,18 @@ extern struct Library *CyberGfxBase;
 #define UNIQUE_ID (-1)
 #endif
 
+/* GCC's bsdsocket inline takes socklen_t *, which is not LONG *. vbcc's
+ * prototype takes the length as this file already passes it. __saveds is
+ * vbcc's base-register reload; GCC ignores it unless -fbaserel, which this
+ * daemon does not use. */
+#ifndef __VBCC__
+#define AMIGENT_SOCKLEN(p) ((socklen_t *)(p))
+#define AMIGENT_SAVEDS
+#else
+#define AMIGENT_SOCKLEN(p) (p)
+#define AMIGENT_SAVEDS __saveds
+#endif
+
 enum {
     CMD_INFO = 1, CMD_FRAME, CMD_MOVE, CMD_BUTTON, CMD_RAWKEY, CMD_PING,
     CMD_CHAR, CMD_PUT, CMD_RUN, CMD_SETUP_END, CMD_SCREENS, CMD_SCREEN_FRONT,
@@ -116,7 +157,11 @@ enum {
     CMD_NOTE,  /* protocol 5, "note" in SYSINFO: a line for the monitor, no answer */
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
+#ifdef AMIGENT_APOLLO
+    CMD_AUDIO = 48  /* ARNE mix. Apollo builds only; there it replaces EMU68. 49 is reserved for PIP. */
+#else
     CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
+#endif
 };
 
 const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
@@ -1594,7 +1639,7 @@ static void refresh(void)
 }
 
 /* Reads ahead at priority -1, a few tiles at a time, whenever a frame asks for it. */
-static void __saveds reader_main(void)
+static void AMIGENT_SAVEDS reader_main(void)
 {
     struct Task *me = FindTask(NULL);
     BOOL more;
@@ -1608,7 +1653,11 @@ static void __saveds reader_main(void)
             more = wanted > 0;
             ReleaseSemaphore(&picture);
             SetTaskPri(me, -1);  /* lets the stack and every program go first */
-        } while (more && !reader_quit);
+        } while (more && !reader_quit
+#ifdef AMIGENT_APOLLO
+                 && !audio_hold
+#endif
+                );
     }
     Forbid();
     Signal(server, 1UL << reader_gone);
@@ -2867,7 +2916,7 @@ static struct Screen *open_screen(ULONG handle)
 
 /* ScreenToFront waits for Intuition, which holds it back while a menu is open,
  * for as long as that may be. So a helper process waits instead of us. */
-static void __saveds front_main(void)
+static void AMIGENT_SAVEDS front_main(void)
 {
     struct Screen *s;
 
@@ -2929,7 +2978,7 @@ static void helper_done(volatile BOOL *flag)
 
 /* A ScreenToFront of the screen in front changes nothing, and comes back at
  * once unless Intuition holds back new windows and screens. */
-static void __saveds held_main(void)
+static void AMIGENT_SAVEDS held_main(void)
 {
     struct Screen *s;
 
@@ -3578,6 +3627,66 @@ static BOOL l_skip(struct link *l, ULONG len, LONG secs)
     return TRUE;
 }
 
+/* POKE payload phase: one wall-clock deadline from now_ms(), not reset by
+ * each fragment the way l_recv(..., IO_SECONDS) would be. */
+#define POKE_DEADLINE_MS (IO_SECONDS * 1000UL)
+
+static BOOL l_wait_until(struct link *l, BOOL writing, ULONG deadline_ms)
+{
+    struct Library *SocketBase = l->base;
+    struct timeval tv;
+    ULONG sigs = SIGBREAKF_CTRL_C;
+    fd_set s;
+    LONG left;
+
+    left = (LONG)(deadline_ms - now_ms());
+    if (left <= 0)
+        return FALSE;
+    tv.tv_sec = left / 1000;
+    tv.tv_usec = (left % 1000) * 1000;
+    FD_ZERO(&s);
+    FD_SET(l->fd, &s);
+    if (WaitSelect(l->fd + 1, writing ? NULL : &s, writing ? &s : NULL, NULL, &tv, &sigs) > 0)
+        return TRUE;
+    if (sigs & SIGBREAKF_CTRL_C)
+        SetSignal(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+    return FALSE;
+}
+
+static BOOL l_recv_until(struct link *l, void *data, ULONG len, ULONG deadline_ms)
+{
+    struct Library *SocketBase = l->base;
+    UBYTE *p = data;
+    LONG n;
+
+    while (len > 0) {
+        if (!l_wait_until(l, FALSE, deadline_ms))
+            return FALSE;
+        n = recv(l->fd, p, len, 0);
+        if (n < 0 && Errno() == EWOULDBLOCK)
+            continue;
+        if (n <= 0)
+            return FALSE;
+        p += n;
+        len -= n;
+        net_in += n;
+    }
+    return TRUE;
+}
+
+static BOOL l_skip_until(struct link *l, ULONG len, ULONG deadline_ms)
+{
+    UBYTE scratch[512];
+
+    while (len > 0) {
+        ULONG n = len > sizeof(scratch) ? sizeof(scratch) : len;
+        if (!l_recv_until(l, scratch, n, deadline_ms))
+            return FALSE;
+        len -= n;
+    }
+    return TRUE;
+}
+
 /* ---- newcomers --------------------------------------------------------- */
 
 /* A connection only becomes the screen client with its first screen command, so
@@ -3605,7 +3714,7 @@ static void accept_pending(void)
     UBYTE hello[8] = {'A', 'M', 'G', 'T', 0, PROTOCOL_VERSION, 0, 0};
     struct link l;
 
-    fd = accept(listener, (struct sockaddr *)&addr, &len);
+    fd = accept(listener, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len));
     if (fd < 0)
         return;
     for (i = 0; i < PENDING && pend[i].fd >= 0; i++)
@@ -4448,9 +4557,29 @@ static BOOL c_sysinfo(struct link *l)
     t_version(&t, "graphics", GfxBase->LibNode.lib_Version, GfxBase->LibNode.lib_Revision);
     {
         UWORD f = SysBase->AttnFlags;
+#ifdef AMIGENT_APOLLO
+        t_pair(&t, "cpu", 68080);  /* this binary contains 68080 instructions */
+#else
         t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
                           f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
+#endif
         t_pair(&t, "attn_flags", f);  /* raw, for bits newer than the NDK, such as a 68080's */
+#ifdef AMIGENT_APOLLO
+        {
+            UWORD board = apollo_board();
+
+            t_str(&t, (const UBYTE *)"os=", FALSE);
+            t_str(&t, (const UBYTE *)(apollo_os_here() ? "ApolloOS" : "AmigaOS"), FALSE);
+            t_chr(&t, '\n');
+            t_str(&t, (const UBYTE *)"board=", FALSE);
+            t_hex(&t, board);
+            t_chr(&t, '\n');
+            t_str(&t, (const UBYTE *)"board_name=", FALSE);
+            t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
+            t_chr(&t, '\n');
+            t_pair(&t, "audio", 1);  /* opcode 48 is implemented in this build */
+        }
+#endif
     }
     /* From protocol 5: how fast this Amiga packs, in KB/s, so the PC can tell
      * whether packing beats the line; and what amigentd records. */
@@ -4474,6 +4603,11 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "note", 1);  /* NOTE is understood */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
+#ifdef AMIGENT_APOLLO
+    t_pair(&t, "trace", 0);  /* TRACE set refused on Apollo/68080 until validated */
+#else
+    t_pair(&t, "trace", 1);
+#endif
     t_pair(&t, "poke", allow_poke);  /* POKE only with ALLOWPOKE */
     t_pair(&t, "probe", 1);  /* LOCKS, CPU, DRAG, QUIET */
     t_pair(&t, "emu68", emu68_present());  /* EMU68 is understood; 1: Emu68 runs here */
@@ -4605,7 +4739,7 @@ static BPTR copy_path(void)
     return first;
 }
 
-static void __saveds runner_main(void)
+static void AMIGENT_SAVEDS runner_main(void)
 {
     struct run *r;
     BPTR in, out, old = 0;
@@ -7014,6 +7148,12 @@ static BOOL peek_allowed(ULONG at, ULONG n)
 
     if (!n || n > PEEK_MAX || end < at)
         return FALSE;
+#ifdef AMIGENT_APOLLO
+    /* A MemHeader that covered a SAGA, PIP, VREG or ARNE window would still
+     * be a read or write with side effects. Those windows are refused first. */
+    if (apollo_mmio_hit(at, n))
+        return FALSE;
+#endif
     if (at >= 0xF80000UL && end <= 0xFFFFFFUL)
         return TRUE;
     if (end < 0x400)  /* vectors and ExecBase at 4: chip RAM below exec's list */
@@ -7159,27 +7299,41 @@ static BOOL c_taskctl(struct link *l, UBYTE op, UWORD len, UWORD y)
 
 static void flush_caches(void);
 
+/* Length uses the same PEEK_MAX bound as PEEK. Order: address -> size ->
+ * ALLOWPOKE -> region -> receive with a wall-clock deadline -> write.
+ * A huge n must not allocate or hang the receive before ALLOWPOKE is checked.
+ * POKE_DEADLINE_MS wall-clock from now_ms(); fragments do not extend it. */
 static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 {
     BOOL alive;
-    ULONG at;
+    ULONG at, deadline;
     UBYTE *data;
 
     if (!c_address(l, len, &at, &alive))
         return alive ? c_fault(l, ERROR_NO_FREE_STORE) : FALSE;
-    if (!(data = AllocVec(n ? n : 1, MEMF_ANY)))
-        return l_skip(l, n, IO_SECONDS) && c_fault(l, ERROR_NO_FREE_STORE);
-    if (!l_recv(l, data, n, IO_SECONDS)) {
-        FreeVec(data);
-        return FALSE;
-    }
-    if (!allow_poke) {
-        FreeVec(data);
-        return c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
-    }
-    if (!peek_allowed(at, n) || at >= 0xF80000UL) {
-        FreeVec(data);
+    if (!n)
         return c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (n > PEEK_MAX)
+        return FALSE;  /* close: do not drain an unbounded declared payload */
+    deadline = now_ms() + POKE_DEADLINE_MS;  /* payload phase only; not reset by drip */
+    if (!allow_poke)
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "writing memory is off; start amigentd with ALLOWPOKE to allow it");
+#ifdef AMIGENT_APOLLO
+    /* APoke is not this command. The same RAM gate applies, and a window
+     * whose read has a side effect is not a place to write either. */
+    if (apollo_mmio_hit(at, n))
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "that range includes Apollo registers that a read can change");
+#endif
+    if (!peek_allowed(at, n) || at >= 0xF80000UL)
+        return l_skip_until(l, n, deadline) &&
+               c_fail(l, 1, "only RAM exec manages, at most 64 KB");
+    if (!(data = AllocVec(n, MEMF_ANY)))
+        return l_skip_until(l, n, deadline) && c_fault(l, ERROR_NO_FREE_STORE);
+    if (!l_recv_until(l, data, n, deadline)) {
+        FreeVec(data);
+        return FALSE;  /* incomplete / deadline: close - do not treat as next command */
     }
     mon_say('C', "write memory", NULL);
     Disable();
@@ -7195,7 +7349,11 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
  * makes our trap handler (amiga/trapstub.s) that task's tc_TrapCode. When the
  * program gets there, the handler keeps the registers and a bit of the stack,
  * puts the instruction back and lets the program go on as if nothing
- * happened: it fires once, and the program never stops. */
+ * happened: it fires once, and the program never stops.
+ *
+ * The trap stub is the upstream 1.4.0 handler. Its behaviour on a 68080 has
+ * not been validated on hardware. Apollo builds (AMIGENT_APOLLO) refuse TRACE
+ * set before any code or trap-handler change; list and clear still work. */
 
 static const UBYTE trap_code[68] = {
     0x0c, 0x97, 0x00, 0x00, 0x00, 0x2f, 0x66, 0x2a, 0x48, 0xe7, 0xff, 0xfe,
@@ -7393,6 +7551,11 @@ static BOOL c_trace(struct link *l, UBYTE op, UWORD len)
     }
     if (op != 1)
         return c_fail(l, 1, "unknown trace operation");
+#ifdef AMIGENT_APOLLO
+    /* 68080 trap stub not hardware-validated: refuse before patching code or tc_TrapCode. */
+    (void)at;
+    return c_fail(l, 1, "tracepoints are not supported on this Apollo build yet");
+#endif
     if (at & 1)
         return c_fail(l, 1, "code starts at an even address");
     for (i = 0; i < TRACES; i++)  /* a second one would take our TRAP for the instruction */
@@ -7822,6 +7985,7 @@ static BOOL c_drag(struct link *l, UBYTE pattern, UWORD len, UWORD steps, UWORD 
     return c_text(l, &t);
 }
 
+#ifndef AMIGENT_APOLLO
 /* ---- Emu68: what runs on the Raspberry Pi, and its JIT settings ---------
  *
  * Emu68 (the 68k JIT on a PiStorm and other Pi boards) offers the Amiga side
@@ -8245,6 +8409,461 @@ static int emu68_cli(const char *spec)
     return RETURN_OK;
 }
 
+#else  /* AMIGENT_APOLLO: opcode 48 is AUDIO here, so EMU68 is not built */
+static BOOL emu68_present(void)
+{
+    return FALSE;
+}
+
+static int emu68_cli(const char *spec)
+{
+    (void)spec;
+    PutStr("amigentd: not Emu68, nothing changed\n");
+    return RETURN_WARN;
+}
+#endif  /* !AMIGENT_APOLLO */
+
+#ifdef AMIGENT_APOLLO
+/* What send() accepted. A full window is not an error: the caller pumps again. */
+static BOOL audio_send_some(struct link *l, UBYTE *buf, ULONG *sent, ULONG len)
+{
+    struct Library *SocketBase = l->base;
+    LONG n;
+
+    if (*sent >= len)
+        return TRUE;
+    n = send(l->fd, buf + *sent, len - *sent, 0);
+    if (n < 0 && Errno() == EWOULDBLOCK)
+        return TRUE;
+    if (n <= 0)
+        return FALSE;
+    *sent += (ULONG)n;
+    net_out += (ULONG)n;
+    return TRUE;
+}
+
+/* 1: a 10-byte command has arrived (the stream's stop). -1: the socket died. */
+static int audio_incoming(struct link *l, UBYTE *acc, ULONG *got)
+{
+    struct Library *SocketBase = l->base;
+    LONG n;
+
+    if (*got >= 10)
+        return 1;
+    n = recv(l->fd, acc + *got, 10 - *got, 0);
+    if (n == 0)
+        return -1;
+    if (n < 0)
+        return Errno() == EWOULDBLOCK ? 0 : -1;
+    *got += (ULONG)n;
+    return *got >= 10 ? 1 : 0;
+}
+
+/* One look, then a vblank. Nothing is playing, or a stop is waiting for the
+ * last bytes to leave. */
+static BOOL audio_idle(ULONG *rate)
+{
+    if (SetSignal(0, 0) & SIGBREAKF_CTRL_C)
+        return FALSE;
+    if (rate)
+        apollo_audio_pump(rate);
+    Delay(1);
+    return (SetSignal(0, 0) & SIGBREAKF_CTRL_C) == 0;
+}
+
+/* Copy while the mix is moving, and keep sending what is already copied.
+ * Stopping every couple of seconds to send was a spurt of sound and then a
+ * break of the same length. A full window does not wait: the bytes stay
+ * queued and the next look tries again. Quiet for a moment means it stopped. */
+static BOOL audio_push(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate,
+                       ULONG budget);
+
+static BOOL audio_feed(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate)
+{
+    LONG n;
+
+    if (*out_sent < *out_len) {
+        if (!audio_send_some(l, out, out_sent, *out_len))
+            return FALSE;
+        if (*out_sent >= *out_len)
+            *out_len = *out_sent = 0;
+        return TRUE;
+    }
+    if (apollo_audio_pending() < 4)
+        return TRUE;
+    n = apollo_audio_take(out + 8, 4096);
+    if (n < 4)
+        return TRUE;
+    be32(out, rate);
+    be32(out + 4, (ULONG)n);
+    *out_len = 8 + (ULONG)n;
+    *out_sent = 0;
+    if (!audio_send_some(l, out, out_sent, *out_len))
+        return FALSE;
+    if (*out_sent >= *out_len)
+        *out_len = *out_sent = 0;
+    return TRUE;
+}
+
+/* A few milliseconds, this task asleep. The port is this task's, so the
+ * timer signals here. The device is the one the main task already opened.
+ * Opening timer.device again from the music task is what stopped the daemon. */
+static struct timerequest *yield_io(struct MsgPort **port)
+{
+    struct timerequest *io;
+
+    *port = NULL;
+    if (!timer_io)
+        return NULL;
+    if (!(*port = CreateMsgPort()))
+        return NULL;
+    if (!(io = (struct timerequest *)CreateIORequest(*port, sizeof(*io)))) {
+        DeleteMsgPort(*port);
+        *port = NULL;
+        return NULL;
+    }
+    io->tr_node.io_Device = timer_io->tr_node.io_Device;
+    io->tr_node.io_Unit = timer_io->tr_node.io_Unit;
+    return io;
+}
+
+static void yield_close(struct MsgPort *port, struct timerequest *io)
+{
+    if (io)
+        DeleteIORequest((struct IORequest *)io);
+    if (port)
+        DeleteMsgPort(port);
+}
+
+/* TRUE when the wait finished. FALSE when stop arrived during it. */
+static BOOL yield_us(struct MsgPort *port, struct timerequest *io, ULONG us)
+{
+    ULONG sigs;
+
+    io->tr_node.io_Command = TR_ADDREQUEST;
+    io->tr_time.tv_secs = 0;
+    io->tr_time.tv_micro = us;
+    SendIO((struct IORequest *)io);
+    sigs = Wait((1UL << port->mp_SigBit) | SIGBREAKF_CTRL_C);
+    if (!CheckIO((struct IORequest *)io))
+        AbortIO((struct IORequest *)io);
+    WaitIO((struct IORequest *)io);
+    SetSignal(0, 1UL << port->mp_SigBit);
+    return (sigs & SIGBREAKF_CTRL_C) == 0;
+}
+
+/* The TLS pump connects from this machine. A music socket from the PC does not. */
+static BOOL peer_local(struct link *l)
+{
+    struct Library *SocketBase = l->base;
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+
+    if (getpeername(l->fd, (struct sockaddr *)&addr, &len) != 0)
+        return TRUE;
+    return addr.sin_addr.s_addr == htonl(INADDR_LOOPBACK);
+}
+
+static BOOL audio_follow(struct link *l, UBYTE *acc, ULONG *acc_n, ULONG *rate, ULONG *since,
+                         UBYTE *out, ULONG *out_len, ULONG *out_sent)
+{
+    struct Task *me = FindTask(NULL);
+    BYTE pri = me->tc_Node.ln_Pri;
+    struct MsgPort *nap_port = NULL;
+    struct timerequest *nap = NULL;
+    ULONG look = now_ms(), click = look;
+    BOOL plain = !peer_local(l);
+    BOOL ok = TRUE;
+    UBYTE heard = 0;
+
+    /* Stay above the picture cipher and wait on the timer between looks.
+     * Dropping to the bottom and giving the picture one turn let it keep
+     * the CPU, and a pass went out only every couple of seconds. */
+    if (plain)
+        nap = yield_io(&nap_port);
+    audio_hold = 1;
+    audio_task = me;
+    SetTaskPri(me, 5);
+    for (;;) {
+        ULONG seq = apollo_audio_seq();
+        ULONG now = 0, got;
+        int stop;
+
+        if (plain) {
+            ULONG pending;
+            int copied;
+
+            apollo_audio_pump(rate);
+            copied = apollo_audio_seq() != seq;
+            pending = apollo_audio_pending();
+            if (copied)
+                heard = 1;
+            if (pending >= 4) {
+                if (!audio_push(l, out, out_len, out_sent, *rate, 4096)) {
+                    ok = FALSE;
+                    break;
+                }
+            }
+            if (nap) {
+                if (!yield_us(nap_port, nap, 1000)) {
+                    ok = FALSE;
+                    break;
+                }
+            } else
+                Delay(1);
+            now = now_ms();
+            if (heard) {
+                *since = now;
+                heard = 0;
+            }
+            if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+                ok = FALSE;
+                break;
+            }
+            if (*since && (ULONG)(now - *since) > 600)
+                break;
+            if ((ULONG)(now - click) < 200)
+                continue;
+            stop = audio_incoming(l, acc, acc_n);
+            if (stop) {
+                if (stop < 0)
+                    ok = FALSE;
+                break;
+            }
+            click = now;
+            continue;
+        }
+        apollo_audio_pump(rate);
+        if (apollo_audio_seq() != seq)
+            *since = now_ms();
+        now = now_ms();
+        if (apollo_audio_seq() == seq && (ULONG)(now - look) < 15)
+            continue;
+        if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+            ok = FALSE;
+            break;
+        }
+        stop = audio_incoming(l, acc, acc_n);
+        if (stop) {
+            if (stop < 0)
+                ok = FALSE;
+            break;
+        }
+        if (*since && (ULONG)(now - *since) > 600)
+            break;
+        if (*out_len || apollo_audio_pending() >= 4) {
+            if (!audio_push(l, out, out_len, out_sent, *rate, 16384)) {
+                ok = FALSE;
+                break;
+            }
+            if (!plain) {
+                SetSignal(0, SIGBREAKF_CTRL_D);
+                audio_wait = 1;
+                SetTaskPri(me, 3);
+                got = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D);
+                audio_wait = 0;
+                if (got & SIGBREAKF_CTRL_C) {
+                    ok = FALSE;
+                    break;
+                }
+            }
+        }
+        now = now_ms();
+        if ((ULONG)(now - click) > 200) {
+            if (plain && nap) {
+                if (!yield_us(nap_port, nap, 3000)) {
+                    ok = FALSE;
+                    break;
+                }
+            } else {
+                SetTaskPri(me, 3);
+                Delay(1);
+            }
+            click = now_ms();
+            now = click;
+        }
+        look = now_ms();
+        SetTaskPri(me, 5);
+    }
+    yield_close(nap_port, nap);
+    audio_wait = 0;
+    audio_task = NULL;
+    audio_hold = 0;
+    SetTaskPri(me, pri);
+    return ok;
+}
+
+/* What is already queued, up to a few halves. More than that in one wake
+ * would sit on the picture's socket. A full window stops the burst. */
+static BOOL audio_push(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate,
+                       ULONG budget)
+{
+    LONG n;
+
+    for (;;) {
+        if (*out_sent < *out_len) {
+            ULONG before = *out_sent;
+
+            if (!audio_send_some(l, out, out_sent, *out_len))
+                return FALSE;
+            if (*out_sent == before)
+                return TRUE;
+            if (*out_sent >= *out_len)
+                *out_len = *out_sent = 0;
+            continue;
+        }
+        if (budget < 4 || apollo_audio_pending() < 4)
+            return TRUE;
+        n = apollo_audio_take(out + 8, 4096);
+        if (n < 4)
+            return TRUE;
+        be32(out, rate);
+        be32(out + 4, (ULONG)n);
+        *out_len = 8 + (ULONG)n;
+        *out_sent = 0;
+        budget = (ULONG)n >= budget ? 0 : budget - (ULONG)n;
+    }
+}
+
+/* Everything copied during the tone. A full window waits one vblank and
+ * tries again, so a slow reader does not throw the rest away. */
+static BOOL audio_drain(struct link *l, UBYTE *out, ULONG *out_len, ULONG *out_sent, ULONG rate)
+{
+    ULONG stalls = 0;
+
+    for (;;) {
+        ULONG pending = apollo_audio_pending();
+        ULONG sent = *out_sent;
+
+        if (!audio_push(l, out, out_len, out_sent, rate, 16384))
+            return FALSE;
+        if (!*out_len && apollo_audio_pending() < 4)
+            return TRUE;
+        if (*out_sent == sent && apollo_audio_pending() == pending) {
+            if (++stalls > 80)
+                return TRUE;
+            if (!audio_idle(NULL))
+                return FALSE;
+        } else
+            stalls = 0;
+    }
+}
+
+/* AUDIO with arg 1. Bytes follow the status byte until arg 2 arrives:
+ * u32 rate, u32 length, then that many s16le bytes. Length 0 is a keepalive.
+ * Length 0xffffffff ends the stream. The screen connection is not involved.
+ * Each finished half is sent once, in the order the DAC played it. */
+static BOOL c_audio_stream(struct link *l)
+{
+    UBYTE out[8 + 4096], acc[10];
+    ULONG out_len = 0, out_sent = 0, acc_n = 0, rate = 0, spins = 0, since = 0;
+    BOOL ok = TRUE;
+
+    if (!apollo_audio_claim())
+        return c_fail(l, 1, "audio is already streaming");
+    if (!l_send(l, "\0", 1, IO_SECONDS)) {
+        apollo_audio_release();
+        return FALSE;
+    }
+    while (ok) {
+        int stop;
+        ULONG seq;
+
+        stop = audio_incoming(l, acc, &acc_n);
+        if (stop < 0) {
+            ok = FALSE;
+            break;
+        }
+        if (stop > 0) {
+            ULONG stalls = 0;
+
+            while (ok && out_sent < out_len) {
+                ULONG before = out_sent;
+
+                ok = audio_send_some(l, out, &out_sent, out_len);
+                if (ok && out_sent == before) {
+                    if (++stalls > 50) {
+                        ok = FALSE;
+                        break;
+                    }
+                    if (!audio_idle(NULL))
+                        ok = FALSE;
+                }
+            }
+            if (ok) {
+                be32(out, 0);
+                be32(out + 4, 0xFFFFFFFFUL);
+                ok = l_send(l, out, 8, IO_SECONDS);
+            }
+            break;
+        }
+        seq = apollo_audio_seq();
+        if (!since) {
+            if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) {
+                ok = FALSE;
+                break;
+            }
+            ULONG burst = 0;
+
+            while (burst < 4000 && apollo_audio_seq() == seq) {
+                apollo_audio_pump(&rate);
+                burst++;
+            }
+            if (apollo_audio_seq() != seq)
+                since = now_ms();
+            else {
+                if (++spins >= 10) {
+                    be32(out, rate);
+                    be32(out + 4, 0);
+                    out_len = 8;
+                    out_sent = 0;
+                    spins = 0;
+                    ok = audio_send_some(l, out, &out_sent, out_len);
+                    if (out_sent >= out_len)
+                        out_len = out_sent = 0;
+                }
+                if (ok && !audio_idle(NULL))
+                    ok = FALSE;
+                continue;
+            }
+        }
+        spins = 0;
+        if (!audio_follow(l, acc, &acc_n, &rate, &since, out, &out_len, &out_sent))
+            ok = FALSE;
+        if (ok && !audio_drain(l, out, &out_len, &out_sent, rate))
+            ok = FALSE;
+        if (since && (ULONG)(now_ms() - since) > 300) {
+            since = 0;
+            apollo_audio_breathe();
+        }
+    }
+    apollo_audio_release();
+    return ok;
+}
+
+/* AUDIO is its own answer, so a frame on the screen connection is not held up.
+ * Nothing is read until a client sends the command. */
+static BOOL c_audio(struct link *l, UWORD ms)
+{
+    UBYTE *buf, head[9];
+    ULONG rate = 48000;
+    LONG n;
+    BOOL ok;
+
+    if (!(buf = AllocVec(48000, MEMF_ANY)))
+        return c_fault(l, ERROR_NO_FREE_STORE);
+    n = apollo_audio(buf, 48000, &rate, ms);
+    if (n < 0)
+        n = 0;
+    head[0] = 0;
+    be32(head + 1, rate);
+    be32(head + 5, (ULONG)n);
+    ok = l_send(l, head, 9, IO_SECONDS) && (n == 0 || l_send(l, buf, n, IO_SECONDS));
+    FreeVec(buf);
+    return ok;
+}
+
+#endif
 static BOOL chan_command(struct link *l, const UBYTE *c)
 {
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
@@ -8320,14 +8939,24 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
         return c_cpu(l, y, w);
     case CMD_DRAG:  /* window as hex in the name; arg pattern, y steps, w pixels */
         return c_drag(l, c[1], x, y, w);
+#ifndef AMIGENT_APOLLO
     case CMD_EMU68:  /* c[1]: 0 info, 2 counters, 1 set (reg, value, mask longs in x bytes) */
         return c_emu68(l, c[1], x);
+#endif
     case CMD_QUIET:  /* the monitor draws nothing for y seconds; 0 ends it */
         quiet_monitor(y);
         return c_ok(l);
     case CMD_PEEK:  /* address as hex in the name, length in w:h */
         mon_say('C', "read memory", NULL);
         return c_peek(l, x, (ULONG)w << 16 | h);
+#ifdef AMIGENT_APOLLO
+    case CMD_AUDIO:
+        if (c[1] & 1)
+            return c_audio_stream(l);
+        if (c[1] & 2)
+            return c_ok(l); /* stop arrived with no stream on this channel */
+        return c_audio(l, y);
+#endif
     case CMD_PUT:  /* these carry data; take it so the next request lines up */
         if (!l_skip(l, (ULONG)w << 16 | h, IO_SECONDS))
             return FALSE;
@@ -8340,7 +8969,7 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     return c_fail(l, 1, "not on a command channel");
 }
 
-static void __saveds channel_main(void)
+static void AMIGENT_SAVEDS channel_main(void)
 {
     struct channel *c;
     struct link l;
@@ -8802,6 +9431,11 @@ static BOOL ssl_write_all(SSL *ssl, const UBYTE *buf, LONG n)
         buf += k;
         n -= k;
     }
+#ifdef AMIGENT_APOLLO
+    /* The music task waits on this signal between halves instead of spinning. */
+    if (audio_wait && audio_task)
+        Signal(audio_task, SIGBREAKF_CTRL_D);
+#endif
     return TRUE;
 }
 
@@ -8849,7 +9483,7 @@ static void pump(struct Library *SocketBase, LONG fd, SSL *ssl, UBYTE *buf)
     SSL_shutdown(ssl);
 }
 
-static void __saveds pump_main(void)
+static void AMIGENT_SAVEDS pump_main(void)
 {
     struct pump *p;
     struct Library *SocketBase;
@@ -8957,7 +9591,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
     struct pump *p = NULL;
     struct Process *proc;
 
-    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, &len)) < 0)
+    if ((fd = accept(listen_fd, (struct sockaddr *)&addr, AMIGENT_SOCKLEN(&len))) < 0)
         return;
     Forbid();
     full = tls_pumps >= TLS_PUMPS;
@@ -8991,7 +9625,7 @@ static void tls_accept(struct Library *SocketBase, LONG listen_fd, SSL_CTX *ctx)
 }
 
 /* Opens AmiSSL; listens while TLS_FILE is there, and reloads it when it changes. */
-static void __saveds tls_main(void)
+static void AMIGENT_SAVEDS tls_main(void)
 {
     struct Library *SocketBase;
     SSL_CTX *ctx = NULL;
@@ -9610,21 +10244,21 @@ static void tool_types(struct WBStartup *wb, UWORD *port)
         old = CurrentDir(arg->wa_Lock);
         if ((icon = GetDiskObject(arg->wa_Name))) {
             tt = (STRPTR *)icon->do_ToolTypes;
-            if ((v = FindToolType(tt, "PORT")) && StrToLong(v, &n) > 0)
+            if ((v = FindToolType((CONST_STRPTR *)tt, "PORT")) && StrToLong(v, &n) > 0)
                 *port = n;
-            if (FindToolType(tt, "SETUP"))
+            if (FindToolType((CONST_STRPTR *)tt, "SETUP"))
                 setup_mode = TRUE;
-            if (FindToolType(tt, "QUIET"))
+            if (FindToolType((CONST_STRPTR *)tt, "QUIET"))
                 quiet = TRUE;
-            if (FindToolType(tt, "TLSONLY"))
+            if (FindToolType((CONST_STRPTR *)tt, "TLSONLY"))
                 tls_only = TRUE;
-            if (FindToolType(tt, "NOTEXT"))
+            if (FindToolType((CONST_STRPTR *)tt, "NOTEXT"))
                 no_text = TRUE;
-            if (FindToolType(tt, "NODEBUG"))
+            if (FindToolType((CONST_STRPTR *)tt, "NODEBUG"))
                 no_debug = TRUE;
-            if (FindToolType(tt, "ALLOWPOKE"))
+            if (FindToolType((CONST_STRPTR *)tt, "ALLOWPOKE"))
                 allow_poke = TRUE;
-            if ((v = FindToolType(tt, "KEY")))
+            if ((v = FindToolType((CONST_STRPTR *)tt, "KEY")))
                 set_key_file((const char *)v);
             FreeDiskObject(icon);
         }
