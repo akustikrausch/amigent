@@ -480,6 +480,7 @@ else.
 | 45 | CPU | | y = seconds (1-60), w = milliseconds between samples (2-1000) | | text, see [probes](#probes) |
 | 46 | DRAG | 0 zigzag, 1 jumps | x = window length, y = steps (2-512), w = pixels a step (1-64) | window address as hex text | text, see [probes](#probes) |
 | 47 | QUIET | | y = seconds, 0 to end | | amigent-monitor draws nothing meanwhile |
+| 48 | AUDIO | 0 one shot, 1 stream, 2 stop | y = milliseconds, at most 200, for a one shot | | Apollo build only. One shot: status, `u32 rate`, `u32 length`, s16le stereo. A stream pushes the same 8-byte headers until length `0xffffffff`. `audio=1` in SYSINFO. Opcode 49 is reserved and is not assigned. |
 
 PING and [PAUSE](#pause) work on a channel too. Other screen commands (1-18) get status `1`
 and the text `not on a command channel`; for PUT, RUN and AUTH the service first

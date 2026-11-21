@@ -371,6 +371,8 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 #folders li.file span { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 [hidden] { display: none !important; }
+/* Hear must not flash before JS: keep invisible while the hidden attribute is set. */
+#hear[hidden] { display: none !important; }
 
 .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .buttons button { min-width: 96px; }

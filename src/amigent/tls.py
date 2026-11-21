@@ -37,6 +37,15 @@ def wanted(host: str) -> bool:
     return os.environ.get("AMIGENT_TLS", "auto").lower() != "off" and pinned(host).exists()
 
 
+TLS_UNAVAILABLE_TEXT = (
+    "amigentd accepts only encrypted connections, but its TLS port is not available. "
+    "The plain connection was closed before any key was sent."
+)
+TLS_HANDSHAKE_TEXT = (
+    "amigentd's TLS handshake failed. The connection was not retried in the clear."
+)
+
+
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     """TLS over sock; the pinned certificate gets in, nobody else."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

@@ -43,6 +43,8 @@
     </button>
   </div>
   <div class="tools">
+    <!-- Hear stays hidden until an active Apollo connection reports audio=1 (protocol >= 6). -->
+    <button id="hear" class="icon" type="button" hidden aria-pressed="false" aria-label="Hear the Amiga" title="Hear the Amiga">&#9834;</button>
     <button id="fit" class="icon" aria-pressed="true" data-i18n-label="fit"><svg><use href="#i-fit"/></svg></button>
     <button id="fullscreen" class="icon" data-i18n-label="fullscreen"><svg><use href="#i-full"/></svg></button>
     <button id="shot" class="icon" data-i18n-label="screenshot"><svg><use href="#i-shot"/></svg></button>

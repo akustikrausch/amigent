@@ -245,7 +245,8 @@ UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "am
                "amiga_locks", "amiga_cpu", "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
                "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
                "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text",
-               "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log"}
+               "amiga_tasks", "amiga_gurus", "amiga_state", "amiga_screen_diff", "amiga_debug_log",
+               "amiga_listen"}
 
 
 def _amiga_name() -> str:
@@ -2805,6 +2806,67 @@ def main() -> None:
         raise SystemExit("no Amiga known yet: run amigent-setup, or set AMIGENT_HOST")
     mcp.run()
 
+
+def _listen_seconds(seconds) -> float:
+    """The clip length the tool accepts: a number from a fifth of a second to two."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    value = float(seconds)
+    if not 0.2 <= value <= 2.0:
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    return value
+
+
+def _listen_clip(seconds: float) -> tuple[int, bytes]:
+    """Gather up to seconds of the Apollo mix. Opcode 48, not LOADED."""
+    from .channel import pcm_wav
+    deadline = time.monotonic() + max(seconds, 0.4) * 12
+    chunks: list[bytes] = []
+    rate = 0
+    last = b""
+    want = int(seconds * 48000 * 4)
+    while time.monotonic() < deadline and sum(len(c) for c in chunks) < want:
+        got_rate, pcm = _with_ctl(lambda: ctl.audio(200))
+        if pcm and pcm != last:
+            if rate and got_rate != rate:
+                break
+            rate = got_rate or rate
+            last = pcm
+            chunks.append(pcm)
+            if rate:
+                want = int(seconds * rate * 4)
+            continue
+        time.sleep(0.002)
+    pcm = b"".join(chunks)
+    return rate, pcm_wav(pcm, rate) if pcm and rate else b""
+
+
+def _audio_result(wav: bytes):
+    """An MCP audio block, from whichever module this sdk version exports it."""
+    try:
+        from mcp.server.fastmcp import Audio as McpAudio
+    except ImportError:
+        from mcp.server.fastmcp.utilities.types import Audio as McpAudio
+    return McpAudio(data=wav, format="wav")
+
+
+@mcp.tool()
+def amiga_listen(seconds: float = 1.0) -> list:
+    """Hear what an AHI program is playing on ApolloOS.
+
+    A short clip of the mix arne.audio is sending to the DAC. Nothing comes
+    back when the Amiga is quiet, or when the sound is not going through AHI.
+    seconds is from 0.2 to 2. This is opcode 48, not LOADED. The returned
+    count is bytes received from the daemon, not a claim that they were heard.
+    """
+    seconds = _listen_seconds(seconds)
+    info = _with_ctl(ctl.sysinfo)
+    if info.get("audio") != "1":
+        return ["this Amiga has no AHI mix to hear"]
+    rate, wav = _listen_clip(seconds)
+    if not wav:
+        return ["nothing is playing through AHI"]
+    return [f"heard {len(wav) - 44} bytes at {rate} Hz", _audio_result(wav)]
 
 if __name__ == "__main__":
     main()
