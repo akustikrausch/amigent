@@ -90,6 +90,10 @@
  "folder_error": "a mappa nem olvasható",
  "about_system": "Rendszer",
  "about_cpu": "Processzor",
+ "about_daemon": "Démon",
+ "about_protocol": "Protokoll",
+ "about_daemon_cpu": "Démon CPU",
+ "about_capabilities": "Képességek",
  "about_memory": "Memória",
  "about_network": "Hálózati verem",
  "about_volumes": "Kötetek",
@@ -135,5 +139,7 @@
  "pause_15": "15 perc",
  "paused": "A kép szünetel az Amigán, még {time}. Az egér és a billentyűk továbbra is működnek.",
  "resume": "Folytatás",
- "pause_failed": "A szüneteltetés nem sikerült"
+ "pause_failed": "A szüneteltetés nem sikerült",
+ "not_reported": "Nincs jelentés",
+ "named_file": "nevezett fájl"
 }

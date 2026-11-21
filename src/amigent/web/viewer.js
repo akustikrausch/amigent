@@ -157,6 +157,21 @@
     const memory = t("mem_line", { chip: bytes(info.chip_free), fast: bytes(info.fast_free) });
     $("about-system").textContent = system || "–";
     $("about-cpu").textContent = cpu || "–";
+    const daemon = $("about-daemon");
+    if (daemon) {
+      const family = info.daemon_family || t("not_reported");
+      const version = info.daemon_version || t("not_reported");
+      // Family comes from the file SYSINFO named; after an update that file may
+      // already be the replacement while the connected process is still the old one.
+      const identity = info.daemon_identity || t("not_reported");
+      daemon.textContent = identity === "named file"
+        ? `${family} (${t("named_file")}) · ${version}`
+        : `${family} · ${version}`;
+      $("about-protocol").textContent = info.daemon_protocol ? String(info.daemon_protocol) : t("not_reported");
+      $("about-daemon-cpu").textContent = info.daemon_target || t("not_reported");
+      const caps = info.daemon_capabilities || [];
+      $("about-daemon-caps").textContent = caps.length ? caps.join(", ") : t("not_reported");
+    }
     $("about-memory").textContent = memory;
     $("about-tcp").textContent = info.tcp ? `bsdsocket.library ${info.tcp}` : "–";
     const list = $("about-volumes");

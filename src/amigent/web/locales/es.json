@@ -90,6 +90,10 @@
  "folder_error": "no se puede leer la carpeta",
  "about_system": "Sistema",
  "about_cpu": "CPU",
+ "about_daemon": "Demonio",
+ "about_protocol": "Protocolo",
+ "about_daemon_cpu": "CPU del demonio",
+ "about_capabilities": "Capacidades",
  "about_memory": "Memoria",
  "about_network": "Pila de red",
  "about_volumes": "Volúmenes",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Imagen en pausa en el Amiga, quedan {time}. El ratón y las teclas siguen funcionando.",
  "resume": "Reanudar",
- "pause_failed": "No se pudo pausar"
+ "pause_failed": "No se pudo pausar",
+ "not_reported": "No informado",
+ "named_file": "archivo nombrado"
 }

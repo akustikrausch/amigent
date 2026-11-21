@@ -90,6 +90,10 @@
  "folder_error": "Ordner nicht lesbar",
  "about_system": "System",
  "about_cpu": "CPU",
+ "about_daemon": "Daemon",
+ "about_protocol": "Protokoll",
+ "about_daemon_cpu": "Daemon-CPU",
+ "about_capabilities": "Fähigkeiten",
  "about_memory": "Speicher",
  "about_network": "Netzwerk-Stack",
  "about_volumes": "Laufwerke",
@@ -135,5 +139,7 @@
  "pause_15": "15 Min.",
  "paused": "Bild auf dem Amiga angehalten, noch {time}. Maus und Tasten gehen weiter.",
  "resume": "Fortsetzen",
- "pause_failed": "Anhalten fehlgeschlagen"
+ "pause_failed": "Anhalten fehlgeschlagen",
+ "not_reported": "Nicht gemeldet",
+ "named_file": "benannte Datei"
 }

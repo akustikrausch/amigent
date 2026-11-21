@@ -90,6 +90,10 @@
  "folder_error": "kansiota ei voi lukea",
  "about_system": "Järjestelmä",
  "about_cpu": "Suoritin",
+ "about_daemon": "Demoni",
+ "about_protocol": "Protokolla",
+ "about_daemon_cpu": "Demonin CPU",
+ "about_capabilities": "Ominaisuudet",
  "about_memory": "Muisti",
  "about_network": "Verkkopino",
  "about_volumes": "Taltiot",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Kuva keskeytetty Amigassa, {time} jäljellä. Hiiri ja näppäimet toimivat edelleen.",
  "resume": "Jatka",
- "pause_failed": "Keskeytys epäonnistui"
+ "pause_failed": "Keskeytys epäonnistui",
+ "not_reported": "Ei ilmoitettu",
+ "named_file": "nimettu tiedosto"
 }

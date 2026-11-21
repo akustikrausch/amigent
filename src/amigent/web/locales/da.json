@@ -90,6 +90,10 @@
  "folder_error": "kan ikke læse mappen",
  "about_system": "System",
  "about_cpu": "Processor",
+ "about_daemon": "Daemon",
+ "about_protocol": "Protokol",
+ "about_daemon_cpu": "Daemon-CPU",
+ "about_capabilities": "Funktioner",
  "about_memory": "Hukommelse",
  "about_network": "Netværksstak",
  "about_volumes": "Drev",
@@ -135,5 +139,7 @@
  "pause_15": "15 min.",
  "paused": "Billedet er sat på pause på Amigaen, {time} tilbage. Mus og taster virker stadig.",
  "resume": "Fortsæt",
- "pause_failed": "Pause mislykkedes"
+ "pause_failed": "Pause mislykkedes",
+ "not_reported": "Ikke rapporteret",
+ "named_file": "navngivet fil"
 }

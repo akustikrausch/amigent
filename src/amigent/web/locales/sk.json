@@ -90,6 +90,10 @@
  "folder_error": "priečinok nemožno čítať",
  "about_system": "Systém",
  "about_cpu": "Procesor",
+ "about_daemon": "Démon",
+ "about_protocol": "Protokol",
+ "about_daemon_cpu": "CPU démona",
+ "about_capabilities": "Schopnosti",
  "about_memory": "Pamäť",
  "about_network": "Sieťový zásobník",
  "about_volumes": "Zväzky",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Obraz na Amige pozastavený, zostáva {time}. Myš a klávesy fungujú ďalej.",
  "resume": "Pokračovať",
- "pause_failed": "Pozastavenie zlyhalo"
+ "pause_failed": "Pozastavenie zlyhalo",
+ "not_reported": "Neuvedené",
+ "named_file": "pomenovaný súbor"
 }

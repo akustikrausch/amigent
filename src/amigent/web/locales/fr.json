@@ -90,6 +90,10 @@
  "folder_error": "dossier illisible",
  "about_system": "Système",
  "about_cpu": "Processeur",
+ "about_daemon": "Démon",
+ "about_protocol": "Protocole",
+ "about_daemon_cpu": "CPU du démon",
+ "about_capabilities": "Capacités",
  "about_memory": "Mémoire",
  "about_network": "Pile réseau",
  "about_volumes": "Volumes",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Image en pause sur l'Amiga, encore {time}. La souris et le clavier fonctionnent toujours.",
  "resume": "Reprendre",
- "pause_failed": "Échec de la pause"
+ "pause_failed": "Échec de la pause",
+ "not_reported": "Non signalé",
+ "named_file": "fichier nommé"
 }

@@ -90,6 +90,10 @@
  "folder_error": "kan inte läsa mappen",
  "about_system": "System",
  "about_cpu": "Processor",
+ "about_daemon": "Demon",
+ "about_protocol": "Protokoll",
+ "about_daemon_cpu": "Demon-CPU",
+ "about_capabilities": "Funktioner",
  "about_memory": "Minne",
  "about_network": "Nätverksstack",
  "about_volumes": "Volymer",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Bilden är pausad på Amigan, {time} kvar. Mus och tangenter fungerar fortfarande.",
  "resume": "Fortsätt",
- "pause_failed": "Pausen misslyckades"
+ "pause_failed": "Pausen misslyckades",
+ "not_reported": "Ej rapporterat",
+ "named_file": "namngiven fil"
 }

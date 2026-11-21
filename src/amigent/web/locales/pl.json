@@ -90,6 +90,10 @@
  "folder_error": "nie można odczytać katalogu",
  "about_system": "System",
  "about_cpu": "Procesor",
+ "about_daemon": "Demon",
+ "about_protocol": "Protokół",
+ "about_daemon_cpu": "CPU demona",
+ "about_capabilities": "Możliwości",
  "about_memory": "Pamięć",
  "about_network": "Stos sieciowy",
  "about_volumes": "Woluminy",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Obraz wstrzymany na Amidze, pozostało {time}. Mysz i klawisze działają dalej.",
  "resume": "Wznów",
- "pause_failed": "Nie udało się wstrzymać"
+ "pause_failed": "Nie udało się wstrzymać",
+ "not_reported": "Nie zgłoszono",
+ "named_file": "nazwany plik"
 }

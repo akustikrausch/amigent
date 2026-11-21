@@ -90,6 +90,10 @@
  "folder_error": "impossibile leggere la cartella",
  "about_system": "Sistema",
  "about_cpu": "CPU",
+ "about_daemon": "Demone",
+ "about_protocol": "Protocollo",
+ "about_daemon_cpu": "CPU del demone",
+ "about_capabilities": "Capacità",
  "about_memory": "Memoria",
  "about_network": "Stack di rete",
  "about_volumes": "Volumi",
@@ -135,5 +139,7 @@
  "pause_15": "15 min",
  "paused": "Immagine in pausa sull'Amiga, mancano {time}. Mouse e tasti funzionano ancora.",
  "resume": "Riprendi",
- "pause_failed": "Pausa non riuscita"
+ "pause_failed": "Pausa non riuscita",
+ "not_reported": "Non segnalato",
+ "named_file": "file nominato"
 }
