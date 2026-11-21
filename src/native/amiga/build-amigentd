@@ -1,10 +1,14 @@
 .KEY SOURCE/K,TO/K,CPU/K,DEVPACK/K,DEFS/K
-.DEF SOURCE amigentd.c
+.DEF SOURCE daemon/amigentd.c
 .DEF TO amigentd
 .DEF CPU 68020
 .DEF DEVPACK SYS:DevPack
 ; Builds amigentd on the Amiga with vbcc and the SDKs from AmiKit's DevPack.
-; Run it in the folder with amigentd.c; DEVPACK names the DevPack folder.
+; Run it with the current directory set to src/native/amiga (this script's
+; folder). SOURCE defaults to daemon/amigentd.c. DEVPACK names the DevPack
+; folder. CPU 68000 TO amigentd.000 makes the 68000 build.
+; Packaged release binaries stay under src/amigent/amiga/bin/ and are unchanged
+; by this script.
 FailAt 21
 Stack 65536
 Assign VBCC: <DEVPACK>/vbcc

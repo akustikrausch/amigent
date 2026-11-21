@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "amiga" / "amigentd.c"
+SOURCE = ROOT / "src/native/amiga/daemon/amigentd.c"
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +42,7 @@ def run(exe, *args, data: bytes) -> bytes:
 
 def samples():
     rnd = random.Random(5)
-    text = (ROOT / "amiga" / "amigentd.c").read_bytes()[:200_000]
+    text = SOURCE.read_bytes()[:200_000]
     yield "empty", b""
     yield "one", b"x"
     yield "text", text

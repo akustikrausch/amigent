@@ -400,7 +400,7 @@ what is missing and leaves everything else unchanged.
 [`scripts/make_icon.py`](../scripts/make_icon.py) creates a desktop icon for it.
 A small module per program in `repair.d` restores installed programs, their
 settings and menu entries; see
-[`amiga/repair.d/example.repair.txt`](../amiga/repair.d/example.repair.txt).
+[`src/native/amiga/examples/repair.d/example.repair.txt`](../src/native/amiga/examples/repair.d/example.repair.txt).
 
 ## Settings
 
@@ -453,15 +453,17 @@ Keep the Amiga in your home network and do not forward its ports.
 ## Building amigentd
 
 vbcc and the NDK are needed; AmiKit's DevPack includes both. The AmigaDOS
-script [`amiga/build-amigentd`](../amiga/build-amigentd) builds it on the Amiga
-in the folder with `amigentd.c`; `CPU 68000 TO amigentd.000` makes the 68000
+script [`src/native/amiga/build-amigentd`](../src/native/amiga/build-amigentd) builds it on the Amiga
+from `src/native/amiga` (SOURCE defaults to `daemon/amigentd.c`); `CPU 68000 TO amigentd.000` makes the 68000
 build, `DEVPACK Work:DevPack` points it to another DevPack folder. `scripts/make_release.py` packs the
 archive with LhA on the Amiga. Tests for the PC side: `python3 -m pytest -q`.
 
 A cross compiler on the PC works too: `m68k-amigaos-gcc -O2 -m68020 -noixemul -s
--o amigentd amiga/amigentd.c` (checked with GCC 16 from the
+-o amigentd src/native/amiga/daemon/amigentd.c` (checked with GCC 16 from the
 `amigadev/crosstools:m68k-amigaos` Docker image; `-m68000` for the 68000
-build). The released binaries are vbcc's.
+build). The released binaries are vbcc's and stay in `src/amigent/amiga/bin/`.
+
+When the separate `amiga` GitHub Actions workflow (upstream PR #26) is adopted, update its path filters and compile lines from `amiga/**` / `amiga/amigentd.c` to `src/native/amiga/**` / `src/native/amiga/daemon/amigentd.c` (and the matching tools paths). The released package binaries remain under `src/amigent/amiga/bin/`.
 
 ## Translations
 

@@ -6761,7 +6761,7 @@ static BOOL c_poke(struct link *l, UWORD len, ULONG n)
 
 /* ---- trace: tracepoints in a running program ----------------------------
  * A tracepoint puts TRAP #15 over one instruction of a program's code and
- * makes our trap handler (amiga/trapstub.s) that task's tc_TrapCode. When the
+ * makes our trap handler (src/native/amiga/daemon/trapstub.s) that task's tc_TrapCode. When the
  * program gets there, the handler keeps the registers and a bit of the stack,
  * puts the instruction back and lets the program go on as if nothing
  * happened: it fires once, and the program never stops. */

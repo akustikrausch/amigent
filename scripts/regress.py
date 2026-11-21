@@ -15,8 +15,8 @@ meanwhile.
 --report    also write the results as Markdown to FILE
 --only      comma separated check names, e.g. files,typing
 --pointer   also run scripts/pointer_test.py with this test program
-            (amiga/pointer-test.c, built on the Amiga)
---kprintf   a program that writes through RawPutChar (amiga/kprintf-test.c,
+            (tests/native/amiga/pointer-test.c, built on the Amiga)
+--kprintf   a program that writes through RawPutChar (tests/native/amiga/kprintf-test.c,
             built for the Amiga), here or on the Amiga, for the debug check
 --aminet    a small Aminet archive to install into RAM:amigent-regress
 
@@ -188,7 +188,7 @@ class Run:
 
     def trace(self):
         if not self.args.trace:
-            return "skip: give --trace with amiga/trace-test built for the Amiga (on a fast CPU with a loop count, e.g. \"RAM:trace-test 15000000\")"
+            return "skip: give --trace with tests/native/amiga/trace-test built for the Amiga (on a fast CPU with a loop count, e.g. \"RAM:trace-test 15000000\")"
         import re
         said = self.s.amiga_job(self.args.trace, wait=3)
         number = int(said.split()[1])

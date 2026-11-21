@@ -608,7 +608,7 @@ started with `ALLOWPOKE` (or that tool type).
 
 A tracepoint puts `TRAP #15` over the instruction at the address, which must
 be in the code (a hunk) of a running process other than amigentd, and makes
-amigentd's trap handler (`amiga/trapstub.s`, copied into memory of its own,
+amigentd's trap handler (`src/native/amiga/daemon/trapstub.s`, copied into memory of its own,
 one per task) that process's `tc_TrapCode`; the earlier one is kept and gets
 every other trap. When the process gets there, the handler keeps D0-D7, A0-A6,
 its stack pointer, SR and PC and the top 8 longs of the stack, puts the

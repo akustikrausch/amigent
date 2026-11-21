@@ -3,7 +3,7 @@
 SlowLink is a TCP proxy that squeezes each direction to a byte rate and adds a
 one-way delay, with little buffering, so a sender blocks as amigentd does on a
 plipbox. FakeAmiga speaks the amigentd screen protocol (docs/PROTOCOL.md) with
-the same tile bookkeeping as amiga/amigentd.c: a reference picture per client,
+the same tile bookkeeping as src/native/amiga/daemon/amigentd.c: a reference picture per client,
 reads that go stale after input or half a second, a background reader that
 only runs while no command is served, and a cost per tile for reading and
 packing, so a 7 MHz box feels like one.
