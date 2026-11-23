@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP, Image as McpImage
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
 from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
-from . import display, emu68net, noos, serial_log
+from . import capture, display, emu68net, noos, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
 from .errors import AmigaError
@@ -2392,7 +2392,12 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
         if not target["front"]:
             return _shot_behind(target, found, (x, y, width, height), text)
     region = (x, y, width, height)
-    image = _with_screen(lambda: _session().screen.capture(x, y, width or None, height or None))
+    try:
+        image = _with_screen(lambda: _session().screen.capture(x, y, width or None, height or None))
+    except AmigaError:
+        if not _capture_stands_in():
+            raise
+        return _capture_shot(region, "the Amiga's OS is off (" + noos.current(_session().host)["program"] + ")")
     seen, _session().last_look = _session().last_look, time.monotonic()  # after the fetch: what it brought is what was seen
     note = _same_shot(region, seen)
     _session().last_shot = (region, _session().last_look, bool(note))
@@ -2573,6 +2578,8 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
     """
     if paused := _paused_note():
         return paused
+    if _capture_stands_in() and not _answers():
+        return _capture_wait((x, y, width, height), timeout)
     # Tiles count whoever fetched them: an open viewer may have taken them first.
     report, changed = watch.wait_change(_session().screen, bind_callback(_with_screen), _session().lookout,
                                         (x, y, width or None, height or None),
@@ -2580,6 +2587,86 @@ def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
     if changed:
         _session().last_look = time.monotonic()
     return report
+
+
+def _capture_stands_in() -> bool:
+    """A capture device is chosen and a program without the OS runs (#2, #3)."""
+    return bool(noos.current(_session().host) and capture.settings(_session().host)["device"])
+
+
+def _answers() -> bool:
+    try:
+        _with_screen(_session().screen.screens)
+        return True
+    except (AmigaError, OSError, AmigentdError):
+        return False
+
+
+def _capture_crop(image, region: tuple):
+    x, y, w, h = region
+    if region == (0, 0, 0, 0):
+        return image
+    return image.crop((x, y, x + (w or image.width - x), y + (h or image.height - y)))
+
+
+def _capture_shot(region: tuple, why: str) -> list:
+    device = capture.settings(_session().host)["device"]
+    image = _capture_crop(capture.grab(device), region)
+    _session().capture_last = image
+    _session().last_look = time.monotonic()
+    size = image.size
+    image, scale = pictures.fit(image)
+    note = (f"picture from the capture device {device!r}, because {why}: the Amiga's own video "
+            f"output, {size[0]}x{size[1]}, scale {scale:.3f}. Clicks and keys can't reach the Amiga "
+            "meanwhile; its quit key works only on the Amiga's own keyboard")
+    return [note, McpImage(data=pictures.png(image), format="png")]
+
+
+def _capture_wait(region: tuple, timeout: float) -> str:
+    """wait_change on the capture picture, while the OS is off."""
+    device = capture.settings(_session().host)["device"]
+    before = getattr(_session(), "capture_last", None)
+    if before is None:
+        before = _capture_crop(capture.grab(device), region)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        now = _capture_crop(capture.grab(device), region)
+        if now.size != before.size or capture.differs(before, now):
+            _session().capture_last = now
+            return "the capture picture changed (the Amiga's OS is off; amiga_screenshot shows it)"
+        if _answers():
+            return "the Amiga answers again: the program without the OS has quit"
+        time.sleep(1)
+    return f"no change in the capture picture within {timeout:.0f} s"
+
+
+@mcp.tool()
+def amiga_capture(action: str = "status", device: str = "", auto: bool | None = None) -> str | list:
+    """A video capture device for the Amiga's own video output, read with ffmpeg.
+
+    For programs without the OS (WHDLoad) and chipset screens on a separate
+    monitor: amiga_screenshot and amiga_wait_change fall back to it while such a
+    program runs, and the remote desktop can show it. Only for looking, never
+    for input. action: status, devices (lists the capture devices), set
+    (device= a name from devices, a /dev/video path, a video file or a URL;
+    '' removes it; auto= whether the remote desktop switches to it by itself),
+    shot (one picture now).
+    """
+    host = _session().host
+    action = action.strip().lower()
+    if action == "devices":
+        found = capture.devices()
+        return "\n".join(found) if found else "no video capture devices found"
+    if action == "set":
+        now = capture.configure(host, device, auto)
+        return f"capture device {now['device'] or 'none'}, remote desktop switches by itself: {now['auto']}"
+    if action == "shot":
+        return _capture_shot((0, 0, 0, 0), "it was asked for")
+    if action != "status":
+        raise AmigaError("action must be status, devices, set or shot")
+    now = capture.settings(host)
+    return json.dumps({"device": now["device"] or None, "auto": now["auto"],
+                       "ffmpeg": capture.ffmpeg() or None}, indent=1)
 
 
 @mcp.tool()

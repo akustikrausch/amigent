@@ -63,7 +63,7 @@ def test_every_machine_tool_exposes_target_and_shared_tools_do_not(two):
     tools = asyncio.run(server.mcp.list_tools())
     for tool in tools:
         assert ('machine' in tool.inputSchema['properties']) == (tool.name not in server.UNTARGETED)
-    assert len(tools) == 96
+    assert len(tools) == 97
 
 
 def test_actual_mcp_dispatch_runs_two_machines_concurrently(two):

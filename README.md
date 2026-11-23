@@ -219,6 +219,10 @@ All numbers, how they were taken and how to repeat them are in
   JIT settings while the Amiga runs, and changes boot options or updates Emu68
   on the SD card with a backup and a way back. See
   [docs/EMU68.md](https://github.com/akustikrausch/amigent/blob/main/docs/EMU68.md).
+- **A WHDLoad game running?** It switches the Amiga's system off, and the
+  network with it. Amigent says so instead of reporting a crash, and with a USB
+  HDMI capture stick it shows the Amiga's own video output meanwhile. See
+  [Programs without the OS](https://github.com/akustikrausch/amigent/blob/main/docs/GUIDE.md#programs-without-the-os).
 - **After a big OS update**, `amigent-repair` puts back what the update removed.
 - **Safe at home.** A key keeps other computers on the network out, and the
   connection can be encrypted. Don't open the Amiga to the internet.

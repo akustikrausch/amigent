@@ -87,9 +87,13 @@
 <div id="body">
   <main id="stage">
     <canvas id="screen" width="640" height="256" tabindex="0" aria-label="Amiga screen" data-i18n-aria="screen_label"></canvas>
+    <img id="capture-img" alt="" hidden>
     <div class="pills">
       <div id="game-pill" class="pill game" role="status" hidden><i></i><span id="game-pill-text"></span><kbd data-i18n="esc_leaves">Esc leaves</kbd></div>
-      <div id="output-pill" class="pill output" role="status" hidden><i></i><span id="output-text"></span></div>
+      <div id="output-pill" class="pill output" role="status" hidden><i></i><span id="output-text"></span>
+        <button id="output-show" data-i18n="capture_show" hidden>Show it</button></div>
+      <div id="capture-pill" class="pill capture" role="status" hidden><i></i><span id="capture-text"></span>
+        <button id="capture-back" data-i18n="capture_back">Back to amigentd</button></div>
       <div id="paused" class="pill" role="status" hidden>
         <span id="paused-text"></span>
         <button id="resume" data-i18n="resume">Resume</button>
@@ -271,6 +275,8 @@
     <button role="menuitemradio" data-theme-value="light" data-i18n="theme_light">Light</button>
     <button role="menuitemradio" data-theme-value="dark" data-i18n="theme_dark">Dark</button>
   </div>
+  <button role="menuitemcheckbox" id="m-capture-show" aria-checked="false" hidden><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu_show">Show the capture picture</span></button>
+  <button role="menuitem" id="m-capture"><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu">Capture device…</span></button>
   <button role="menuitem" id="m-keys"><svg><use href="#i-keyboard"/></svg><span data-i18n="shortcuts">Keyboard shortcuts</span></button>
   <button role="menuitem" id="m-about"><svg><use href="#i-about"/></svg><span data-i18n="about">About Amigent</span></button>
 </div>
@@ -316,6 +322,21 @@
     <div class="buttons">
       <button value="cancel" data-i18n="cancel" autofocus>Cancel</button>
       <button value="ok" class="destructive" data-i18n="restart_go">Restart</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="capture-dialog" aria-labelledby="capture-title">
+  <form method="dialog">
+    <h3 id="capture-title" data-i18n="capture_title">Capture device</h3>
+    <p class="hint" data-i18n="capture_intro">A USB HDMI capture stick shows the Amiga's own video output here, for programs without the operating system and chipset screens. Only for looking; mouse and keys don't go through it.</p>
+    <label for="capture-device" data-i18n="capture_device">Device</label>
+    <select id="capture-device"></select>
+    <label class="check"><input type="checkbox" id="capture-auto"> <span data-i18n="capture_auto">Switch to it by itself when the picture leaves amigentd</span></label>
+    <p id="capture-error" class="hint" hidden></p>
+    <div class="buttons">
+      <button value="cancel" data-i18n="cancel">Cancel</button>
+      <button id="capture-save" value="save" class="primary" data-i18n="capture_save">Save</button>
     </div>
   </form>
 </dialog>

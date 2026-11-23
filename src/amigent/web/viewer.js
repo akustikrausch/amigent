@@ -179,10 +179,45 @@
       n.quit_key ? t("noos_key", { key: n.quit_key }) : t("noos_key_usual")].join(" ");
   }
 
+  // The capture device for the Amiga's own video output (#3): shown instead of
+  // amigentd's picture when the OS is off or a chipset screen is in front, or on request.
+  let captureCfg = { device: "", auto: true, ffmpeg: false };
+  let captureManual = null;  // the person's own choice until the reason changes
+  let lastOutput = null;
+  let captureReason = "";
+
+  function captureWanted() {
+    if (!captureCfg.device) return false;
+    if (captureManual !== null) return captureManual;
+    return captureCfg.auto && (!!noOs || !!(lastOutput && lastOutput.moved));
+  }
+
+  function paintCapture() {
+    const reasonNow = noOs ? "noos" : lastOutput && lastOutput.moved ? "chipset" : "";
+    if (reasonNow !== captureReason) {
+      captureReason = reasonNow;
+      captureManual = null;
+    }
+    const show = captureWanted();
+    const img = $("capture-img");
+    if (show && img.hidden) img.src = api("/capture.mjpg", { n: Date.now() });
+    if (!show && !img.hidden) img.removeAttribute("src");
+    img.hidden = !show;
+    $("capture-pill").hidden = !show;
+    $("capture-text").textContent = noOs ? t("capture_pill_noos") : t("capture_pill");
+    $("capture-pill").title = noOs ? noOsText(noOs) : "";
+    $("output-show").hidden = !(captureCfg.device && !show && lastOutput && lastOutput.moved);
+    $("m-capture-show").hidden = !captureCfg.device;
+    $("m-capture-show").setAttribute("aria-checked", String(show));
+    showState();
+  }
+
   function showState() {
     const overlay = $("overlay");
     let message = "";
+    const capturing = !$("capture-img").hidden;
     if (!socketOpen) message = t("disconnected");
+    else if (amigaOnline === false && noOs && capturing) message = "";
     else if (amigaOnline === false && noOs) message = t("noos_title");
     else if (amigaOnline === false) message = t("offline");
     else if (amigaOnline === null) message = t("connecting");
@@ -321,6 +356,7 @@
   // Which video output the picture is on (#1): a chipset screen in front of a
   // graphics card leaves the card's monitor; say so once, and keep a pill.
   function showOutput(o, told) {
+    lastOutput = o || null;
     const moved = !!(o && o.moved);
     $("output-pill").hidden = !moved;
     if (!moved) return;
@@ -329,6 +365,11 @@
     const limits = (o.limits || []).map((l) => t(`output_limit_${l}`)).join(" ");
     $("output-pill").title = [t("output_moved", { mode: o.mode || t("output_chipset") }), limits].filter(Boolean).join(" ");
     if (told) toast([t("output_moved", { mode: o.mode || t("output_chipset") }), limits].filter(Boolean).join(" "));
+  }
+
+  function showOutputAndCapture(o, told) {
+    showOutput(o, told);
+    paintCapture();
   }
 
   function onEvent(m) {
@@ -345,8 +386,9 @@
         reason = m.reason || "";
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
-        showOutput(m.output, false);
         noOs = m.no_os || null;
+        if (m.capture) captureCfg = m.capture;
+        showOutputAndCapture(m.output, false);
         if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
         if (m.update) showUpdate(m.update);
         paintUpdate();
@@ -368,11 +410,15 @@
         showScreens(m.screens);
         break;
       case "output":
-        showOutput(m, true);
+        showOutputAndCapture(m, true);
         break;
       case "no_os":
         noOs = m.no_os || null;
-        showState();
+        paintCapture();
+        break;
+      case "capture":
+        captureCfg = m.capture;
+        paintCapture();
         break;
       case "online":
         amigaOnline = m.online;
@@ -953,6 +999,42 @@
   $("try-manage").addEventListener("click", () => window.amigentMachines?.open());
 
   // ---------------------------------------------------------------- restart
+
+  $("capture-back").addEventListener("click", () => { captureManual = false; paintCapture(); canvas.focus(); });
+  $("output-show").addEventListener("click", () => { captureManual = true; paintCapture(); });
+  $("m-capture-show").addEventListener("click", () => {
+    captureManual = $("capture-img").hidden;
+    paintCapture();
+  });
+  $("capture-img").addEventListener("error", () => {
+    if ($("capture-img").hidden) return;
+    toast(t("capture_failed"), true);
+    captureManual = false;
+    paintCapture();
+  });
+
+  $("m-capture").addEventListener("click", async () => {
+    const select = $("capture-device");
+    const error = $("capture-error");
+    select.replaceChildren(new Option(t("capture_none"), ""));
+    $("capture-auto").checked = captureCfg.auto;
+    error.hidden = true;
+    $("capture-dialog").showModal();
+    const reply = await fetch(api("/api/capture", { list: 1 })).catch(() => null);
+    const got = reply && reply.ok ? await reply.json() : { devices: [], error: t("capture_failed") };
+    const names = [...new Set([...(got.devices || []), ...(captureCfg.device ? [captureCfg.device] : [])])];
+    for (const name of names) select.append(new Option(name, name));
+    select.value = captureCfg.device;
+    const problem = got.ffmpeg === false ? t("capture_no_ffmpeg") : got.error || (names.length ? "" : t("capture_no_devices"));
+    error.textContent = problem;
+    error.hidden = !problem;
+  });
+  $("capture-dialog").addEventListener("close", async () => {
+    if ($("capture-dialog").returnValue !== "save") return;
+    const body = JSON.stringify({ device: $("capture-device").value, auto: $("capture-auto").checked });
+    const reply = await fetch(api("/api/capture"), { method: "POST", body }).catch(() => null);
+    if (!reply || !reply.ok) toast(t("capture_failed"), true);
+  });
 
   $("m-restart").addEventListener("click", () => $("restart-dialog").showModal());
   $("restart-dialog").addEventListener("close", () => {

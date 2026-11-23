@@ -287,7 +287,8 @@ starts the old one again.
 | `amiga_clipboard` | read or set the Amiga's clipboard |
 | `amiga_notes`, `amiga_note` | what the agent learned about programs on this Amiga, for next time |
 | `amiga_viewer` | open the remote desktop |
-| `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up |
+| `amiga_restart`, `amiga_power` | restart, and mains power if a smart plug is set up; both ask first while a program without the OS runs |
+| `amiga_capture` | a USB HDMI capture device for the Amiga's own video output (see [Programs without the OS](#programs-without-the-os)) |
 | `amiga_find` | find the Amiga again after its address changed, or set its address |
 
 Gadgets without a readable label, such as GadTools buttons or MUI gadgets, come
@@ -615,6 +616,12 @@ documentation and WarpOS 4.0, and reports from owners are welcome.
 - **Screens.** With two or more open screens, a list in the middle of the toolbar
   shows them and brings the one you pick to the front; it also has *Workbench to
   front* and *Next screen*.
+- **Which output.** With a graphics card, a chipset screen in front (a game, a
+  tracker, SysInfo) moves the picture to the Amiga's own video output; on a
+  PiStorm that is the RGB port, not the Pi's HDMI. The window says so once and
+  keeps a small *On the Amiga's video output* note with the screen mode while it
+  lasts. The AI agent hears the same in `amiga_screenshot`, `amiga_screens` and
+  `amiga_status`.
 - **Mouse and keyboard.** Click, drag, right button for menus, mouse wheel.
   Characters are typed through the Amiga's keymap, so umlauts and AltGr
   characters arrive correctly. *Game mode* (tab *Mouse & games*) captures the
@@ -684,6 +691,46 @@ every Mac; what differs per Mac is in `~/.config/amigent/app.json`. The first
 start asks for access to the local network, which it needs to reach the Amiga.
 `scripts/build-mac-app.sh` builds, signs and notarizes it again; without the
 signed app, `--install` builds an unsigned one with the Xcode tools.
+
+## Programs without the OS
+
+WHDLoad installs and most demos switch the operating system off. From then on
+amigentd and the network are gone until the program quits, which to the PC
+looks like a crash. When the AI agent starts WHDLoad or a `.slave`, Amigent
+keeps a note of it:
+
+- tools that lose the connection say that the program took the OS along, which
+  key quits it (read from the slave, otherwise usually F10) and that it has to
+  be pressed on the Amiga's own keyboard;
+- `amiga_restart` and `amiga_power('off')` ask first instead of cutting the
+  power of an Amiga that is busy playing; `force=True` goes ahead;
+- the remote desktop shows what runs and since when, and connects again by
+  itself once amigentd is back.
+
+A program started from the Amiga itself, say from iGame, can't be told this
+way; the connection is just lost.
+
+### A capture device
+
+To see such programs, the Amiga's own video output has to reach the PC. A USB
+HDMI capture stick does that, behind an RGB-to-HDMI converter on a classic
+Amiga. Amigent reads it with [ffmpeg](https://ffmpeg.org), which has to be
+installed (Windows `winget install ffmpeg`, macOS `brew install ffmpeg`, Linux
+the package manager).
+
+Choose the device in the remote desktop under ⋯ → *Capture device…*, or let the
+AI agent do it with `amiga_capture(action="devices")` and
+`amiga_capture(action="set", device=...)`. The device is kept per Amiga.
+
+- The remote desktop switches to the capture picture by itself while a program
+  without the OS runs or a chipset screen is in front, with a note that this is
+  the capture picture; *Back to amigentd* and ⋯ → *Show the capture picture*
+  switch by hand. Mouse and keys don't go through the capture picture.
+- `amiga_screenshot` and `amiga_wait_change` fall back to the capture device
+  while a program without the OS runs, and say so. The agent can then see when
+  a game reached its title screen or quit back to the Workbench.
+
+Without a capture device, the agent can't see programs without the OS.
 
 ## Several Amigas
 

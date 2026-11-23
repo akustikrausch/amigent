@@ -40,6 +40,7 @@ class MachineSession:
         self.gdb = {}
         self.graphics = None  # graphics.Info once amiga_graphics has looked
         self.slow_bus_told = False
+        self.capture_last = None  # the last capture picture the model saw (#3)
 
 
     def refresh_address(self):

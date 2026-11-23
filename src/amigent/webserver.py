@@ -192,6 +192,14 @@ class _Handler(TokenHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if url.path == "/api/capture":
+            try:
+                found = self.viewer.capture_devices() if query.get("list") else []
+            except (AmigaError, OSError) as e:
+                return self._json(200, {**self.viewer.capture_state(), "devices": [], "error": str(e)})
+            return self._json(200, {**self.viewer.capture_state(), "devices": found})
+        if url.path == "/capture.mjpg":
+            return self._capture_stream()
         if url.path == "/api/clients":
             with self.viewer.clients_lock:
                 return self._json(200, {"clients": len(self.viewer.clients)})
@@ -206,7 +214,8 @@ class _Handler(TokenHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if not self._allowed(query) or url.path not in ("/api/upload", "/api/clipboard", "/api/address",
-                                                       "/api/machines", "/api/connect", "/api/update"):
+                                                       "/api/machines", "/api/connect", "/api/update",
+                                                       "/api/capture"):
             return self._reply(403, b"forbidden", "text/plain")
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -230,6 +239,15 @@ class _Handler(TokenHandler):
                 return self._json(200, result)
             except (ValueError, OSError) as e:
                 return self._json(400, {"error": str(e)})
+        if url.path == "/api/capture":
+            try:
+                body = json.loads(data or b"{}")
+                device = body.get("device")
+                auto = body.get("auto")
+                return self._json(200, self.viewer.set_capture(
+                    None if device is None else str(device), None if auto is None else bool(auto)))
+            except (ValueError, AttributeError, OSError) as e:
+                return self._json(400, {"error": str(e)})
         if url.path == "/api/update":
             try:
                 return self._json(200, self.viewer.update_action(data.decode("utf-8", "replace").strip()))
@@ -248,6 +266,31 @@ class _Handler(TokenHandler):
         except (AmigaError, OSError) as e:
             return self._json(502, {"error": str(e)})
         self._json(409 if job.get("exists") else 200, job)
+
+    def _capture_stream(self) -> None:
+        """The capture device as multipart JPEG, which an <img> shows as it comes (#3)."""
+        try:
+            stream = self.viewer.capture_stream()
+            seen, picture = stream.next(0, timeout=10)
+        except (AmigaError, OSError) as e:
+            return self._reply(502, str(e).encode(), "text/plain; charset=utf-8")
+        if not picture:
+            return self._reply(504, (stream.error or "no picture from the capture device").encode(),
+                               "text/plain; charset=utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        try:
+            while picture:
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                 + str(len(picture)).encode() + b"\r\n\r\n" + picture + b"\r\n")
+                self.wfile.flush()
+                seen, picture = stream.next(seen, timeout=10)
+        except OSError:
+            pass  # the page stopped looking
 
     def _websocket(self) -> None:
         key = self.headers.get("Sec-WebSocket-Key")

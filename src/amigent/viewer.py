@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, display, machines, memory, noos, roster, tls, update
+from . import __version__, capture, display, machines, memory, noos, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
@@ -247,6 +247,7 @@ class Viewer:
         self.screen_list: list = []
         self.output: dict = {}
         self.no_os: dict | None = None
+        self._capture: capture.Stream | None = None
         self._system: dict = {}
         self._forget_daemon()
         self.alone_since = time.monotonic()
@@ -296,6 +297,7 @@ class Viewer:
                                 "version": __version__, "amiga": self.amiga,
                                 "update": update.offer(), "update_done": self.update_done,
                                 "screens": self.screen_list, "output": self.output, "no_os": self.no_os,
+                                "capture": self.capture_state(),
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -474,6 +476,34 @@ class Viewer:
         if output != self.output:
             self.output = output
             self.event("output", **output)
+
+    # the capture device for the Amiga's own video output (#3)
+
+    def capture_state(self) -> dict:
+        now = capture.settings(self.host)
+        return {"device": now["device"], "auto": now["auto"], "ffmpeg": bool(capture.ffmpeg())}
+
+    def capture_devices(self) -> list[str]:
+        return capture.devices()
+
+    def set_capture(self, device: str | None, auto: bool | None) -> dict:
+        capture.configure(self.host, device, auto)
+        if self._capture:
+            self._capture.stop()
+            self._capture = None
+        state = self.capture_state()
+        self.event("capture", capture=state)
+        return state
+
+    def capture_stream(self) -> capture.Stream:
+        device = capture.settings(self.host)["device"]
+        if not device:
+            raise AmigaError("no capture device chosen")
+        if not self._capture or self._capture.device != device:
+            if self._capture:
+                self._capture.stop()
+            self._capture = capture.Stream(device)
+        return self._capture
 
     def _graphics(self) -> str:
         """The card's driver, and on a Zorro II card a gentler screen loop (#22)."""

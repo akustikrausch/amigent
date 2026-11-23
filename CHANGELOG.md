@@ -3,6 +3,24 @@
 Versions follow [semver](https://semver.org). The number lives in
 `src/amigent/__init__.py`, everything else reads it from there.
 
+## 1.6.0 (unreleased)
+
+- Amigent says which video output the picture is on. With a graphics card, a
+  chipset screen in front moves the picture to the Amiga's own output (on a
+  PiStorm the RGB port, not HDMI): `amiga_screenshot`, `amiga_screens` and
+  `amiga_status` say so with the screen mode, and the remote desktop shows a
+  note while it lasts. amigentd 1.6.0 adds each screen's mode ID and name to
+  SCREENS (arg `1`); an older one leaves them out. (#1)
+- A program without the OS, such as a WHDLoad install, is no longer taken for a
+  crash. Started by the agent, it leaves a note: a lost connection says what
+  runs and which key quits it, `amiga_restart` and `amiga_power` ask first
+  (`force=True` goes ahead), and the remote desktop shows it instead of
+  "not answering". (#2)
+- An optional USB HDMI capture device for the Amiga's own video output, read
+  with ffmpeg: the remote desktop switches to it for programs without the OS
+  and chipset screens, and `amiga_screenshot` and `amiga_wait_change` fall back
+  to it. `amiga_capture` lists and sets the device. (#3)
+
 ## 1.5.0 (2026-11-23)
 
 ### Updates
