@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP, Image as McpImage
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
 from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
-from . import emu68net, serial_log
+from . import display, emu68net, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
 from .errors import AmigaError
@@ -380,6 +380,8 @@ def amiga_status() -> str:
     report["system"] = _system_facts()
     if info.get("emu68") == "1":  # amigentd 1.5.0 found Emu68: the Pi's health in one line
         _emu68_status(report)
+    if moved := display.where(_screens_or_none() or []):
+        report["display"] = moved
     report.update({"sysinfo": info, "volumes": _with_ctl(_session().ctl.volumes)})
     outdated = pc_outdated(getattr(getattr(_session().ctl, "backend", None), "protocol", 0))
     if outdated:
@@ -2409,7 +2411,9 @@ def _slow_bus_note(region: tuple) -> str:
 
 def _screen_name(s: dict) -> str:
     kind = "graphics card" if s["rtg"] else "chipset"
-    return f"{s['title']!r} ({s['width']}x{s['height']}, {kind}, {s['handle']:#010x})"
+    mode = display.mode_label(s)
+    return (f"{s['title']!r} ({s['width']}x{s['height']}, {kind}{', ' + mode if mode else ''}, "
+            f"{s['handle']:#010x})")
 
 
 def display_note(found: list) -> str:
@@ -2446,6 +2450,8 @@ def display_note(found: list) -> str:
             else:
                 lines.append("the front screen is not in the chipset's view; the chipset output "
                              "shows no Intuition screen")
+        if moved := display.where(found):
+            lines.append(moved)
         card = next((s for s in found if s["rtg"]), None)
         if card:
             lines.append(f"the graphics card, if it has its own monitor, still shows "
@@ -2545,7 +2551,8 @@ def amiga_screens() -> str:
         f"{s['handle']:#010x} {s['width']}x{s['height']}x{s['depth']}"
         f"{' front' if s['front'] else ''}{' workbench' if s['workbench'] else ''}"
         f"{' rtg' if s.get('rtg') else ''}{' ham' if s['ham'] else ''}"
-        f"{' chipset-output' if s.get('chip_shown') else ''} {s['title']!r}" for s in found]
+        f"{' chipset-output' if s.get('chip_shown') else ''} {s['title']!r}"
+        f"{' ' + display.mode_label(s) if display.mode_label(s) else ''}" for s in found]
     if shown := display_note(found):
         lines.append(shown)
     return "\n".join(lines)

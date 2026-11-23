@@ -27,6 +27,7 @@ CMD_AUTH, CMD_CLIENT, CMD_PAUSE = 17, 18, 19
 AIM = 1  # SCREEN_FRONT arg, when SCREENS carries DISPLAY_KNOWN: FRAME_RGB reads that screen
 # SCREENS flags from 1.5.0: what the display shows. See "screens" in PROTOCOL.md.
 CHIP_SHOWN, IN_VIEW, FOREIGN_VIEW, DISPLAY_KNOWN = 16, 32, 0x4000, 0x8000
+MODES_KNOWN = 0x2000  # SCREENS arg 1 (1.6.0): mode ID and name follow each title
 PAUSE_PROTOCOL = 4  # INFO tells the seconds of screen pause left, PAUSE sets them
 RGB_AREA = 512 * 512  # FRAME_RGB answers regions of up to this many pixels
 FRAME_PLANAR = 2 | 4  # FRAME arg bits: planes or chunky tiles, all methods; PROTOCOL.md "planar"
@@ -446,7 +447,10 @@ class Amigentd:
                           "chip_shown": bool(flags & CHIP_SHOWN) if flags & DISPLAY_KNOWN else None,
                           "in_view": bool(flags & IN_VIEW) if flags & DISPLAY_KNOWN else None,
                           "foreign_view": bool(flags & FOREIGN_VIEW) if flags & DISPLAY_KNOWN else None,
-                          "title": (yield size).decode("iso-8859-1")})
+                          "title": (yield size).decode("iso-8859-1") if size else ""})
+            if flags & MODES_KNOWN:
+                mode, n = struct.unpack(">IB", (yield 5))
+                found[-1].update(mode=mode, mode_name=(yield n).decode("iso-8859-1") if n else "")
         return found
 
     def _drive(self, parser):
@@ -750,7 +754,7 @@ class Amigentd:
     def screens(self) -> list[dict]:
         """All Intuition screens, front to back."""
         def call():
-            self._send(CMD_SCREENS)
+            self._send(CMD_SCREENS, 1)  # 1: with the modes; older amigentd ignores it
             return self._drive(self._screens_reply())
 
         self._need(2)
@@ -1016,7 +1020,7 @@ class Pipeline:
         def parse():
             done((yield from self.screen._screens_reply()))
 
-        self._ask("other", parse(), CMD_SCREENS)
+        self._ask("other", parse(), CMD_SCREENS, 1)
 
     def frame(self, x: int, y: int, w: int, h: int, force: bool = False, on_done=None) -> None:
         """Ask for a region; tiles reach the picture as each one lands."""

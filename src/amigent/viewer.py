@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, memory, roster, tls, update
+from . import __version__, display, machines, memory, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
@@ -245,6 +245,7 @@ class Viewer:
         self.ever_joined = False
         self.amiga: dict = {}
         self.screen_list: list = []
+        self.output: dict = {}
         self._system: dict = {}
         self._forget_daemon()
         self.alone_since = time.monotonic()
@@ -293,7 +294,7 @@ class Viewer:
                                 "reason": self.reason,
                                 "version": __version__, "amiga": self.amiga,
                                 "update": update.offer(), "update_done": self.update_done,
-                                "screens": self.screen_list,
+                                "screens": self.screen_list, "output": self.output,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -459,6 +460,10 @@ class Viewer:
         if listing != self.screen_list:
             self.screen_list = listing
             self.event("screens", screens=listing)
+        output = display.state(found)  # which video output the picture is on (#1)
+        if output != self.output:
+            self.output = output
+            self.event("output", **output)
 
     def _graphics(self) -> str:
         """The card's driver, and on a Zorro II card a gentler screen loop (#22)."""

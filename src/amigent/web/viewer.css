@@ -405,6 +405,7 @@ kbd { font: inherit; }
   pointer-events: auto;
 }
 .pill.game { border-color: var(--accent); padding-right: 8px; }
+.pill.output i { width: 8px; height: 8px; border-radius: 2px; background: var(--muted); flex: none; }
 .pill.game i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
 .pill kbd { padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); white-space: nowrap; }
 

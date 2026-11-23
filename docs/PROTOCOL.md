@@ -337,6 +337,13 @@ those, the screen the chipset output shows. A graphics card screen never has
 monitor is visible next to the chipset output. A copper list written straight
 to the hardware leaves `ActiView` alone and does not show here.
 
+SCREENS with arg `1` (from 1.6.0) adds each screen's display mode: `0x2000` is
+set on every screen, and after its title come `u32 mode ID` (as `GetVPModeID`
+gives it) and `u8 name length`, then the name from the display database
+(Latin-1, at most 31 bytes, none if the mode has no name), such as `PAL:HighRes
+Laced` or a graphics card's own. An older amigentd ignores the arg and never sets
+`0x2000`, so a client reads the extra fields only where that bit is set.
+
 SCREEN_FRONT brings the screen with that handle to the front, after checking that
 it is still open. `1` if it isn't. The next FRAME then reads everything fresh.
 The answer comes at once; while a menu is open, Intuition only switches screens

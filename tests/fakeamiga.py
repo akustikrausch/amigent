@@ -315,7 +315,7 @@ class FakeAmiga:
             self.owner = me["client"]
             return self._frame(bool(arg & 1), x, y, w or width, h or height)
         if cmd == 11:
-            return self._screens()
+            return self._screens(arg & 1)
         if cmd == 12 and arg & 1 and self.screen_list is not None:  # aim, from 1.5.0
             handle = x << 16 | y
             me["aim"] = handle if any(s["handle"] == handle for s in self.screen_list) else 0
@@ -332,7 +332,7 @@ class FakeAmiga:
                 return s["picture"]
         return self.picture
 
-    def _screens(self) -> bytes:
+    def _screens(self, modes: bool = False) -> bytes:
         found = self.screen_list
         if found is None:
             w, h = self.picture.size
@@ -341,7 +341,12 @@ class FakeAmiga:
         for s in found:
             w, h = (s.get("picture") or self.picture).size
             title = s["title"].encode("iso-8859-1")
-            out += struct.pack(">IHHHHH", s["handle"], w, h, s.get("depth", 8), s["flags"], len(title)) + title
+            with_mode = modes and "mode" in s  # an older pretend amigentd ignores the arg
+            flags = s["flags"] | (0x2000 if with_mode else 0)
+            out += struct.pack(">IHHHHH", s["handle"], w, h, s.get("depth", 8), flags, len(title)) + title
+            if with_mode:
+                name = s.get("mode_name", "").encode("iso-8859-1")
+                out += struct.pack(">IB", s["mode"], len(name)) + name
         return out
 
     def _frame(self, everything: bool, x, y, w, h) -> bytes:

@@ -31,6 +31,7 @@
 #include <graphics/gfxbase.h>
 #include <graphics/view.h>
 #include <graphics/modeid.h>
+#include <graphics/displayinfo.h>
 #include <graphics/clip.h>
 #include <graphics/layers.h>
 #include <graphics/rastport.h>
@@ -2800,13 +2801,28 @@ static BOOL in_view(struct View *v, struct ViewPort *vp)
     return FALSE;
 }
 
-static BOOL screens(void)
+/* The display database's name of a mode, "PAL:HighRes Laced" or a card's own;
+ * 0 bytes where it has none. Each name is at most 31 characters plus a NUL. */
+static UWORD mode_name(ULONG mode, UBYTE *out)
+{
+    struct NameInfo ni;
+    UWORD n = 0;
+
+    if (mode != INVALID_ID && GetDisplayInfoData(NULL, (UBYTE *)&ni, sizeof(ni), DTAG_NAME, mode) > 0)
+        while (n < DISPLAYNAMELEN - 1 && ni.Name[n] >= ' ')
+            out[n] = ni.Name[n], n++;
+    return n;
+}
+
+/* modes: from 1.6.0 (arg 1), every screen sets 0x2000 and adds its mode ID and
+ * the mode's name after its title. An older amigentd ignores the arg. */
+static BOOL screens(BOOL modes)
 {
     struct text t = {0};
     struct Screen *s;
     struct View *shown;
     ULONG lock;
-    UBYTE b[16] = {0};
+    UBYTE b[16] = {0}, name[DISPLAYNAMELEN];
     UWORD count = 0, all;
     BOOL ok, chip = FALSE;
 
@@ -2818,6 +2834,7 @@ static BOOL screens(void)
     shown = GfxBase->ActiView;
     all = 0x8000;  /* these display bits are filled in */
     if (shown != &IntuitionBase->ViewLord) all |= 0x4000;
+    if (modes) all |= 0x2000;
     for (s = IntuitionBase->FirstScreen; s; s = s->NextScreen) {
         const UBYTE *title = screen_title(s);
         UWORD flags = all, n = title ? strlen((const char *)title) : 0;
@@ -2839,6 +2856,14 @@ static BOOL screens(void)
         be16(b + 12, n);
         t_add(&t, b, 14);
         t_add(&t, title, n);
+        if (modes) {
+            ULONG mode = GetVPModeID(&s->ViewPort);
+            n = mode_name(mode, name);
+            be32(b, mode);
+            b[4] = n;
+            t_add(&t, b, 5);
+            t_add(&t, name, n);
+        }
         count++;
     }
     UnlockIBase(lock);
@@ -8572,7 +8597,7 @@ static BOOL command(const UBYTE *c)
         setup_mode = FALSE;
         return reply(0);
     case CMD_SCREENS:
-        return screens();
+        return screens(c[1] & 1);
     case CMD_SCREEN_FRONT:
         if (c[1] & 1) {  /* from 1.5.0 (0x8000 in SCREENS): aim FRAME_RGB, move nothing */
             aim = (ULONG)x << 16 | y;

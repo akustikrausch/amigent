@@ -307,6 +307,19 @@
     screenMenu?.refresh();
   }
 
+  // Which video output the picture is on (#1): a chipset screen in front of a
+  // graphics card leaves the card's monitor; say so once, and keep a pill.
+  function showOutput(o, told) {
+    const moved = !!(o && o.moved);
+    $("output-pill").hidden = !moved;
+    if (!moved) return;
+    const mode = o.mode ? ` · ${o.mode}` : "";
+    $("output-text").textContent = t("output_pill") + mode;
+    const limits = (o.limits || []).map((l) => t(`output_limit_${l}`)).join(" ");
+    $("output-pill").title = [t("output_moved", { mode: o.mode || t("output_chipset") }), limits].filter(Boolean).join(" ");
+    if (told) toast([t("output_moved", { mode: o.mode || t("output_chipset") }), limits].filter(Boolean).join(" "));
+  }
+
   function onEvent(m) {
     switch (m.type) {
       case "hello":
@@ -321,6 +334,7 @@
         reason = m.reason || "";
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
+        showOutput(m.output, false);
         if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
         if (m.update) showUpdate(m.update);
         paintUpdate();
@@ -340,6 +354,9 @@
         break;
       case "screens":
         showScreens(m.screens);
+        break;
+      case "output":
+        showOutput(m, true);
         break;
       case "online":
         amigaOnline = m.online;
