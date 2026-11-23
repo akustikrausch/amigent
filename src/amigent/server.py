@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP, Image as McpImage
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
 from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
-from . import display, emu68net, serial_log
+from . import display, emu68net, noos, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
 from .errors import AmigaError
@@ -293,7 +293,20 @@ def _screen_lock():
 
 
 def _with_ctl(fn):
-    """Run fn against amigactld, reconnecting once after a dropped link."""
+    """Run fn against amigactld, reconnecting once after a dropped link.
+
+    While a program without the OS runs (#2), a lost link says so instead."""
+    try:
+        result = _with_ctl_once(fn)
+    except AmigaError as e:
+        if e.code is None and (note := noos.gone(_session().host)):
+            raise AmigaError(noos.explain(note)) from e
+        raise
+    noos.answered(_session().host)
+    return result
+
+
+def _with_ctl_once(fn):
     with _exclusive():
         if not _session().ctl.connected:
             _session().ctl.connect()
@@ -320,7 +333,41 @@ def _with_ctl(fn):
 def _with_screen(fn):
     """Run fn against amigentd; the client reconnects by itself."""
     with _screen_lock():
-        return fn()
+        try:
+            return fn()
+        except (OSError, AmigaError, AmigentdError) as e:
+            if getattr(e, "code", None) is None and (note := noos.gone(_session().host)):
+                raise AmigaError(noos.explain(note)) from e
+            raise
+
+
+def _note_no_os(command: str, cd: str = "") -> dict | None:
+    """Before sending a command that starts a program without the OS: keep a note,
+    with the quit key from the slave when it can be read. None for other commands."""
+    found = noos.detect(command)
+    if not found:
+        return None
+    key = None
+    slave = found["slave"]
+    if slave and ":" not in slave:
+        where = cd or next((ln.split(None, 1)[1].strip().strip('"') for ln in command.splitlines()
+                            if ln.strip().lower().startswith("cd ") and len(ln.split(None, 1)) > 1), "")
+        slave = _join(where, slave) if where else ""
+    if slave:
+        try:
+            head = _with_ctl(lambda: perform(_session().ctl, [Request.read_file(slave, 64)]))[0]
+            if not isinstance(head, AmigaError):
+                key = noos.slave_quit_key(head)
+        except AmigaError:
+            pass
+    return noos.mark(_session().host, found, key)
+
+
+def _no_os_started(note: dict) -> str:
+    key = f"; its quit key is {note['quit_key']}" if note.get("quit_key") else ""
+    return (f"started {note['program']}: it switches the operating system off, so amigentd and "
+            f"the network go away until it quits{key}. Tools say so meanwhile; amiga_status "
+            "answers again once it is back")
 
 
 _join = join_path
@@ -572,6 +619,12 @@ def amiga_exec(command: str, cd: str = "", timeout: float = 30) -> str:
     """
     if SLOW_COMMAND.search(command):
         raise AmigaError("recursive scans can block the Amiga for many minutes; use amiga_job")
+    if note := _note_no_os(command, cd):
+        try:
+            _with_ctl(lambda: _session().ctl.exec(f"Run >NIL: {command}", cd or None, timeout))
+        except AmigaError:
+            pass  # gone already: the program took over
+        return _no_os_started(note)
     result = _with_ctl(lambda: _session().ctl.exec(command, cd or None, timeout))
     return f"rc={result.rc}\n{result.output}"
 
@@ -593,6 +646,12 @@ def amiga_start(command: str, unique: bool = False) -> str:
             return (f"not started: {command.split()[0]} runs already as " + ", ".join(
                 f"{t.label} (${t.address:08X})" for t in running)
                 + "; amiga_tasks shows it, amiga_task(..., signal='C') asks it to quit")
+    if note := _note_no_os(command):
+        try:
+            _with_ctl(lambda: _session().ctl.exec(f"Run >NIL: {command}"))
+        except AmigaError:
+            pass  # gone already: the program took over
+        return _no_os_started(note)
     before = _clear_hold()
     _session().windows_at_start = (time.monotonic(), _window_ids())
     _with_ctl(lambda: _session().ctl.exec(f"Run >NIL: {command}"))
@@ -771,6 +830,16 @@ def amiga_job(command: str, wait: float = 600) -> str:
     amiga_jobs (all of them), amiga_job_output (what it printed so far) and
     amiga_break(job=n). A return code other than 0 is said at the end.
     """
+    if note := _note_no_os(command):
+        try:
+            number = _start_job(command)
+        except AmigaError:
+            return _no_os_started(note)
+        try:
+            said = _wait_job(number, min(wait, 20))
+        except AmigaError:
+            return _no_os_started(note)
+        return said if said is not None else _no_os_started(note)
     number = _start_job(command)
     said = _wait_job(number, wait)
     if said is not None:
@@ -3026,13 +3095,17 @@ def amiga_viewer() -> str:
 
 
 @mcp.tool()
-def amiga_restart() -> str:
+def amiga_restart(force: bool = False) -> str:
     """Restart cleanly through the system and wait until the Amiga answers.
 
     Some Amigas come back without network after a warm restart. With power
     control set up, the power is cycled after two minutes without an answer;
     the disks were written before the restart, so nothing is lost.
+    While a program without the OS (WHDLoad) runs, it asks first: force=True
+    restarts anyway.
     """
+    if not force and (held := _held_by_no_os()):
+        return held
     with _exclusive():
         reboot(_session().ctl, FLUSH_VOLUMES)
         with _screen_lock():
@@ -3049,6 +3122,15 @@ def amiga_restart() -> str:
     return f"Amiga restarted; it came back without network, so the power was cycled ({attempts}x)"
 
 
+def _held_by_no_os() -> str:
+    """Before cutting the power or restarting: a program without the OS may run fine."""
+    note = noos.current(_session().host)
+    if not note:
+        return ""
+    return ("not done: " + noos.explain(note) + ". Ask the user whether the program still runs "
+            "(they can see it on the Amiga's monitor); force=True does it anyway")
+
+
 def _process_target():
     """Whether this session owns single-host environment settings."""
     if sessions.configured:
@@ -3061,15 +3143,19 @@ def _power_available():
 
 
 @mcp.tool()
-def amiga_power(action: str) -> str:
+def amiga_power(action: str, force: bool = False) -> str:
     """Control mains power, if configured: 'on', 'off' or 'cycle'.
 
     Last resort for a hung Amiga: cutting power loses file changes from the
-    last minutes. Prefer amiga_restart while the Amiga still answers.
+    last minutes. Prefer amiga_restart while the Amiga still answers. While a
+    program without the OS (WHDLoad) runs, 'off' and 'cycle' ask first:
+    force=True cuts the power anyway.
     """
     action = action.strip().lower()
     if action not in ("on", "off", "cycle"):
         raise AmigaError("action must be 'on', 'off' or 'cycle'")
+    if action != "on" and not force and (held := _held_by_no_os()):
+        return held
     if not _power_available():
         raise AmigaError("No power control bound to this machine; configure AMIGENT_HOST with AMIGENT_POWER_CMD.")
     if action == "cycle":

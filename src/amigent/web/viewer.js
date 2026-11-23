@@ -170,18 +170,29 @@
     return address && address !== host ? `${host} (${address})` : host;
   }
 
+  // A program without the OS (WHDLoad) runs: the Amiga is fine, only away (#2).
+  let noOs = null;
+
+  function noOsText(n) {
+    const time = new Date(n.since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return [t("noos_body", { program: n.program, time }),
+      n.quit_key ? t("noos_key", { key: n.quit_key }) : t("noos_key_usual")].join(" ");
+  }
+
   function showState() {
     const overlay = $("overlay");
     let message = "";
     if (!socketOpen) message = t("disconnected");
+    else if (amigaOnline === false && noOs) message = t("noos_title");
     else if (amigaOnline === false) message = t("offline");
     else if (amigaOnline === null) message = t("connecting");
     overlay.classList.toggle("show", message !== "");
     $("overlay-text").textContent = message;
     // Say where it connects to, and why it failed: a missing key looks like a hang otherwise.
-    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false ? shownLinkReason(reason)
+    $("overlay-reason").textContent = !socketOpen ? "" : amigaOnline === false && noOs ? noOsText(noOs)
+      : amigaOnline === false ? shownLinkReason(reason)
       : amigaOnline === null && address ? where() : "";
-    $("offline-actions").hidden = !(socketOpen && amigaOnline === false);
+    $("offline-actions").hidden = !(socketOpen && amigaOnline === false && !noOs);
     const up = socketOpen && amigaOnline;
     const waiting = socketOpen && amigaOnline === null;
     $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
@@ -335,6 +346,7 @@
         if (m.amiga && m.amiga.os !== undefined) showAmiga(m.amiga);
         showScreens(m.screens || []);
         showOutput(m.output, false);
+        noOs = m.no_os || null;
         if (m.update_done) toast(m.update_done.ok ? t("update_done") : t("update_failed"), !m.update_done.ok);
         if (m.update) showUpdate(m.update);
         paintUpdate();
@@ -357,6 +369,10 @@
         break;
       case "output":
         showOutput(m, true);
+        break;
+      case "no_os":
+        noOs = m.no_os || null;
+        showState();
         break;
       case "online":
         amigaOnline = m.online;

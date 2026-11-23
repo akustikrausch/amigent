@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, display, machines, memory, roster, tls, update
+from . import __version__, display, machines, memory, noos, roster, tls, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import NEWEST_PROTOCOL, Commands, pc_outdated
@@ -246,6 +246,7 @@ class Viewer:
         self.amiga: dict = {}
         self.screen_list: list = []
         self.output: dict = {}
+        self.no_os: dict | None = None
         self._system: dict = {}
         self._forget_daemon()
         self.alone_since = time.monotonic()
@@ -294,7 +295,7 @@ class Viewer:
                                 "reason": self.reason,
                                 "version": __version__, "amiga": self.amiga,
                                 "update": update.offer(), "update_done": self.update_done,
-                                "screens": self.screen_list, "output": self.output,
+                                "screens": self.screen_list, "output": self.output, "no_os": self.no_os,
                                 "w": self.screen.width, "h": self.screen.height}))
             if picture is not None:
                 out = io.BytesIO()
@@ -410,6 +411,15 @@ class Viewer:
 
     def _set_online(self, online: bool, reason: str = "") -> None:
         shown = "" if online else connection_reason(reason)
+        # a program without the OS (WHDLoad) took the network along: nothing is wrong (#2)
+        note = None if online else noos.gone(self.host)
+        if online:
+            noos.answered(self.host)
+        no_os = {"program": note["program"], "since": note["since"],
+                 "quit_key": note.get("quit_key", "")} if note else None
+        if no_os != getattr(self, "no_os", None):  # a half-built viewer in tests has none
+            self.no_os = no_os
+            self.event("no_os", no_os=no_os)
         if online != self.online or shown != self.reason:
             if not online:
                 # the next daemon to answer may be another file, or another Amiga
