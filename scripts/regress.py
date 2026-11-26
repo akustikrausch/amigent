@@ -223,7 +223,7 @@ class Run:
         assert "hunk 0" in hunks, hunks
         vec = self.s.amiga_memory("$00000004", 4)
         assert vec.startswith("$00000004"), vec
-        said = self.s.amiga_job("Wait 20", wait=1)
+        said = self.s.amiga_job("Wait 60", wait=1)  # outlasts the slow look below on a 68000
         number = int(said.split()[1])
         for _ in range(8):  # a 68000 may take a few seconds to start the job's task
             time.sleep(1)

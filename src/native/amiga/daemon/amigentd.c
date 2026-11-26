@@ -120,7 +120,7 @@ enum {
     CMD_EMU68  /* protocol 6, "emu68" in SYSINFO */
 };
 
-const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
+const char version[] = "$VER: amigentd 1.6.0 (26.11.2026)";
 
 static void mon_say(UBYTE kind, const char *what, const char *arg);
 static BOOL emu68_present(void);
