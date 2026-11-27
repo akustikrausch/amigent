@@ -1200,22 +1200,31 @@ registerProcessor("amigent-pcm", AmigentPcm);
     paintCapture();
   });
 
-  $("m-capture").addEventListener("click", async () => {
+  // Lists the devices into the open dialog; Search again runs it once more after plugging one in.
+  async function listCaptureDevices() {
     const select = $("capture-device");
     const error = $("capture-error");
-    select.replaceChildren(new Option(t("capture_none"), ""));
-    $("capture-auto").checked = captureCfg.auto;
-    error.hidden = true;
-    $("capture-dialog").showModal();
+    const keep = select.value || captureCfg.device;
+    $("capture-rescan").disabled = true;
     const reply = await fetch(api("/api/capture", { list: 1 })).catch(() => null);
     const got = reply && reply.ok ? await reply.json() : { devices: [], error: t("capture_failed") };
-    const names = [...new Set([...(got.devices || []), ...(captureCfg.device ? [captureCfg.device] : [])])];
-    for (const name of names) select.append(new Option(name, name));
-    select.value = captureCfg.device;
-    const problem = got.ffmpeg === false ? t("capture_no_ffmpeg") : got.error || (names.length ? "" : t("capture_no_devices"));
+    const names = [...new Set([...(got.devices || []), ...(keep ? [keep] : [])])];
+    select.replaceChildren(new Option(t("capture_none"), ""), ...names.map((name) => new Option(name, name)));
+    select.value = keep;
+    const problem = got.ffmpeg === false ? t("capture_no_ffmpeg") : got.error || (got.devices && got.devices.length ? "" : t("capture_no_devices"));
     error.textContent = problem;
     error.hidden = !problem;
+    $("capture-rescan").disabled = false;
+  }
+  $("m-capture").addEventListener("click", () => {
+    $("capture-device").replaceChildren(new Option(t("capture_none"), ""));
+    $("capture-device").value = "";
+    $("capture-auto").checked = captureCfg.auto;
+    $("capture-error").hidden = true;
+    $("capture-dialog").showModal();
+    listCaptureDevices();
   });
+  $("capture-rescan").addEventListener("click", listCaptureDevices);
   $("capture-dialog").addEventListener("close", async () => {
     if ($("capture-dialog").returnValue !== "save") return;
     const body = JSON.stringify({ device: $("capture-device").value, auto: $("capture-auto").checked });

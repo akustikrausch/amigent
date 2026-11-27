@@ -266,6 +266,8 @@
     <button role="menuitem" data-clip="get" data-i18n="clip_get">Amiga → PC</button>
     <button role="menuitem" data-clip="put" data-i18n="clip_put">PC → Amiga</button>
   </div>
+  <button role="menuitemcheckbox" id="m-capture-show" aria-checked="false" hidden><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu_show">Show the capture picture</span></button>
+  <button role="menuitem" id="m-capture"><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu">Capture device…</span></button>
   <button role="menuitem" id="m-restart" class="danger"><svg><use href="#i-restart"/></svg><span data-i18n="restart">Restart Amiga…</span></button>
   <div class="sep" role="separator"></div>
   <div class="lbl" role="presentation">Amigent</div>
@@ -277,8 +279,6 @@
     <button role="menuitemradio" data-theme-value="light" data-i18n="theme_light">Light</button>
     <button role="menuitemradio" data-theme-value="dark" data-i18n="theme_dark">Dark</button>
   </div>
-  <button role="menuitemcheckbox" id="m-capture-show" aria-checked="false" hidden><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu_show">Show the capture picture</span></button>
-  <button role="menuitem" id="m-capture"><svg><use href="#i-screen"/></svg><span data-i18n="capture_menu">Capture device…</span></button>
   <button role="menuitem" id="m-keys"><svg><use href="#i-keyboard"/></svg><span data-i18n="shortcuts">Keyboard shortcuts</span></button>
   <button role="menuitem" id="m-about"><svg><use href="#i-about"/></svg><span data-i18n="about">About Amigent</span></button>
 </div>
@@ -334,9 +334,10 @@
     <p class="hint" data-i18n="capture_intro">A USB HDMI capture stick shows the Amiga's own video output here, for programs without the operating system and chipset screens. Only for looking; mouse and keys don't go through it.</p>
     <label for="capture-device" data-i18n="capture_device">Device</label>
     <select id="capture-device"></select>
-    <label class="check"><input type="checkbox" id="capture-auto"> <span data-i18n="capture_auto">Switch to it by itself when the picture leaves amigentd</span></label>
+    <label class="check"><input type="checkbox" id="capture-auto"> <span data-i18n="capture_auto">Switch to it by itself for programs without the OS and for chipset screens</span></label>
     <p id="capture-error" class="hint" hidden></p>
     <div class="buttons">
+      <button type="button" id="capture-rescan" class="left" data-i18n="capture_rescan">Search again</button>
       <button value="cancel" data-i18n="cancel">Cancel</button>
       <button id="capture-save" value="save" class="primary" data-i18n="capture_save">Save</button>
     </div>

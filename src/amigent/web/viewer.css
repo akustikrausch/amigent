@@ -668,6 +668,7 @@ textarea:focus, input:focus { outline: 2px solid var(--focus); outline-offset: 0
 
 .buttons { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .buttons button { min-width: 96px; }
+.buttons .left { margin-right: auto; }
 .kbd-hint { margin-right: auto; font-size: 12px; color: var(--muted); }
 
 /* About: four tabs */

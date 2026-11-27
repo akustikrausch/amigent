@@ -20,6 +20,9 @@ Versions follow [semver](https://semver.org). The number lives in
   with ffmpeg: the remote desktop switches to it for programs without the OS
   and chipset screens, and `amiga_screenshot` and `amiga_wait_change` fall back
   to it. `amiga_capture` lists and sets the device. (#3)
+- Remote desktop: the capture dialog has Search again for a device plugged in
+  while it is open, its menu items moved to the Amiga section, and the capture
+  and no-OS texts no longer speak of amigentd.
 - `AMIGENT_REQUIRE_TLS=1`: TLS with the pinned certificate or no connection.
   No plain dial, no `amigactld` fallback, no network sweep for a moved Amiga,
   no key on a plain line, and no plain hello read to explain a refused TLS
