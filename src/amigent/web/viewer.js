@@ -195,6 +195,9 @@
   let captureManual = null;  // the person's own choice until the reason changes
   let lastOutput = null;
   let captureReason = "";
+  // Both outputs at once (#3): the capture picture small in a corner, kept per browser.
+  let captureCorner = false;
+  try { captureCorner = localStorage.getItem("amigent.captureCorner") === "1"; } catch (e) { /* private mode */ }
 
   function captureWanted() {
     if (!captureCfg.device) return false;
@@ -209,23 +212,27 @@
       captureManual = null;
     }
     const show = captureWanted();
+    const corner = !show && captureCorner && !!captureCfg.device;
     const img = $("capture-img");
-    if (show && img.hidden) img.src = api("/capture.mjpg", { n: Date.now() });
-    if (!show && !img.hidden) img.removeAttribute("src");
-    img.hidden = !show;
+    if ((show || corner) && img.hidden) img.src = api("/capture.mjpg", { n: Date.now() });
+    if (!show && !corner && !img.hidden) img.removeAttribute("src");
+    img.hidden = !(show || corner);
+    img.classList.toggle("corner", corner);
     $("capture-pill").hidden = !show;
     $("capture-text").textContent = noOs ? t("capture_pill_noos") : t("capture_pill");
     $("capture-pill").title = noOs ? noOsText(noOs) : "";
     $("output-show").hidden = !(captureCfg.device && !show && lastOutput && lastOutput.moved);
     $("m-capture-show").hidden = !captureCfg.device;
     $("m-capture-show").setAttribute("aria-checked", String(show));
+    $("m-capture-corner").hidden = !captureCfg.device;
+    $("m-capture-corner").setAttribute("aria-checked", String(captureCorner));
     showState();
   }
 
   function showState() {
     const overlay = $("overlay");
     let message = "";
-    const capturing = !$("capture-img").hidden;
+    const capturing = !$("capture-img").hidden && !$("capture-img").classList.contains("corner");
     if (!socketOpen) message = t("disconnected");
     else if (amigaOnline === false && noOs && capturing) message = "";
     else if (amigaOnline === false && noOs) message = t("noos_title");
@@ -1191,14 +1198,20 @@ registerProcessor("amigent-pcm", AmigentPcm);
 
   $("capture-back").addEventListener("click", () => { captureManual = false; paintCapture(); canvas.focus(); });
   $("output-show").addEventListener("click", () => { captureManual = true; paintCapture(); });
+  $("m-capture-corner").addEventListener("click", () => {
+    captureCorner = !captureCorner;
+    try { localStorage.setItem("amigent.captureCorner", captureCorner ? "1" : "0"); } catch (e) { /* private mode */ }
+    paintCapture();
+  });
   $("m-capture-show").addEventListener("click", () => {
-    captureManual = $("capture-img").hidden;
+    captureManual = !captureWanted();
     paintCapture();
   });
   $("capture-img").addEventListener("error", () => {
     if ($("capture-img").hidden) return;
     toast(t("capture_failed"), true);
-    captureManual = false;
+    if ($("capture-img").classList.contains("corner")) captureCorner = false;  // for this page only
+    else captureManual = false;
     paintCapture();
   });
 

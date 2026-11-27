@@ -46,7 +46,7 @@ def state(found: list) -> dict:
     card = has_card(found)
     chipset = not s.get("rtg")
     foreign = bool(found[0].get("foreign_view"))
-    limits = []
+    limits = ["planar"] if chipset else []
     if chipset and (s.get("mode") or 0) & DUALPF_KEY and s.get("mode") != INVALID_ID:
         limits.append("dualpf")
     if chipset and foreign:
@@ -66,6 +66,8 @@ def where(found: list) -> str:
     line = (f"the front screen {st['title']!r} is a chipset screen{mode}: it shows on the "
             "Amiga's own video output, not on the graphics card's (on a PiStorm: the RGB port, "
             "not HDMI); tell the user to look at that monitor or input")
+    line += ("; the picture here is read from its bitplanes, so sprites and colour changes "
+             "during the frame (copper) are missing")
     if "dualpf" in st["limits"]:
         line += ("; it is a dual playfield screen, which the picture here shows only in part")
     return line

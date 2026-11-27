@@ -27,6 +27,9 @@ Versions follow [semver](https://semver.org). The number lives in
   amigentd's -5, where a WHDLoad splash could look hung. A short break in the
   connection while such a program loads no longer clears its note, and the
   remote desktop shows "Without its OS" with an amber dot instead of offline.
+- Capture device: ⋯ → *Capture picture in a corner* shows it small next to the
+  live picture, for setups where both outputs carry something. Chipset screens
+  say that sprites and copper colour changes are missing from amigentd's picture. (#1, #3)
 - `AMIGENT_REQUIRE_TLS=1`: TLS with the pinned certificate or no connection.
   No plain dial, no `amigactld` fallback, no network sweep for a moved Amiga,
   no key on a plain line, and no plain hello read to explain a refused TLS

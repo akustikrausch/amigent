@@ -31,7 +31,7 @@ def chipset_in_front():
 def test_a_chipset_screen_in_front_of_a_card_moves_the_picture():
     st = display.state(chipset_in_front())
     assert st == {"output": "chipset", "mode": "PAL:HighRes Laced", "title": "Game", "card": True,
-                  "moved": True, "limits": []}
+                  "moved": True, "limits": ["planar"]}
     line = display.where(chipset_in_front())
     assert "Amiga's own video output" in line and "(PAL:HighRes Laced)" in line and "HDMI" in line
 
@@ -50,7 +50,7 @@ def test_the_card_in_front_says_nothing():
 def test_dual_playfield_is_named_as_a_limit():
     found = chipset_in_front()
     found[0]["mode"] |= display.DUALPF_KEY
-    assert display.state(found)["limits"] == ["dualpf"]
+    assert display.state(found)["limits"] == ["planar", "dualpf"]
     assert "dual playfield" in display.where(found)
 
 

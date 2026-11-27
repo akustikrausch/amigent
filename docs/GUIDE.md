@@ -726,6 +726,8 @@ AI agent do it with `amiga_capture(action="devices")` and
   without the OS runs or a chipset screen is in front, with a note that this is
   the capture picture; *Back to amigentd* and ⋯ → *Show the capture picture*
   switch by hand. Mouse and keys don't go through the capture picture.
+- ⋯ → *Capture picture in a corner* keeps it small in a corner next to the live
+  picture, for setups where both outputs show something.
 - `amiga_screenshot` and `amiga_wait_change` fall back to the capture device
   while a program without the OS runs, and say so. The agent can then see when
   a game reached its title screen or quit back to the Workbench.
