@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Les écrans dual playfield ne s'affichent ici qu'en partie.",
  "output_limit_own_view": "Le programme affiche son propre écran ; cette image est l'écran Intuition derrière lui.",
  "noos_title": "Un programme sans système d'exploitation tourne",
+ "noos_state": "Sans système",
  "noos_body": "{program}, lancé à {time}. Le réseau de l'Amiga est coupé jusqu'à ce qu'il se termine ; Amigent se reconnecte tout seul. Tout va bien.",
  "noos_key": "Pour quitter, appuyez sur {key} sur le clavier de l'Amiga.",
  "noos_key_usual": "Pour quitter, appuyez sur sa touche de sortie sur le clavier de l'Amiga, en général F10.",

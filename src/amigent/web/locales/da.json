@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Dual playfield-skærme vises her kun delvist.",
  "output_limit_own_view": "Programmet viser sin egen visning; dette billede er Intuition-skærmen bag den.",
  "noos_title": "Et program uden styresystem kører",
+ "noos_state": "Uden styresystem",
  "noos_body": "{program}, startet {time}. Amigaens netværk er slukket, til det slutter; Amigent forbinder igen af sig selv. Alt er i orden.",
  "noos_key": "Tryk {key} på Amigaens eget tastatur for at afslutte.",
  "noos_key_usual": "Tryk på dets afslutningstast på Amigaens eget tastatur for at afslutte, normalt F10.",

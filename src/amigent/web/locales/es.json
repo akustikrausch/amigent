@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Las pantallas dual playfield se ven aquí solo en parte.",
  "output_limit_own_view": "El programa muestra una pantalla propia; esta imagen es la pantalla de Intuition que hay detrás.",
  "noos_title": "Se está ejecutando un programa sin sistema operativo",
+ "noos_state": "Sin sistema operativo",
  "noos_body": "{program}, iniciado a las {time}. La red del Amiga está apagada hasta que termine; Amigent se reconecta solo. Todo está bien.",
  "noos_key": "Para salir, pulsa {key} en el teclado del Amiga.",
  "noos_key_usual": "Para salir, pulsa su tecla de salida en el teclado del Amiga, normalmente F10.",

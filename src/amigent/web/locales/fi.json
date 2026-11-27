@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Dual playfield -näytöt näkyvät tässä vain osittain.",
  "output_limit_own_view": "Ohjelma näyttää oman näkymänsä; tämä kuva on sen takana oleva Intuition-näyttö.",
  "noos_title": "Käynnissä on ohjelma ilman käyttöjärjestelmää",
+ "noos_state": "Ilman käyttöjärjestelmää",
  "noos_body": "{program}, käynnistetty {time}. Amigan verkko on poissa, kunnes se päättyy; Amigent yhdistää sitten itse. Kaikki on kunnossa.",
  "noos_key": "Lopeta painamalla {key} Amigan omasta näppäimistöstä.",
  "noos_key_usual": "Lopeta painamalla sen lopetusnäppäintä Amigan omasta näppäimistöstä, yleensä F10.",

@@ -131,6 +131,7 @@
  "output_limit_dualpf": "Dual playfield screens show here only in part.",
  "output_limit_own_view": "The program shows a display of its own; this picture is the Intuition screen behind it.",
  "noos_title": "A program without the operating system is running",
+ "noos_state": "Without its OS",
  "noos_body": "{program}, started {time}. The Amiga's network is off until it quits; Amigent reconnects by itself. Nothing is wrong.",
  "noos_key": "To quit it, press {key} on the Amiga's own keyboard.",
  "noos_key_usual": "To quit it, press its quit key on the Amiga's own keyboard, usually F10.",

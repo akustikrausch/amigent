@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Obrazovky s dual playfield sa tu zobrazia len čiastočne.",
  "output_limit_own_view": "Program ukazuje vlastné zobrazenie; tento obraz je obrazovka Intuition za ním.",
  "noos_title": "Beží program bez operačného systému",
+ "noos_state": "Bez operačného systému",
  "noos_body": "{program}, spustené {time}. Sieť Amigy je vypnutá, kým neskončí; Amigent sa potom pripojí sám. Všetko je v poriadku.",
  "noos_key": "Na ukončenie stlačte {key} na klávesnici Amigy.",
  "noos_key_usual": "Na ukončenie stlačte jeho kláves na ukončenie na klávesnici Amigy, zvyčajne F10.",

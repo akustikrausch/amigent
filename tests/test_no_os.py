@@ -43,7 +43,7 @@ def test_the_quit_key_comes_from_the_slave():
     assert noos.slave_quit_key(b"not a slave") is None
 
 
-def test_a_note_lives_until_the_amiga_answers_after_being_gone():
+def test_a_note_lives_until_the_amiga_answers_after_being_gone(monkeypatch):
     host = "192.0.2.7"
     noos.mark(host, {"program": "WHDLoad: Lemmings", "slave": ""}, 0x59)
     noos.answered(host)  # still loading: the Amiga answers before the game takes over
@@ -51,6 +51,22 @@ def test_a_note_lives_until_the_amiga_answers_after_being_gone():
     assert note["gone"] and note["quit_key"] == "F10"
     text = noos.explain(note)
     assert "without the operating system" in text and "F10" in text and "don't cut the power" in text
+    later = time.time() + noos.AWAY + 1
+    monkeypatch.setattr(noos.time, "time", lambda: later)
+    noos.answered(host)
+    assert noos.current(host) is None
+
+
+def test_a_short_break_while_it_loads_keeps_the_note(monkeypatch):
+    host = "192.0.2.11"
+    noos.mark(host, {"program": "WHDLoad: Lemmings", "slave": ""})
+    assert noos.gone(host)["gone"]
+    noos.answered(host)  # back after a few seconds: the splash, not the game's end
+    note = noos.current(host)
+    assert note and not note["gone"]
+    noos.gone(host)
+    later = time.time() + noos.AWAY + 1
+    monkeypatch.setattr(noos.time, "time", lambda: later)
     noos.answered(host)
     assert noos.current(host) is None
 
@@ -83,3 +99,12 @@ def test_power_and_restart_ask_first(monkeypatch):
     noos.mark(S.host, {"program": "WHDLoad: Lemmings", "slave": ""})
     held = server._held_by_no_os()
     assert held.startswith("not done:") and "force=True" in held
+
+
+def test_a_game_starts_at_normal_priority():
+    import amigent.server as server
+    command = 'cd "Data2:Games/Lemmings"\nWHDLoad Lemmings.slave'
+    job = server._at_normal_priority(command, False).splitlines()
+    assert job[0].startswith("ChangeTaskPri") and job[0].endswith(" 0") and job[1:] == command.splitlines()
+    run = server._at_normal_priority(command, True)
+    assert run.startswith("Run >NIL: ChangeTaskPri 0 +\n") and run.endswith("+\nWHDLoad Lemmings.slave")

@@ -445,6 +445,16 @@ def _note_no_os(command: str, cd: str = "") -> dict | None:
     return noos.mark(_session().host, found, key)
 
 
+def _at_normal_priority(command: str, run: bool) -> str:
+    """The command at priority 0. Jobs and Run inherit amigentd's -5, and a game or
+    its WHDLoad splash at -5 gets no time while anything else runs: it seems to hang.
+    run=True gives one Run line (the lines joined with Run's "+")."""
+    lines = [line for line in command.splitlines() if line.strip()]
+    if run:
+        return "Run >NIL: ChangeTaskPri 0 +\n" + " +\n".join(lines)
+    return "\n".join(["ChangeTaskPri >NIL: 0", *lines])
+
+
 def _no_os_started(note: dict) -> str:
     key = f"; its quit key is {note['quit_key']}" if note.get("quit_key") else ""
     return (f"started {note['program']}: it switches the operating system off, so amigentd and "
@@ -703,7 +713,7 @@ def amiga_exec(command: str, cd: str = "", timeout: float = 30) -> str:
         raise AmigaError("recursive scans can block the Amiga for many minutes; use amiga_job")
     if note := _note_no_os(command, cd):
         try:
-            _with_ctl(lambda: _session().ctl.exec(f"Run >NIL: {command}", cd or None, timeout))
+            _with_ctl(lambda: _session().ctl.exec(_at_normal_priority(command, True), cd or None, timeout))
         except AmigaError:
             pass  # gone already: the program took over
         return _no_os_started(note)
@@ -730,7 +740,7 @@ def amiga_start(command: str, unique: bool = False) -> str:
                 + "; amiga_tasks shows it, amiga_task(..., signal='C') asks it to quit")
     if note := _note_no_os(command):
         try:
-            _with_ctl(lambda: _session().ctl.exec(f"Run >NIL: {command}"))
+            _with_ctl(lambda: _session().ctl.exec(_at_normal_priority(command, True)))
         except AmigaError:
             pass  # gone already: the program took over
         return _no_os_started(note)
@@ -914,7 +924,7 @@ def amiga_job(command: str, wait: float = 600) -> str:
     """
     if note := _note_no_os(command):
         try:
-            number = _start_job(command)
+            number = _start_job(_at_normal_priority(command, False))
         except AmigaError:
             return _no_os_started(note)
         try:

@@ -17,6 +17,10 @@ from . import paths
 
 KEEP = 12 * 3600  # s: a note older than this is forgotten
 SETTLE = 600  # s: answering this long after the start without ever going away, it didn't take over
+# s: away at least this long before an answer counts as "it quit". A WHDLoad splash
+# can starve the network for a few seconds before the game takes over; that
+# hiccup must not clear the note.
+AWAY = 30
 
 # The raw key codes a slave names as its quit key, for the ones people meet.
 RAWKEYS = {0x45: "Esc", 0x46: "Del", 0x5F: "Help", 0x5D: "numeric pad *", 0x5A: "numeric pad (",
@@ -89,18 +93,34 @@ def gone(host: str) -> dict | None:
     note = current(host)
     if note and not note.get("gone"):
         note["gone"] = True
-        try:
-            _file(host).write_text(json.dumps(note), encoding="utf-8")
-        except OSError:
-            pass
+        note["gone_at"] = time.time()
+        _save(host, note)
     return note
 
 
+def _save(host: str, note: dict) -> None:
+    try:
+        _file(host).write_text(json.dumps(note), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def answered(host: str) -> None:
-    """amigentd answered: a program that took over has quit, or one never did."""
+    """amigentd answered: a program that took over has quit, or one never did.
+
+    Away for less than AWAY seconds is a hiccup before the takeover, not a quit."""
     note = current(host)
-    if note and (note.get("gone") or time.time() - note.get("since", 0) > SETTLE):
+    if not note:
+        return
+    now = time.time()
+    if note.get("gone") and now - note.get("gone_at", 0) >= AWAY:
         clear(host)
+    elif now - note.get("since", 0) > SETTLE:
+        clear(host)
+    elif note.get("gone"):  # only a short break, as while a splash loads: still starting
+        note["gone"] = False
+        note.pop("gone_at", None)
+        _save(host, note)
 
 
 def clear(host: str) -> None:

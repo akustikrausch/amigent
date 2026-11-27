@@ -23,6 +23,10 @@ Versions follow [semver](https://semver.org). The number lives in
 - Remote desktop: the capture dialog has Search again for a device plugged in
   while it is open, its menu items moved to the Amiga section, and the capture
   and no-OS texts no longer speak of amigentd.
+- Programs without the OS started by the agent run at priority 0, not at
+  amigentd's -5, where a WHDLoad splash could look hung. A short break in the
+  connection while such a program loads no longer clears its note, and the
+  remote desktop shows "Without its OS" with an amber dot instead of offline.
 - `AMIGENT_REQUIRE_TLS=1`: TLS with the pinned certificate or no connection.
   No plain dial, no `amigactld` fallback, no network sweep for a moved Amiga,
   no key on a plain line, and no plain hello read to explain a refused TLS

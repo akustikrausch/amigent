@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Ekrany dual playfield są tu widoczne tylko częściowo.",
  "output_limit_own_view": "Program pokazuje własny obraz; ten obraz to ekran Intuition za nim.",
  "noos_title": "Działa program bez systemu operacyjnego",
+ "noos_state": "Bez systemu",
  "noos_body": "{program}, uruchomiony o {time}. Sieć Amigi jest wyłączona, dopóki się nie zakończy; Amigent połączy się sam. Wszystko w porządku.",
  "noos_key": "Aby wyjść, naciśnij {key} na klawiaturze Amigi.",
  "noos_key_usual": "Aby wyjść, naciśnij jego klawisz wyjścia na klawiaturze Amigi, zwykle F10.",

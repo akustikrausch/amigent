@@ -240,9 +240,11 @@
     $("offline-actions").hidden = !(socketOpen && amigaOnline === false && !noOs);
     const up = socketOpen && amigaOnline;
     const waiting = socketOpen && amigaOnline === null;
-    $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : "bad");
+    // away on purpose (a program without the OS): not the red of a fault
+    const away = socketOpen && amigaOnline === false && !!noOs;
+    $("machine-dot").className = "dot " + (up ? "ok" : waiting ? "" : away ? "away" : "bad");
     $("machine-name").textContent = host || "Amiga";
-    const state = up ? t("machines_online") : waiting ? t("machines_checking") : t("state_offline");
+    const state = up ? t("machines_online") : waiting ? t("machines_checking") : away ? t("noos_state") : t("state_offline");
     $("machine-sub").textContent = up ? [amiga.os, amiga.cpu && amiga.cpu + (amiga.fpu_state && !["none", ""].includes(amiga.fpu_state) ? " + FPU" : "")].filter(Boolean).join(" · ") || state : state;
     $("machine").setAttribute("aria-label", t("machine_switch", { name: host || "Amiga", state }));
     $("machine").title = up ? [where(), systemLine(amiga), cpuLine(amiga)].filter(Boolean).join("\n") : "";

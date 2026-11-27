@@ -132,6 +132,7 @@
  "output_limit_dualpf": "Dual playfield-skärmar syns här bara delvis.",
  "output_limit_own_view": "Programmet visar en egen bild; den här bilden är Intuition-skärmen bakom den.",
  "noos_title": "Ett program utan operativsystem körs",
+ "noos_state": "Utan operativsystem",
  "noos_body": "{program}, startat {time}. Amigans nätverk är avstängt tills det avslutas; Amigent ansluter sedan av sig själv. Allt är i sin ordning.",
  "noos_key": "Tryck {key} på Amigans eget tangentbord för att avsluta.",
  "noos_key_usual": "Tryck på dess avslutningstangent på Amigans eget tangentbord för att avsluta, oftast F10.",

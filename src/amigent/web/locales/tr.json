@@ -131,6 +131,7 @@
  "output_limit_dualpf": "Dual playfield ekranlar burada yalnızca kısmen görünür.",
  "output_limit_own_view": "Program kendi görüntüsünü gösteriyor; bu resim arkasındaki Intuition ekranı.",
  "noos_title": "İşletim sistemi olmadan çalışan bir program var",
+ "noos_state": "İşletim sistemi olmadan",
  "noos_body": "{program}, {time} saatinde başlatıldı. Program kapanana kadar Amiga'nın ağı kapalı; Amigent sonra kendiliğinden bağlanır. Her şey yolunda.",
  "noos_key": "Çıkmak için Amiga'nın klavyesinde {key} tuşuna basın.",
  "noos_key_usual": "Çıkmak için Amiga'nın klavyesinde çıkış tuşuna basın, genellikle F10.",

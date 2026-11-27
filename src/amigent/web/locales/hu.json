@@ -132,6 +132,7 @@
  "output_limit_dualpf": "A dual playfield képernyők itt csak részben látszanak.",
  "output_limit_own_view": "A program saját megjelenítést mutat; ez a kép a mögötte lévő Intuition-képernyő.",
  "noos_title": "Operációs rendszer nélküli program fut",
+ "noos_state": "Operációs rendszer nélkül",
  "noos_body": "{program}, indítva {time}. Az Amiga hálózata ki van kapcsolva, amíg ki nem lép; az Amigent utána magától újracsatlakozik. Minden rendben.",
  "noos_key": "Kilépéshez nyomja meg a(z) {key} billentyűt az Amiga billentyűzetén.",
  "noos_key_usual": "Kilépéshez nyomja meg a kilépő billentyűjét az Amiga billentyűzetén, általában F10.",

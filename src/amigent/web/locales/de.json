@@ -131,6 +131,7 @@
  "output_limit_dualpf": "Dual-Playfield-Bildschirme erscheinen hier nur teilweise.",
  "output_limit_own_view": "Das Programm zeigt eine eigene Anzeige; dieses Bild ist der Intuition-Bildschirm dahinter.",
  "noos_title": "Ein Programm ohne Betriebssystem läuft",
+ "noos_state": "Ohne Betriebssystem",
  "noos_body": "{program}, gestartet {time}. Das Netz des Amiga ist aus, bis es endet; Amigent verbindet sich dann von selbst. Alles in Ordnung.",
  "noos_key": "Zum Beenden {key} auf der Tastatur des Amiga drücken.",
  "noos_key_usual": "Zum Beenden die Quit-Taste auf der Tastatur des Amiga drücken, meist F10.",
