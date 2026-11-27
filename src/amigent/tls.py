@@ -6,6 +6,11 @@ certificate in ~/.config/amigent/tls-<host>.pem. With that file present the
 clients speak TLS on the port after amigentd's; AMIGENT_TLS=off kills it.
 The pin doubles as the Amiga's fingerprint when it turns up under a new
 address (see machines.py).
+
+AMIGENT_REQUIRE_TLS=1 turns "TLS when pinned" into "TLS or nothing": no pin,
+AMIGENT_TLS=off, a refused handshake or a certificate that is not the pin all
+end the attempt before a single byte goes to amigentd's plain port, and the
+network is not swept for the Amiga either (the sweep knocks on plain ports).
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import machines, roster
+from . import machines, roster, safety
 from .paths import FOLDER, safe  # FOLDER stays patchable here, like secret.FOLDER
 
 
@@ -69,6 +74,25 @@ def plain_closed(flags: int, encrypted: bool) -> str:
     return PLAIN_CLOSED_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
 
 
+REQUIRED_OFF_TEXT = ("AMIGENT_REQUIRE_TLS is set and so is AMIGENT_TLS=off; nothing was sent. "
+                     "Drop one of the two.")
+REQUIRED_NO_PIN_TEXT = ("AMIGENT_REQUIRE_TLS is set, but no certificate is pinned for {host} "
+                        "(tls-<name>.pem in ~/.config/amigent/). Nothing was sent in the clear.")
+
+
+class TlsRequired(ConnectionError):
+    """AMIGENT_REQUIRE_TLS turned a plain connection down before it was made."""
+
+
+def required_failure(host: str) -> str:
+    """Why AMIGENT_REQUIRE_TLS cannot dial host over TLS, or '' when it can."""
+    if os.environ.get("AMIGENT_TLS", "auto").lower() == "off":
+        return REQUIRED_OFF_TEXT
+    if not pinned(host).exists():
+        return REQUIRED_NO_PIN_TEXT.format(host=host)
+    return ""
+
+
 def wrap(sock: socket.socket, host: str) -> ssl.SSLSocket:
     """TLS over sock; the pinned certificate gets in, nobody else."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -100,21 +124,27 @@ def _why_tls_refused(address: str, port: int) -> str:
     return NO_CERT_TEXT if flags & AMISSL_OPEN else NO_TLS_TEXT
 
 
-def _dial(address: str, host: str, port: int, timeout: float) -> socket.socket:
+def _dial(address: str, host: str, port: int, timeout: float,
+          handshake: float | None = None) -> socket.socket:
     if wanted(host):
         try:
             sock = socket.create_connection((address, port + 1), timeout)
         except ConnectionRefusedError as e:
             # Refused means the Amiga is up and the TLS port shut; an Amiga that is off
-            # times out instead and costs no second try.
-            if why := _why_tls_refused(address, port):
+            # times out instead and costs no second try. The reason is read on the
+            # plain port, so AMIGENT_REQUIRE_TLS goes without it.
+            if not safety.require_tls() and (why := _why_tls_refused(address, port)):
                 raise TlsDown(why) from e
             raise
         try:
+            if handshake:
+                sock.settimeout(handshake)
             return wrap(sock, host)
         except (OSError, ssl.SSLError):
             sock.close()
             raise
+    if safety.require_tls():
+        raise TlsRequired(required_failure(host) or REQUIRED_NO_PIN_TEXT.format(host=host))
     return socket.create_connection((address, port), timeout)
 
 
@@ -122,7 +152,8 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     """Plain to port, or TLS to port + 1 when a certificate is pinned.
 
     host is a name or an address. No answer there? One sweep of the local
-    network, and the Amiga is picked up again at its new address.
+    network, and the Amiga is picked up again at its new address; not under
+    AMIGENT_REQUIRE_TLS, where a failed TLS dial is the answer.
     """
     host = roster.identity(host)
     address = roster.address(host)  # machines is only rung when the line stays dead
@@ -133,10 +164,28 @@ def connect(host: str, port: int, timeout: float) -> socket.socket:
     except (OSError, ssl.SSLError):
         if not roster.is_id(host):
             raise  # a one-off address must never change the saved registry
+        if safety.require_tls():
+            raise
         moved = machines.relocate(host)
         if not moved or moved == address:
             raise
         return _dial(moved, host, port, timeout)
+
+
+HANDSHAKE_WAIT = 30.0  # seconds; AmiSSL on a 68000 or over a plipbox takes its time
+
+
+def greet(host: str, port: int, timeout: float, connect_timeout: float | None = None,
+          handshake: float | None = None) -> bytes:
+    """net.greet over TLS: amigentd's first bytes on port + 1, the pin checked; b"" for silence.
+
+    The handshake gets connect_timeout too, unless handshake says otherwise."""
+    try:
+        with _dial(roster.address(host), host, port, connect_timeout or timeout, handshake) as s:
+            s.settimeout(timeout)
+            return s.recv(8)
+    except OSError:  # ssl.SSLError and TlsRequired included
+        return b""
 
 
 def find_openssl() -> str | None:

@@ -16,7 +16,15 @@ def test_native_amiga_tree_exists():
     assert (native / "tools/amigent-levels.c").is_file()
     assert (native / "apollo/apollo_detect.c").is_file()
     assert (native / "apollo/apollo_probe.c").is_file()
+    assert (native / "apollo/apollo_audio.c").is_file()
+    assert (native / "apollo/apollo_audio.h").is_file()
+    assert (native / "apollo/apollo_mmio.c").is_file()
+    assert (native / "apollo/apollo_runtime.c").is_file()
+    assert (native / "apollo/apollo_start.s").is_file()
+    assert (native / "apollo/div64.c").is_file()
+    assert (native / "apollo/gcc_support.c").is_file()
     assert (native / "Makefile.apollo").is_file()
+    assert (native / "build-amigentd-apollo").is_file()
     assert (native / "examples/repair.d/example.repair.txt").is_file()
     assert (native / "build-amigentd").is_file()
     assert not (ROOT / "amiga").exists()
@@ -65,4 +73,8 @@ def test_amiga_workflow_uses_native_paths():
     assert "src/native/amiga/daemon/amigentd.c" in text
     assert "src/native/amiga/tools/amigent-status.c" in text
     assert "src/native/amiga/tools/amigent-monitor.c" in text
+    assert "Makefile.apollo" in text
+    assert "amigentd.apollo" in text
+    assert "amigent-apollo-probe" in text
+    assert "amigent-monitor.apollo" in text
     assert "amiga/amigentd.c" not in text

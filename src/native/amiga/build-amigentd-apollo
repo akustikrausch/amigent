@@ -1,0 +1,12 @@
+#!/bin/bash
+# Build amigentd.apollo, amigent-apollo-probe and amigent-monitor.apollo from source.
+# Export APOLLOCROSSDEV to the ApolloCrossDev checkout (uses -m68080 by default),
+# or pass PREFIX=/path/to/crosstools CPU_FLAG=-m68020 for GCC 16 CI verification.
+# From any directory:
+#   src/native/amiga/build-amigentd-apollo
+#   make -f src/native/amiga/Makefile.apollo
+# The default target writes only under build/apollo.
+# Copying into src/amigent/amiga/bin is explicit (not part of upstream releases):
+#   src/native/amiga/build-amigentd-apollo install
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec make -f "$HERE/Makefile.apollo" "$@"

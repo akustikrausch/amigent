@@ -10,6 +10,7 @@ from .roster import identity
 
 import socket
 
+from . import safety
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
 from .roster import address
@@ -32,6 +33,9 @@ class AmigaCtl(VolumeFlush):
 
     def connect(self) -> None:
         self.close()
+        if safety.require_tls():
+            raise AmigaError("AMIGENT_REQUIRE_TLS is set and amigactld only speaks plain TCP; "
+                             "it was not contacted")
         try:
             self._sock = socket.create_connection((address(self.host), self.port), self.timeout)
             self.banner = self._line()

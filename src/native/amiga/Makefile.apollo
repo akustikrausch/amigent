@@ -1,35 +1,94 @@
-# 68000 ApolloOS probe. The 68080 daemon, AUDIO and PIP are later changes;
-# this file does not build them and does not install anything.
-# Set APOLLOCROSSDEV to the ApolloCrossDev checkout, or pass PREFIX=.
-# `all` writes build/apollo/amigent-apollo-probe only.
+# 68000 ApolloOS probe (ApolloOS + AFF_FPGA), the 68080 daemon with ARNE audio,
+# and the 68080 amigent-monitor. PIP is not built here.
+# Set APOLLOCROSSDEV to the ApolloCrossDev checkout (uses -m68080 by default),
+# or pass PREFIX= and CPU_FLAG=-m68020 for GCC 16 CI verification (which rejects -m68080).
+# `all` writes under build/apollo/. Upstream releases omit prebuilt Apollo binaries.
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../../..)
 BUILD := $(ROOT)/build/apollo
+BIN := $(ROOT)/src/amigent/amiga/bin
 APOLLO := $(HERE)/apollo
+TOOLS := $(HERE)/tools
 
 GCC_FLAVOR ?= GCC-6.50-Stable
 PREFIX ?= $(APOLLOCROSSDEV)/Compilers/$(GCC_FLAVOR)
-CC := $(PREFIX)/bin/m68k-amigaos-gcc
+CC ?= $(PREFIX)/bin/m68k-amigaos-gcc
+CPU_FLAG ?= -m68080
 
-ifeq ($(wildcard $(CC)),)
+ifeq ($(shell command -v "$(CC)" 2>/dev/null),)
 $(error m68k-amigaos-gcc was not found at $(CC). Set APOLLOCROSSDEV to your ApolloCrossDev checkout after its GCC install script (Compilers/$(GCC_FLAVOR)), or pass PREFIX= to that compiler tree)
 endif
 
+CFLAGS := -noixemul -O2 $(CPU_FLAG) -fomit-frame-pointer -std=gnu99 -DAMIGENT_APOLLO
 INCLUDES := -I$(APOLLO) \
 	-I$(PREFIX)/m68k-amigaos/libnix/include \
 	-I$(PREFIX)/m68k-amigaos/sys-include \
 	-I$(PREFIX)/m68k-amigaos/ndk-include
 PROBE_CFLAGS := -noixemul -O2 -m68000 -fomit-frame-pointer -std=gnu99
+MONITOR_CFLAGS := -noixemul -O2 $(CPU_FLAG) -fomit-frame-pointer
 
-.PHONY: all clean
+# No libnix: its startup opens "*" and the boot console stays up. The string
+# routines, qsort and the entry are in apollo_runtime.c and apollo_start.s.
+# libgcc.a in ApolloCrossDev is empty, so the 64-bit helpers are div64.c.
+OBJ_NAMES := amigentd.o apollo_detect.o apollo_mmio.o apollo_audio.o gcc_support.o div64.o apollo_runtime.o
+OBJS := $(addprefix $(BUILD)/,$(OBJ_NAMES))
 
-all: $(BUILD)/amigent-apollo-probe
+.PHONY: all monitor install clean
+
+all: $(BUILD)/amigentd.apollo $(BUILD)/amigent-apollo-probe $(BUILD)/amigent-monitor.apollo
+
+monitor: $(BUILD)/amigent-monitor.apollo
+
+install: $(BIN)/amigentd.apollo $(BIN)/amigent-apollo-probe $(BIN)/amigent-monitor.apollo
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+$(BUILD)/amigentd.apollo: $(OBJS) $(BUILD)/apollo_start.o
+	$(CC) $(CFLAGS) -nostartfiles -nostdlib -o $@ $(BUILD)/apollo_start.o $(OBJS)
+
+$(BUILD)/apollo_start.o: $(APOLLO)/apollo_start.s | $(BUILD)
+	$(CC) -c -o $@ $(APOLLO)/apollo_start.s
+
+$(BUILD)/apollo_runtime.o: $(APOLLO)/apollo_runtime.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_runtime.c
+
+$(BUILD)/amigentd.o: $(HERE)/daemon/amigentd.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(HERE)/daemon/amigentd.c
+
+$(BUILD)/apollo_detect.o: $(APOLLO)/apollo_detect.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_detect.c
+
+$(BUILD)/apollo_mmio.o: $(APOLLO)/apollo_mmio.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_mmio.c
+
+$(BUILD)/apollo_audio.o: $(APOLLO)/apollo_audio.c $(APOLLO)/apollo_audio.h | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/apollo_audio.c
+
+$(BUILD)/gcc_support.o: $(APOLLO)/gcc_support.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/gcc_support.c
+
+$(BUILD)/div64.o: $(APOLLO)/div64.c | $(BUILD)
+	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $(APOLLO)/div64.c
+
 $(BUILD)/amigent-apollo-probe: $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c | $(BUILD)
 	$(CC) $(PROBE_CFLAGS) $(INCLUDES) -o $@ $(APOLLO)/apollo_probe.c $(APOLLO)/apollo_detect.c -lgcc
+
+# Same 1.5.0 monitor source as the classic 68000 package, compiled for Apollo.
+$(BUILD)/amigent-monitor.apollo: $(TOOLS)/amigent-monitor.c | $(BUILD)
+	$(CC) $(MONITOR_CFLAGS) $(INCLUDES) -o $@ $(TOOLS)/amigent-monitor.c
+
+$(BIN):
+	mkdir -p $(BIN)
+
+$(BIN)/amigentd.apollo: $(BUILD)/amigentd.apollo | $(BIN)
+	cp $< $@
+
+$(BIN)/amigent-apollo-probe: $(BUILD)/amigent-apollo-probe | $(BIN)
+	cp $< $@
+
+$(BIN)/amigent-monitor.apollo: $(BUILD)/amigent-monitor.apollo | $(BIN)
+	cp $< $@
 
 clean:
 	rm -rf $(BUILD)

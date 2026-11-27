@@ -12,10 +12,16 @@ import time
 from pathlib import Path, PurePosixPath
 
 from mcp.server.fastmcp import FastMCP, Image as McpImage
+from mcp.server.fastmcp.exceptions import ToolError
+
+try:
+    from mcp.types import ToolAnnotations
+except ImportError:  # mcp before 1.7: no annotations, the allowlist below works all the same
+    ToolAnnotations = None
 
 from . import aminet, files, install, inventory, locks, machines, notes, others, pack, pictures, screentext
 from . import __version__
-from . import gdb, journal, memory, net, probes, secret, system, update, uptime, watch
+from . import gdb, journal, memory, net, probes, safety, secret, system, tls, update, uptime, watch
 from . import capture, display, emu68net, noos, serial_log
 from .sessions import Sessions, active, bound, bind_callback, current as _session
 from .client import join_path
@@ -80,7 +86,52 @@ INSTRUCTIONS = """Amigent operates registered Amigas.
 - When amiga_status says a newer Amigent is out, tell the user once; only
   after they agree, amiga_update(apply=True) updates this PC and the Amigas."""
 
-mcp = FastMCP("amigent", instructions=INSTRUCTIONS)
+# AMIGENT_READ_ONLY=1: only these tools exist. Each was read down to the amigentd
+# commands it sends (DIR, TEXT, TASKS, LOADED, SYSINFO) or the PC files it reads;
+# channel.READ_ONLY_COMMANDS holds the channel to the same list, whatever a tool does.
+# A tool not named here is not offered and not run: new tools stay out until audited.
+READ_ONLY = safety.read_only()
+READ_ONLY_TOOLS = frozenset({"amiga_list", "amiga_screen_text", "amiga_tasks", "amiga_loaded",
+                             "amiga_notes", "amiga_installs"})
+# MCP annotations are hints for the client, never the enforcement. Only the
+# read-only server gives them, where every tool it offers was audited to only look;
+# the default server makes no claim, so it stays as it was.
+READ_ONLY_INSTRUCTIONS = """Amigent looks at registered Amigas, read-only (AMIGENT_READ_ONLY).
+- The server enforces it: only amiga_list, amiga_screen_text, amiga_loaded,
+  amiga_tasks, amiga_notes and amiga_installs exist, and the line to the Amiga
+  takes only the read commands they use. Nothing is run, changed or written on
+  the Amiga; when a request needs that, tell the user it needs the server
+  without AMIGENT_READ_ONLY.
+- An omitted machine uses AMIGENT_HOST, the saved default, or the sole Amiga;
+  otherwise pass machine, a saved name or ID, and keep each machine's results apart.
+- amiga_list shows one directory; list the ones below one at a time, recursive
+  listing is not offered here.
+- amiga_screen_text for what is on the screen, window by window.
+- amiga_loaded for what really runs (a driver, a library version); amiga_tasks
+  for the tasks, their state and stack.
+- amiga_notes(topic) for what was learned earlier about a program; amiga_installs
+  for the installations recorded on this Amiga."""
+if READ_ONLY:
+    INSTRUCTIONS = READ_ONLY_INSTRUCTIONS
+
+
+class _Server(FastMCP):
+    """FastMCP that, read-only, lists and calls nothing outside READ_ONLY_TOOLS.
+
+    Unregistered tools are unknown to FastMCP anyway; this holds at the door too,
+    for anything that might get registered some other way."""
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        return [t for t in tools if not READ_ONLY or t.name in READ_ONLY_TOOLS]
+
+    async def call_tool(self, name: str, arguments: dict):
+        if READ_ONLY and name not in READ_ONLY_TOOLS:
+            raise ToolError(f"AMIGENT_READ_ONLY: {name} is not offered by this server")
+        return await super().call_tool(name, arguments)
+
+
+mcp = _Server("amigent", instructions=INSTRUCTIONS)
 # One packing policy per Amiga, shared by channel and screen; amigas.json may set "compress".
 sessions = Sessions(CTL_PORT, SCREEN_PORT)
 
@@ -107,7 +158,11 @@ def note_line(name: str, kwargs: dict, defaults: dict | None = None) -> str:
 
 
 def _note(line: str) -> bool:
-    """Best effort and only on a link that is up: the monitor must never cost a tool."""
+    """Best effort and only on a link that is up: the monitor must never cost a tool.
+
+    Read-only, amigent-monitor gets no line: NOTE is a command like any other."""
+    if READ_ONLY:
+        return False
     backend = getattr(_session().ctl, "backend", None)
     if not getattr(_session().ctl, "connected", False) or not hasattr(backend, "note"):
         return False
@@ -192,7 +247,7 @@ def _noted(fn):
         finally:
             if not sent:  # the tool may have brought the link up
                 _note(line)
-            if fn.__name__ not in UNJOURNALED:
+            if fn.__name__ not in UNJOURNALED and not READ_ONLY:
                 diary.add(_amiga_name(), line, ok)
         if isinstance(result, str):
             result = _outdated_note() + result
@@ -207,15 +262,37 @@ def _noted(fn):
 
 
 _tool = mcp.tool
+ANNOTATIONS = ToolAnnotations is not None and "annotations" in inspect.signature(FastMCP.tool).parameters
+
+
+def annotations_for(name: str):
+    """The MCP hints for a tool, from the sets above; None where nothing is claimed."""
+    if ToolAnnotations is None or not READ_ONLY or name not in READ_ONLY_TOOLS:
+        return None
+    return ToolAnnotations(readOnlyHint=True)
+
+
+def _refused(fn):
+    """What a tool's name means in Python when AMIGENT_READ_ONLY keeps it from MCP."""
+    @functools.wraps(fn)
+    def refuse(*args, **kwargs):
+        raise AmigaError(f"AMIGENT_READ_ONLY: {fn.__name__} is not offered by this server")
+    return refuse
 
 
 UNTARGETED = {"amiga_everywhere", "amiga_machines", "amiga_aminet_search", "amiga_aminet_readme", "amiga_update"}
 
 
 def _tool_noted(*args, **kwargs):
-    register = _tool(*args, **kwargs)
+    def register(name):
+        hints = annotations_for(name)
+        if ANNOTATIONS and hints is not None and "annotations" not in kwargs:
+            return _tool(*args, annotations=hints, **kwargs)
+        return _tool(*args, **kwargs)
 
     def decorate(fn):
+        if READ_ONLY and fn.__name__ not in READ_ONLY_TOOLS:
+            return _refused(fn)
         targeted = fn.__name__ not in UNTARGETED
         signature = inspect.signature(fn)
         if targeted:
@@ -255,7 +332,7 @@ def _tool_noted(*args, **kwargs):
             # Separate machines can progress while a slow command waits.
             return await asyncio.to_thread(run, *args, **kwargs)
 
-        register(dispatch)
+        register(fn.__name__)(dispatch)
         return run
     return decorate
 
@@ -274,7 +351,12 @@ def amiga_machines() -> str:
     entries = machines.load()
     def status(entry):
         conflicts = machines.conflicts(entry, entries)
-        online = not conflicts and net.greet(entry['host'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
+        if conflicts:
+            online = False
+        elif safety.require_tls():  # the pinned TLS port or nothing; no pin reads as offline
+            online = tls.greet(entry['id'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
+        else:
+            online = net.greet(entry['host'], SCREEN_PORT, 2, connect_timeout=2)[:4] == b'AMGT'
         return {"id": entry['id'], "name": entry['name'], "address": entry['host'],
                 "default": bool(entry.get('default')), "online": online,
                 "conflicts": conflicts}
@@ -1100,7 +1182,7 @@ def amiga_tasks(name: str = "") -> str:
     Needs amigentd 1.4.0. With WarpOS running, the PowerPC tasks follow
     with their CPU load, as WarpOS's tool stat tells it."""
     table = memory.task_table(_tasks(), name)
-    extra = _ppc_task_section(name)
+    extra = "" if READ_ONLY else _ppc_task_section(name)  # runs Version, CPU and stat: EXEC
     return table + ("\n\n" + extra if extra else "")
 
 
@@ -2254,6 +2336,9 @@ def _host_path(path: str) -> str:
 @mcp.tool()
 def amiga_list(path: str, recursive: bool = False) -> str:
     """List a directory, e.g. 'Work:Games'. Amiga paths use VOLUME:dir/file."""
+    if recursive and READ_ONLY:
+        raise AmigaError("AMIGENT_READ_ONLY: recursive listing is not offered; list one "
+                         "directory at a time")
     entries = _with_ctl(lambda: _session().ctl.list_dir(path, recursive))
     return "\n".join(
         f"{e['type']:4} {e['size']:>10} {e['date']} {e['name']}" for e in entries
@@ -4924,6 +5009,12 @@ def _close_for_update() -> None:
     with sessions._lock:
         open_now = list(sessions._sessions.values())
     for session in open_now:
+        viewer = session.viewer
+        if viewer is not None:
+            try:
+                viewer.stop_hear()  # Hear's own audio link goes before the daemon is replaced
+            except Exception:  # noqa: BLE001 - a stuck viewer must not block the update
+                pass
         try:
             with session.calls, bound(session):
                 with _exclusive():
@@ -4934,9 +5025,99 @@ def _close_for_update() -> None:
             pass
 
 
+def read_only_problems() -> list[str]:
+    """Everything a read-only server would offer beyond READ_ONLY_TOOLS; empty when it is clean.
+
+    Asks FastMCP's own registry, not the filter in _Server, so a tool, resource or
+    prompt that got in another way is found too."""
+    async def offered():
+        return (await FastMCP.list_tools(mcp), await mcp.list_resources(),
+                await mcp.list_resource_templates(), await mcp.list_prompts())
+
+    tools, resources, templates, prompts = asyncio.run(offered())
+    problems = [f"tool {t.name}" for t in tools if t.name not in READ_ONLY_TOOLS]
+    problems += [f"resource {r.uri}" for r in resources]
+    problems += [f"resource template {r.uriTemplate}" for r in templates]
+    problems += [f"prompt {p.name}" for p in prompts]
+    return problems
+
+
 def main() -> None:
-    update.refresh_in_background()
+    if READ_ONLY and (problems := read_only_problems()):
+        raise SystemExit("AMIGENT_READ_ONLY: refusing to start, not audited: " + ", ".join(problems))
+    if not READ_ONLY:  # it writes update.json and asks PyPI; neither is reading the Amiga
+        update.refresh_in_background()
     mcp.run()
+
+
+def _listen_seconds(seconds) -> float:
+    """The clip length the tool accepts: a number from a fifth of a second to two."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    value = float(seconds)
+    if not 0.2 <= value <= 2.0:
+        raise AmigaError("seconds must be a number from 0.2 to 2")
+    return value
+
+
+def _listen_clip(seconds: float) -> tuple[int, bytes]:
+    """Gather up to seconds of the Apollo mix. Opcode 49, not LOADED or EMU68."""
+    from .channel import pcm_wav
+    deadline = time.monotonic() + max(seconds, 0.4) * 12
+    chunks: list[bytes] = []
+    rate = 0
+    last = b""
+    want = int(seconds * 48000 * 4)
+    while time.monotonic() < deadline and sum(len(c) for c in chunks) < want:
+        got_rate, pcm = _with_ctl(lambda: _session().ctl.audio(200))
+        if pcm and pcm != last:
+            if rate and got_rate != rate:
+                break
+            rate = got_rate or rate
+            last = pcm
+            chunks.append(pcm)
+            if rate:
+                want = int(seconds * rate * 4)
+            continue
+        time.sleep(0.002)
+    pcm = b"".join(chunks)
+    return rate, pcm_wav(pcm, rate) if pcm and rate else b""
+
+
+def _audio_result(wav: bytes):
+    """An MCP audio block, from whichever module this sdk version exports it."""
+    try:
+        from mcp.server.fastmcp import Audio as McpAudio
+    except ImportError:
+        from mcp.server.fastmcp.utilities.types import Audio as McpAudio
+    return McpAudio(data=wav, format="wav")
+
+
+@mcp.tool()
+def amiga_listen(seconds: float = 1.0) -> list:
+    """Hear what an AHI program is playing on ApolloOS.
+
+    A short clip of the mix arne.audio is sending to the DAC. Nothing comes
+    back when the Amiga is quiet, or when the sound is not going through AHI.
+    seconds is from 0.2 to 2. Uses CMD_AUDIO (opcode 49), when SYSINFO
+    advertises audio=49. The returned count is bytes received from the daemon,
+    not a claim that they were heard.
+    """
+    from .channel import AUDIO
+    seconds = _listen_seconds(seconds)
+    if not _with_ctl(lambda: callable(getattr(_session().ctl, "audio", None))):  # amigactld
+        return ["listening needs amigentd's command channel; this connection uses the older "
+                "amigactld. Run amigent-setup --update to install amigentd"]
+    info = _with_ctl(_session().ctl.sysinfo)
+    audio = str(info.get("audio") or "")
+    if audio == "1":
+        return ["this Apollo daemon advertises legacy audio=1 (opcode 48); update it for opcode 49 (audio=49)"]
+    if audio != str(AUDIO):
+        return ["this Amiga has no AHI mix to hear"]
+    rate, wav = _listen_clip(seconds)
+    if not wav:
+        return ["nothing is playing through AHI"]
+    return [f"heard {len(wav) - 44} bytes at {rate} Hz", _audio_result(wav)]
 
 
 if __name__ == "__main__":

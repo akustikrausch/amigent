@@ -54,11 +54,14 @@ def test_classic_68000_packaged_daemon_identity():
 
 def test_unknown_bytes_are_named_file_without_invented_family():
     got = describe_connected(6, "custom 9.9.9", b"\x00\x00\x03\xf3not-a-packaged-daemon",
-                             {"os": "ApolloOS", "cpu": "68080", "audio": "1"}, BIN)
+                             {"os": "ApolloOS", "cpu": "68080", "audio": "49"}, BIN)
     assert got["daemon_identity"] == "named file"
     assert got["daemon_family"] == "" and got["daemon_target"] == ""
     assert got["daemon_version"] == "custom 9.9.9"
     assert "AUDIO" in got["daemon_capabilities"]
+    legacy = describe_connected(6, "custom 1.5.0", b"\x00\x00\x03\xf3not-a-packaged-daemon",
+                                {"os": "ApolloOS", "cpu": "68080", "audio": "1"}, BIN)
+    assert "AUDIO" in legacy["daemon_capabilities"]
 
 
 def test_named_file_is_not_a_proven_running_binary():

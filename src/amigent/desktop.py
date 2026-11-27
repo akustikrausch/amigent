@@ -204,7 +204,8 @@ def _install_mac(host: str) -> list[str]:
         subprocess.run(["ditto", "-x", "-k", str(MAC_RELEASE), str(MAC_APP.parent)], check=True)
     else:
         build_mac_app(MAC_APP.parent, host=host)
-    subprocess.run(["touch", str(MAC_APP)], check=False)  # poke Finder into showing the icon
+    if MAC_APP.exists():
+        os.utime(MAC_APP, None)  # poke Finder into showing the icon
     if shutil.which("mdimport"):
         subprocess.run(["mdimport", str(MAC_APP)], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # for Spotlight

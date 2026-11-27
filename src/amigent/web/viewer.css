@@ -788,3 +788,6 @@ body.fleet #tiles {
 .tile .state.bad { color: var(--bad-ink); }
 .tile .star { color: var(--accent-ink); }
 .tile.offline .shot img { filter: grayscale(1) opacity(.5); }
+
+/* Hear from #50 */
+#hear[hidden] { display: none !important; }

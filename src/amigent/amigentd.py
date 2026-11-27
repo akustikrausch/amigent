@@ -15,7 +15,7 @@ from collections import deque
 
 from PIL import Image
 
-from . import pack, tls
+from . import pack, safety, tls
 from .planar import HAM, HAS_PALETTE, Chunky, Planes, PlanarError
 from .planar import header as planar_header
 from .secret import load_key
@@ -158,6 +158,8 @@ class Amigentd:
 
     def connect(self) -> None:
         self.close()
+        if safety.read_only():  # this link carries mouse, keys, RUN and PUT
+            raise AmigentdError("AMIGENT_READ_ONLY is set; the screen connection was not opened")
         try:
             self._sock = tls.connect(self.host, self.port, 5)  # TLS when a certificate is pinned
             self._sock.settimeout(self.timeout)
@@ -168,6 +170,9 @@ class Amigentd:
             self.protocol, self.flags = struct.unpack(">HH", hello[4:8])
             if refused := tls.plain_closed(self.flags, hasattr(self._sock, "version")):
                 raise AmigentdError(refused)
+            if safety.require_tls() and not isinstance(self._sock, ssl.SSLSocket):
+                raise AmigentdError("AMIGENT_REQUIRE_TLS is set and this line is not TLS; "
+                                    "no key was sent")
             if self.flags & 1:  # bit 0: a key is required, bit 1: TLS on the next port
                 self._authenticate()
             if self.protocol >= 2:

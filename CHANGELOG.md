@@ -20,6 +20,21 @@ Versions follow [semver](https://semver.org). The number lives in
   with ffmpeg: the remote desktop switches to it for programs without the OS
   and chipset screens, and `amiga_screenshot` and `amiga_wait_change` fall back
   to it. `amiga_capture` lists and sets the device. (#3)
+- `AMIGENT_REQUIRE_TLS=1`: TLS with the pinned certificate or no connection.
+  No plain dial, no `amigactld` fallback, no network sweep for a moved Amiga,
+  no key on a plain line, and no plain hello read to explain a refused TLS
+  port; `amiga_restart` waits on the TLS port, with time for a slow handshake,
+  and `amiga_machines` and the overview check reachability there.
+- `AMIGENT_READ_ONLY=1`: `amigent-server` lists and runs only `amiga_list`,
+  `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
+  `amiga_installs`, on every saved Amiga, refuses every other name, and will
+  not start with anything else registered. Its channel sends only the commands
+  those tools need; `amiga_tasks` leaves out the PowerPC section, which runs
+  commands. There is no update check either, and the server's instructions to
+  the AI name only those six tools.
+  `amiga_list` lists one directory at a time there. With mcp 1.7 or later
+  these six tools carry the MCP hint `readOnlyHint`; the default server gives
+  no hints, as before.
 
 ## 1.5.0 (2026-11-23)
 

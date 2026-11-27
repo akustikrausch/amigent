@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import struct
+import threading
 import time
 
 from amigent.viewer import Viewer, WebSocket, _amiga_name, _join, tiles_message
@@ -422,6 +423,7 @@ def test_set_online_sends_a_key_to_the_page_and_the_raw_reason_to_the_terminal(c
     viewer.online = None
     viewer.reason = ""
     viewer.host = "amiga.local"
+    viewer.clients_lock, viewer.hearers, viewer._media_wake = threading.Lock(), set(), threading.Event()
     events = []
     viewer.event = lambda kind, **fields: events.append((kind, fields))
     viewer._set_online(False, "amigentd at 10.0.0.8:6801 not answering: timed out")

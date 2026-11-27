@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .roster import identity, RegistryError
 
+import ipaddress
 import socket
 import re
 import struct
@@ -17,7 +18,7 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import pack, tls
+from . import pack, safety, tls
 from .amigactl import AmigaCtl
 from .client import ExecResult, VolumeFlush, join_path
 from .errors import AmigaError
@@ -31,6 +32,7 @@ NOTE = 37  # a line for amigent-monitor, no answer; SYSINFO says "note=1" when u
 LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
 EMU68 = 48  # protocol 6, "emu68" in SYSINFO (amigentd 1.5.0)
+AUDIO = 49  # protocol 6, "audio=49" in SYSINFO (Apollo ARNE mix, amigentd 1.6.0)
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -50,12 +52,113 @@ def pc_outdated(protocol: int) -> str:
     from . import __version__
     return (f"amigentd on the Amiga is newer than Amigent {__version__} on this PC. Update the PC "
             "side too: run \"pipx upgrade amigent\", then restart the AI app and the remote desktop.")
+
+
+# AMIGENT_READ_ONLY: the commands a read-only channel may send. Logging in, the
+# channel itself, its packing level, and the requests that only look. LOADED and
+# TASKS exist from protocol 6 on; below it their numbers mean nothing.
+READ_ONLY_COMMANDS = frozenset({CMD_AUTH, CMD_CHANNEL, COMPRESS, SYSINFO, DIR, TEXT})
+READ_ONLY_COMMANDS_6 = frozenset({LOADED, TASKS})
+READ_ONLY_CODE = -1  # not the Amiga's answer: the request never left this PC
+
+
+class ReadOnlyRefused(AmigaError):
+    """AMIGENT_READ_ONLY kept a command off the wire."""
+
+    def __init__(self, cmd: int):
+        super().__init__(f"AMIGENT_READ_ONLY: amigentd command {cmd} is not on the read-only "
+                         "list and was not sent", READ_ONLY_CODE)
+
+
+def read_only_allows(protocol: int, cmd: int) -> bool:
+    if cmd in READ_ONLY_COMMANDS:
+        return True
+    return protocol >= LOADED_PROTOCOL and cmd in READ_ONLY_COMMANDS_6
+
+
+def feature_opcode(protocol: int, feature: str, info: dict | None = None) -> int | None:
+    """The opcode for one protocol-6 feature on this daemon, or None when unavailable.
+
+    AUDIO uses unique opcode 49 (``CMD_AUDIO``) and requires SYSINFO ``audio=49``.
+    A legacy 1.5.0 fork daemon advertising ``audio=1`` (where opcode 48 was
+    overloaded for AUDIO) returns ``None`` for both ``AUDIO`` and ``EMU68`` so a
+    1.6.0 client never sends the wrong command to opcode 48 or 49.
+    """
+    info = info or {}
+    if protocol < LOADED_PROTOCOL:
+        return None
+    if feature == "AUDIO":
+        return AUDIO if str(info.get("audio") or "") == str(AUDIO) else None
+    if feature == "EMU68":
+        if str(info.get("audio") or "") == "1":
+            return None
+        return EMU68 if "emu68" in info else None
+    if feature == "LOADED" and info.get("loaded") == "1":
+        return LOADED
+    if feature == "TASKS" and info.get("loaded") == "1":
+        return TASKS
+    if feature == "PEEK" and info.get("loaded") == "1":
+        return PEEK
+    if feature == "TASKCTL" and info.get("loaded") == "1":
+        return TASKCTL
+    if feature == "TRACE" and info.get("loaded") == "1":
+        return None if info.get("trace") == "0" else TRACE
+    if feature == "POKE":
+        return POKE
+    if feature in ("LOCKS", "CPU", "DRAG", "QUIET") and info.get("probe") == "1":
+        return {"LOCKS": LOCKS, "CPU": CPU, "DRAG": DRAG, "QUIET": QUIET}[feature]
+    return None
+
+
+def audio_request(arg: int = 0, y: int = 0, protocol: int = LOADED_PROTOCOL) -> bytes:
+    """The 10-byte AUDIO (opcode 49) header. arg 1 starts a stream, arg 2 stops, y is one-shot ms."""
+    opcode = feature_opcode(protocol, "AUDIO", {"audio": str(AUDIO)})
+    if opcode is None:
+        raise AmigaError("AUDIO is not available on this protocol")
+    return struct.pack(">BBHHHH", opcode, arg & 0xFF, 0, y & 0xFFFF, 0, 0)
+
+
 PAUSE_MAX = 65535  # seconds; INFO tells what is left in a u16
 PLAIN_CLOSED, PLAIN_CLOSED_TEXT = tls.PLAIN_CLOSED, tls.PLAIN_CLOSED_TEXT
 SLICE = 16384  # send granularity: a stall is noticed per slice, not per file
 WINDOW = 16  # requests in flight; enough to hide a 300 ms round trip behind 4 KB files
 CRC_RATE = 50_000  # bytes/s CHECKSUM manages on a 7 MHz 68000 reading a slow disk
 DISK_RATE = 20_000  # bytes/s for the far end to settle a READ/WRITE, pessimistic on purpose
+
+
+def peer_is_loopback(host: str) -> bool:
+    """127.0.0.1 and localhost. The TLS pump is one of these. A name is not."""
+    text = str(host).split("%", 1)[0]
+    if text.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def audio_uses_tls(flags: int, host: str) -> bool:
+    """Remote audio goes over TLS when the daemon has closed the plain port."""
+    return bool(flags & PLAIN_CLOSED) and not peer_is_loopback(host)
+
+
+def apollo_commands(info: dict | None) -> frozenset[str]:
+    """Optional Apollo commands advertised by this daemon."""
+    info = info or {}
+    commands = set()
+    if str(info.get("audio") or "") == str(AUDIO):
+        commands.add("AUDIO")
+    return frozenset(commands)
+
+
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """s16le stereo at rate, as a WAV the host tools can play."""
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + len(pcm), b"WAVE",
+        b"fmt ", 16, 1, 2, rate, rate * 4, 4, 16,
+        b"data", len(pcm))
+    return header + pcm
 
 
 def budget(size: int, rate: float, base: float = 30.0) -> float:
@@ -235,18 +338,20 @@ class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None,
-                 address: str | None = None):
+                 address: str | None = None, read_only: bool | None = None):
         self.host = identity(host)
         self.port = port
         self.address = address  # dial here, not where the registry says, and never look elsewhere
         self.timeout = timeout
         self.key = key
+        self.read_only = safety.read_only() if read_only is None else read_only
         self._sock: socket.socket | None = None
         self.banner = ""
         self.protocol = 0
         self.policy: pack.Policy | None = None  # Commands hands its own; else one per host
         self.zlevel = 0  # what COMPRESS last set on this connection
         self._asked = 0.0  # when the request whose answer comes next went out
+        self._audio_opcode = 0
 
     # link
 
@@ -267,6 +372,8 @@ class AmigaChannel(VolumeFlush):
                                  f"{CHANNEL_PROTOCOL}")
             if refused := tls.plain_closed(flags, hasattr(self._sock, "version")):
                 raise AmigaError(refused)
+            if safety.require_tls() and not hasattr(self._sock, "version"):
+                raise AmigaError("AMIGENT_REQUIRE_TLS is set and this line is not TLS; no key was sent")
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -282,6 +389,7 @@ class AmigaChannel(VolumeFlush):
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
             self._notes = self._read_from = None  # a new amigentd may answer now
+            self._audio_opcode = 0
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
                     self.policy = pack.policy_for(self.host)
@@ -309,8 +417,13 @@ class AmigaChannel(VolumeFlush):
             data += chunk
         return bytes(data)
 
+    def _allow(self, cmd: int) -> None:
+        if self.read_only and not read_only_allows(self.protocol, cmd):
+            raise ReadOnlyRefused(cmd)
+
     def _header(self, cmd: int, arg: int = 0, x: int = 0, y: int = 0, w: int = 0, h: int = 0) -> None:
         assert self._sock
+        self._allow(cmd)
         self._sock.sendall(struct.pack(">BBHHHH", cmd, arg, x, y, w, h))
 
     def _send(self, data: bytes) -> None:
@@ -324,6 +437,7 @@ class AmigaChannel(VolumeFlush):
 
     def _put(self, req: Request) -> None:
         """Fire one request at the Amiga without waiting for its answer."""
+        self._allow(req.cmd)
         raw = req.path.encode(ENCODING)
         arg, w, h, payload = req.arg, req.w, req.h, req.payload
         if (req.cmd == WRITE and len(payload) >= PACK_WRITE_MIN and self.policy
@@ -400,6 +514,8 @@ class AmigaChannel(VolumeFlush):
         """
         if not self._sock:
             self.connect()
+        for req in requests:  # all or nothing: a refusal halfway would leave answers in flight
+            self._allow(req.cmd)
         results: list = [None] * len(requests)
         asked = [0.0] * len(requests)
         sent = got = 0
@@ -584,8 +700,9 @@ class AmigaChannel(VolumeFlush):
         """A line for amigent-monitor's window on the Amiga: what the agent is doing.
 
         NOTE has no answer, so it costs no round trip and the stream stays in
-        step. Silently nothing on an amigentd that doesn't know it."""
-        if not self._sock or self.protocol < PACK_PROTOCOL:
+        step. Silently nothing on an amigentd that doesn't know it, and on a
+        read-only channel."""
+        if not self._sock or self.protocol < PACK_PROTOCOL or self.read_only:
             return
         if getattr(self, "_notes", None) is None:
             self._notes = self.sysinfo().get("note") == "1"
@@ -670,7 +787,12 @@ class AmigaChannel(VolumeFlush):
     def _need_emu68(self, what: str) -> None:
         self._need6(what)
         if getattr(self, "_emu68", None) is None:
-            self._emu68 = "emu68" in self.sysinfo()
+            info = self.sysinfo()
+            # A legacy 1.5.0 fork Apollo daemon (audio=1) puts AUDIO on opcode 48 instead of EMU68.
+            self._legacy_audio_48 = str(info.get("audio") or "") == "1"
+            self._emu68 = "emu68" in info and not self._legacy_audio_48
+        if getattr(self, "_legacy_audio_48", False):
+            raise AmigaError(f"{what}: daemon advertises legacy audio=1 on opcode 48, not EMU68")
         if not self._emu68:
             raise AmigaError(f"{what} needs amigentd 1.5.0 or newer; run amigent-setup --update")
 
@@ -697,6 +819,59 @@ class AmigaChannel(VolumeFlush):
         self._need_probe("a quiet monitor")
         self._one(Request(QUIET, "", 0, seconds))
 
+    def _apollo_opcode(self, what: str, feature: str) -> int:
+        """Opcode 49 on protocol >= 6 when SYSINFO advertises ``audio=49``.
+
+        Refuses legacy ``audio=1`` (where opcode 48 was overloaded for AUDIO) so a
+        1.6.0 client never silently mis-targets opcode 48 or 49 across mixed versions.
+        """
+        if not self._sock:
+            self.connect()
+        if self.protocol < LOADED_PROTOCOL:
+            raise AmigaError(f"{what} needs amigentd 1.6.0 or newer (protocol {LOADED_PROTOCOL}); "
+                             "run amigent-setup --update")
+        info = self.sysinfo()
+        if feature == "AUDIO" and str(info.get("audio") or "") == "1":
+            raise AmigaError(f"{what}: daemon advertises legacy audio=1 (opcode 48); "
+                             f"upstream requires CMD_AUDIO (opcode {AUDIO}, audio={AUDIO})")
+        opcode = feature_opcode(self.protocol, feature, info)
+        if opcode is None:
+            raise AmigaError(f"{what} needs an Apollo build of amigentd advertising audio={AUDIO}")
+        return opcode
+
+    def audio(self, ms: int = 0) -> tuple[int, bytes]:
+        """One shot of the AHI mix arne.audio is playing: (sample rate, s16le stereo).
+
+        ms is how long to collect, up to a fifth of a second. Zero returns the
+        newest finished half. Empty when nothing is playing through AHI.
+        """
+        self._request(self._apollo_opcode("ARNE audio", "AUDIO"), y=max(0, min(int(ms), 200)))
+        head = self._exact(8)
+        rate, size = struct.unpack(">II", head)
+        return rate, self._exact(size) if size else b""
+
+    def audio_start(self) -> None:
+        """Ask the daemon to copy the mix into its FIFO and push it until audio_stop."""
+        self._audio_opcode = self._apollo_opcode("ARNE audio", "AUDIO")
+        self._request(self._audio_opcode, arg=1)
+
+    def audio_read(self) -> tuple[int, bytes] | None:
+        """The next streamed chunk, or None when the daemon has ended the stream."""
+        rate, size = struct.unpack(">II", self._exact(8))
+        if size == 0xFFFFFFFF:
+            return None
+        if size > 256 * 1024:
+            raise AmigaError("audio chunk is too large")
+        return rate, self._exact(size) if size else b""
+
+    def audio_stop(self) -> None:
+        """Tell the daemon to finish the stream. The end marker arrives via audio_read."""
+        if not self._sock:
+            return
+        self._sock.settimeout(self.timeout)
+        opcode = self._audio_opcode or self._apollo_opcode("ARNE audio", "AUDIO")
+        self._header(opcode, arg=2)
+
     def debug_log(self, since: int = 0) -> tuple[int, bytes]:
         """What went through RawPutChar since the count since: (count now, bytes)."""
         self._need5("reading debug output")
@@ -708,13 +883,28 @@ class Commands:
     """amigentd's command channel when the Amiga offers it, else amigactld."""
 
     def __init__(self, host: str, ctl_port: int = 6800, screen_port: int = 6801,
-                 timeout: float = 30.0):
+                 timeout: float = 30.0, read_only: bool | None = None):
         self.host, self.ctl_port, self.screen_port, self.timeout = identity(host), ctl_port, screen_port, timeout
+        self.read_only = safety.read_only() if read_only is None else read_only
         self.backend: AmigaChannel | AmigaCtl | None = None
+
+    def _channel(self) -> AmigaChannel:
+        channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+        channel.read_only = self.read_only
+        return channel
+
+    def connect_audio(self, *, tls: bool) -> None:
+        """The music stream. A TLS failure stays a failure and does not fall through to amigactld."""
+        channel = self._channel()
+        channel.connect()
+        if tls and not hasattr(channel._sock, "version"):
+            channel.close()
+            raise AmigaError(PLAIN_CLOSED_TEXT)
+        self.backend = channel
 
     def connect(self) -> None:
         if self.backend is None:
-            channel = AmigaChannel(self.host, self.screen_port, self.timeout)
+            channel = self._channel()
             try:
                 channel.connect()
                 self.backend = channel
@@ -722,7 +912,9 @@ class Commands:
             except RegistryError:
                 raise
             except AmigaError as e:
-                if "refused the key" in str(e) or "wants a key" in str(e):
+                # amigactld is plain TCP and has no read-only gate: neither switch falls back to it.
+                if ("refused the key" in str(e) or "wants a key" in str(e)
+                        or safety.require_tls() or self.read_only):
                     raise
                 first = e
             legacy = AmigaCtl(self.host, self.ctl_port, self.timeout)

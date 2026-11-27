@@ -17,6 +17,8 @@ import ipaddress
 import socket
 from dataclasses import dataclass, field
 
+from . import safety
+
 
 @dataclass(frozen=True)
 class Agent:
@@ -97,7 +99,8 @@ def scan(ctl, host: str, info: dict) -> list[Found]:
         for port in agent.tcp:
             # An emulator on this PC shares its ports with the PC's own programs (the WinUAE
             # GDB server also listens on 2345), so there only the Amiga's names count.
-            if host and not loopback(host) and listening(host, port):
+            # AMIGENT_REQUIRE_TLS: no plain socket to the Amiga at all, only the names count.
+            if host and not loopback(host) and not safety.require_tls() and listening(host, port):
                 f.running = True
                 f.how.append(f"listens on TCP {port}")
         for path in agent.files:

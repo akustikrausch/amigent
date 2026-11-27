@@ -18,7 +18,7 @@ import struct
 import threading
 import time
 
-from . import net, secret, tls
+from . import net, safety, secret, tls
 from .roster import (address, aliases, default, find, forget, list_file, load, name_of,  # noqa: F401
                      pick, remember, rename, save, stems, unique_name, identity, edit,
                      conflicts, found_again, is_id, validate_address, RegistryError)
@@ -101,8 +101,11 @@ def _proves_key(candidate: str, key: str) -> bool:
 
 
 def relocate(host: str) -> str | None:
-    """Sweep the network for this Amiga; returns and remembers its new address, if any."""
-    if getattr(_busy, "on", False) or not host:  # this thread is mid-sweep already: no nesting
+    """Sweep the network for this Amiga; returns and remembers its new address, if any.
+
+    Never under AMIGENT_REQUIRE_TLS: the sweep greets plain ports, and without
+    a pin it would hand our key to whoever answers there."""
+    if getattr(_busy, "on", False) or not host or safety.require_tls():  # no nesting either
         return None
     now = time.monotonic()
     with _lock:

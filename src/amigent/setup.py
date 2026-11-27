@@ -185,10 +185,12 @@ def _reported(info: dict) -> bool:
 
 
 def _apollo_by_probe(link: Amigentd) -> bool:
-    """SETUP only returns a program's exit code. 0 means the probe said ApolloOS.
+    """SETUP only returns a program's exit code.
 
-    A missing probe is an unsuccessful probe: the caller keeps the classic binary.
-    Without an Apollo build in the package the probe is not even sent.
+    An Apollo probe returns 0 only when ApolloOS and the FPGA core bit are both
+    present. A missing probe is an unsuccessful probe: the caller keeps the
+    classic binary. Without an Apollo build in the package the probe is not
+    even sent.
     """
     probe = AMIGA / "bin" / "amigent-apollo-probe"
     if not _apollo_packaged() or not probe.is_file():
@@ -196,6 +198,25 @@ def _apollo_by_probe(link: Amigentd) -> bool:
     link.put("T:amigent-apollo-probe", probe.read_bytes())
     link.run("Protect T:amigent-apollo-probe +e")
     return link.run("T:amigent-apollo-probe") == 0
+
+
+def monitor_file(build: str) -> str:
+    """The packaged monitor for a build ``select_build`` already returned.
+
+    The installed name stays ``amigent-monitor``. ApolloOS uses the Apollo
+    monitor when that file is in the package, and the general-purpose
+    monitor when it is not. Every other build keeps the general-purpose one.
+    """
+    if build == "amigentd.apollo" and (AMIGA / "bin" / "amigent-monitor.apollo").is_file():
+        return "amigent-monitor.apollo"
+    return "amigent-monitor"
+
+
+def window_source(name: str, build: str):
+    """Local file to store as ``name``, or None when that window is not packaged."""
+    packaged = monitor_file(build) if name == "amigent-monitor" else name
+    path = AMIGA / "bin" / packaged
+    return path if path.is_file() else None
 
 
 def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: bool) -> None:
@@ -213,8 +234,9 @@ def install(link: Amigentd, home: str, key: str, allow: str | None, with_actld: 
         link.put(f"{home}/{name}", text.encode("iso-8859-1"))
     link.put(f"{home}/amigent-repair.info", (AMIGA / "amigent-repair.info").read_bytes())
     for name in WINDOWS:  # the little windows on the Amiga's side
-        if (AMIGA / "bin" / name).exists():
-            link.put(f"{home}/{name}", (AMIGA / "bin" / name).read_bytes())
+        local = window_source(name, build)
+        if local is not None:
+            link.put(f"{home}/{name}", local.read_bytes())
     print("setting the key")
     link.put("S:amigent.key", (key + "\n").encode())
     link.put(f"{home}/amigent.key", (key + "\n").encode())
@@ -327,12 +349,12 @@ def update_folders(channel, home: str | None, spare: str | None, amigentd: bytes
         update_spare(channel, home, spare, amigentd)
 
 
-def update_windows(channel, home: str | None) -> None:
+def update_windows(channel, home: str | None, build: str = "amigentd") -> None:
     """amigent-status and amigent-monitor into the Amigent folder, where they differ."""
     home = home or _noted(channel, "amigent-home") or "SYS:amigent"
     for name in WINDOWS:
-        local = AMIGA / "bin" / name
-        if not local.exists():
+        local = window_source(name, build)
+        if local is None:
             continue
         target = f"{home}/{name}"
         try:
@@ -365,7 +387,7 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             return 1
         if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
             channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
-        update_windows(channel, home)
+        update_windows(channel, home, build)
         try:
             installed = channel.read_file("C:amigentd")
         except AmigaError as e:

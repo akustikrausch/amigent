@@ -317,7 +317,7 @@ class _Handler(TokenHandler):
             while (message := ws.receive()) is not None:
                 if isinstance(message, str):
                     try:
-                        self.viewer.submit(json.loads(message))
+                        self.viewer.submit(json.loads(message), ws)
                     except ValueError:
                         pass
         except (OSError, EOFError):

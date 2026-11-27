@@ -832,21 +832,23 @@ static void draw_all(void)
 static void tool_types(struct WBStartup *wb)
 {
     struct DiskObject *dob;
-    char *v;
+    UBYTE *v;
     BPTR old;
 
     if (!(IconBase = OpenLibrary("icon.library", 36)))
         return;
     old = CurrentDir(wb->sm_ArgList[0].wa_Lock);
     if ((dob = GetDiskObject(wb->sm_ArgList[0].wa_Name))) {
-        if ((v = FindToolType(dob->do_ToolTypes, "LEFT"))) StrToLong(v, &opt_left);
-        if ((v = FindToolType(dob->do_ToolTypes, "TOP"))) StrToLong(v, &opt_top);
-        if ((v = FindToolType(dob->do_ToolTypes, "WIDTH"))) StrToLong(v, &opt_w);
-        if ((v = FindToolType(dob->do_ToolTypes, "HEIGHT"))) StrToLong(v, &opt_h);
-        if ((v = FindToolType(dob->do_ToolTypes, "SIZE"))) StrToLong(v, &opt_size);
-        if ((v = FindToolType(dob->do_ToolTypes, "NAME")))
+        /* NDK FindToolType takes CONST_STRPTR *; DiskObject still exposes STRPTR *. */
+        CONST_STRPTR *types = (CONST_STRPTR *)dob->do_ToolTypes;
+        if ((v = FindToolType(types, "LEFT"))) StrToLong(v, &opt_left);
+        if ((v = FindToolType(types, "TOP"))) StrToLong(v, &opt_top);
+        if ((v = FindToolType(types, "WIDTH"))) StrToLong(v, &opt_w);
+        if ((v = FindToolType(types, "HEIGHT"))) StrToLong(v, &opt_h);
+        if ((v = FindToolType(types, "SIZE"))) StrToLong(v, &opt_size);
+        if ((v = FindToolType(types, "NAME")))
             strncpy(opt_name, v, sizeof(opt_name) - 1);
-        if ((v = FindToolType(dob->do_ToolTypes, "FONT")))
+        if ((v = FindToolType(types, "FONT")))
             strncpy(opt_font, v, sizeof(opt_font) - 1);
         FreeDiskObject(dob);
     }

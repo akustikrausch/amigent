@@ -23,7 +23,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlparse
 
-from . import machines, net, roster
+from . import machines, net, roster, safety, tls
 from .errors import AmigaError
 from .amigentd import AmigentdError
 from .channel import Commands
@@ -125,8 +125,13 @@ class Fleet:
         # or running commands on every saved machine just to populate a selector.
         while not entry["stop"].is_set():
             try:
-                target = machines.address(entry["id"]) if self.saved else entry["host"]
-                entry["online"] = net.greet(target, self.screen_port, 2, connect_timeout=2)[:4] == b"AMGT"
+                if safety.require_tls():  # the pinned TLS port or nothing
+                    hello = tls.greet(entry["id"] if self.saved else entry["host"], self.screen_port, 2,
+                                      connect_timeout=2)
+                else:
+                    target = machines.address(entry["id"]) if self.saved else entry["host"]
+                    hello = net.greet(target, self.screen_port, 2, connect_timeout=2)
+                entry["online"] = hello[:4] == b"AMGT"
                 entry["error"] = "" if entry["online"] else "Not reachable"
                 if entry["online"]:
                     entry["seen"] = time.time()

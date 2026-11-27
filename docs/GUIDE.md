@@ -884,6 +884,8 @@ settings and menu entries; see
 | `AMIGENT_FLEET_PORT` | `6820` | port of the overview, on 127.0.0.1 only |
 | `AMIGENT_KEY` | | key for `amigentd`, if not taken from `~/.config/amigent/` |
 | `AMIGENT_TLS` | `auto` | `off` talks to `amigentd` unencrypted even with a certificate |
+| `AMIGENT_REQUIRE_TLS` | off | `1`: TLS with the pinned certificate or no connection at all, see [Security](#security) |
+| `AMIGENT_READ_ONLY` | off | `1`: the MCP server offers only tools that change nothing, see [Security](#security) |
 | `AMIGENT_GDB` | | `host:port` of WinUAE's GDB server, when not set as `"gdb"` in `amigas.json` |
 | `AMIGENT_WINUAE` | | WinUAE's program, when not set as `"winuae"` in `amigas.json` |
 | `AMIGENT_NO_UPDATE_CHECK` | | `1` stops looking for new releases (also `python -m amigent.update off`) |
@@ -919,6 +921,36 @@ or the close gadget ends it, C clears the log.
   [PROTOCOL.md](PROTOCOL.md#tls) for how. Without TLS the connection is
   unencrypted, and someone who can read your network traffic could read the key
   too.
+- `AMIGENT_REQUIRE_TLS=1` makes the PC side refuse anything but TLS with the
+  pinned certificate: no pin, `AMIGENT_TLS=off`, a failed handshake or another
+  certificate end the attempt before a byte reaches a plain port. There is no
+  fallback to `amigactld`, no search of the network for a moved Amiga
+  (`amiga_find` with an address still works), and a refused TLS port is not
+  explained from the plain port's hello. `amiga_restart` waits on the TLS port:
+  gone once it takes no connection, back once the pinned `amigentd` says hello,
+  with up to 30 seconds for a slow handshake. `amiga_machines` and the overview
+  count an Amiga as reachable only there.
+- `AMIGENT_READ_ONLY=1` makes `amigent-server` offer only `amiga_list`,
+  `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
+  `amiga_installs`, for every saved Amiga (`machine=`). Every other tool, and
+  any tool added later, is neither listed nor run, whatever the AI app's own
+  tool switches say, and the server refuses to start if anything else is
+  registered. Its command channel sends only the commands those tools need
+  (DIR, TEXT, TASKS, LOADED, SYSINFO), it does not fall back to `amigactld`, it
+  opens no screen connection (that one carries mouse and keys), and
+  `amigent-monitor` gets no line per tool. `amiga_tasks` leaves out the
+  PowerPC section (it runs WarpOS's `stat`), and the server does not look for
+  a new Amigent release. Its instructions to the AI name only those six tools.
+  `amiga_list` lists one directory at a time there, never recursively. With
+  mcp 1.7 or later these tools carry the MCP hint `readOnlyHint`; hints are
+  for the AI app, the server does the enforcing. These tools do show the
+  Amiga's file names, screen text and tasks to the AI.
+- What `AMIGENT_REQUIRE_TLS` does not cover: the link to WinUAE's GDB server
+  (`amiga_emulator`, `amiga_trace` on an emulator) is plain TCP on the PC;
+  `amiga_pistorm` uses ssh and `amiga_serial_log` a local serial port. The
+  remote desktop, the overview and `amigent-setup` follow the variable only
+  when they see it, so set it for them too when they are started on their
+  own.
 - Setup commands only work in `SETUP` mode, which `amigent-setup` switches off.
 - The remote desktop and the overview listen only on the PC itself and need the
   token in their address.
@@ -938,6 +970,42 @@ A cross compiler on the PC works too: `m68k-amigaos-gcc -O2 -m68020 -noixemul -s
 Docker image; `-m68000` for the 68000 build). The released binaries are vbcc's and stay in `src/amigent/amiga/bin/`.
 The `amiga` workflow builds amigentd, amigent-status and amigent-monitor this way
 whenever something in `src/native/amiga/` changes and keeps them as an artifact of the run.
+
+### Apollo V4 / 68080 (source-only)
+
+Release packages (wheels, source distributions, and Aminet `.lha` archives) ship
+the classic `amigentd`, `amigentd.000`, `amigent-status`, and `amigent-monitor`
+executables only. No prebuilt `amigentd.apollo`, `amigent-apollo-probe`, or
+`amigent-monitor.apollo` executable is included in upstream release packages.
+`amigent-setup` keeps an existing Apollo daemon in place during a normal update
+when no packaged `amigentd.apollo` is present (`--force` installs classic `amigentd`).
+
+To build the Apollo binaries (`build/apollo/amigentd.apollo`,
+`build/apollo/amigent-apollo-probe`, and `build/apollo/amigent-monitor.apollo`)
+from source:
+
+- With ApolloCrossDev (`GCC-6.50-Stable`, which supports `-m68080`):
+  `APOLLOCROSSDEV=/path/to/ApolloCrossDev src/native/amiga/build-amigentd-apollo`
+  (add `install` to stage locally into `src/amigent/amiga/bin/`).
+- With GCC 16 (`amigadev/crosstools:m68k-amigaos`, as run by the `amiga` GitHub
+  Actions workflow into the `amiga-gcc` artifact): upstream GCC 16 rejects
+  `-m68080`, so CI passes `CPU_FLAG=-m68020`:
+  `make -f src/native/amiga/Makefile.apollo PREFIX="$CROSS_ROOT" CC=m68k-amigaos-gcc CPU_FLAG=-m68020`
+  (produces 68020-targeted CI build verification binaries with `-DAMIGENT_APOLLO`;
+  not hardware-tested).
+
+**Status: untested on hardware.** AUDIO (opcode 49), the Viewer's Hear button
+and `amiga_listen` have not yet been run on a physical Apollo V4-SA from this
+source. What has been checked is only this:
+
+- Compilation: the Apollo binaries build without warnings with ApolloCrossDev
+  GCC 6.5 (Stable and Dev) and with GCC 16 in CI.
+- Simulation: the test suite runs the daemon's AUDIO task code against a
+  simulated Exec, timer and TLS pump, and the Viewer's Hear against simulated
+  PCM and pages.
+
+Neither says the Apollo part works on a V4-SA. Until it has been accepted
+there, treat Apollo support as experimental.
 
 ## Translations
 

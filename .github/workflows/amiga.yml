@@ -29,7 +29,53 @@ jobs:
           m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigentd.000 src/native/amiga/daemon/amigentd.c
           m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-status src/native/amiga/tools/amigent-status.c
           m68k-amigaos-gcc -O2 -m68000 -noixemul -s -o out/amigent-monitor src/native/amiga/tools/amigent-monitor.c
+          # Build the Apollo daemon, 68000 probe and Apollo monitor from source into out/
+          # for CI verification only (they are not copied into src/amigent/amiga/bin/ or
+          # shipped in release packages). Upstream GCC 16 in crosstools rejects -m68080,
+          # so CI builds with CPU_FLAG=-m68020; Makefile.apollo keeps -m68080 by default
+          # for ApolloCrossDev GCC 6.5.0. All Apollo runtime paths use AttnFlags guards.
+          make -f src/native/amiga/Makefile.apollo PREFIX="${CROSS_ROOT:-/opt/m68k-amigaos}" CC=m68k-amigaos-gcc CPU_FLAG=-m68020 clean all
+          cp build/apollo/amigentd.apollo build/apollo/amigent-apollo-probe build/apollo/amigent-monitor.apollo out/
           ls -l out
+      - name: validate built native binaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          out = Path("out")
+          expected = (
+              "amigentd",
+              "amigentd.000",
+              "amigent-status",
+              "amigent-monitor",
+              "amigentd.apollo",
+              "amigent-apollo-probe",
+              "amigent-monitor.apollo",
+          )
+          for name in expected:
+              data = (out / name).read_bytes()
+              assert len(data) > 0, f"{name} is empty"
+              assert data.startswith(b"\x00\x00\x03\xf3"), f"{name} is not an Amiga Hunk executable"
+
+          apollo = (out / "amigentd.apollo").read_bytes()
+          for marker in (
+              b"arne.audio 4.22",
+              b"ApolloOS",
+              b"that range includes Apollo registers that a read can change",
+              b"tracepoints are not supported on this Apollo build yet",
+              b"$VER: amigentd",
+          ):
+              assert marker in apollo, f"amigentd.apollo missing marker: {marker!r}"
+
+          probe = (out / "amigent-apollo-probe").read_bytes()
+          for marker in (b"ApolloOS", b"AmigaOS", b"68080"):
+              assert marker in probe, f"amigent-apollo-probe missing marker: {marker!r}"
+          assert b"arne.audio" not in probe
+
+          monitor = (out / "amigent-monitor.apollo").read_bytes()
+          assert b"$VER: amigent-monitor" in monitor
+          print("Validated all 7 built Amiga Hunk binaries in out/")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: amiga-gcc

@@ -54,7 +54,12 @@ version = { attr = "amigent.__version__" }
 amigent = ["*.json", "web/*", "web/locales/*", "macos/*", "amiga/*", "amiga/bin/*"]
 
 [tool.setuptools.exclude-package-data]
-amigent = ["amiga/bin/amigentd.080"]  # untested without Vampire hardware; a 68080 runs amigentd
+amigent = [
+  "amiga/bin/amigentd.080",           # untested without Vampire hardware; a 68080 runs amigentd
+  "amiga/bin/amigentd.apollo",        # source-only in upstream; built from src/native/amiga/
+  "amiga/bin/amigent-apollo-probe",   # source-only in upstream; built from src/native/amiga/
+  "amiga/bin/amigent-monitor.apollo", # source-only in upstream; built from src/native/amiga/
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

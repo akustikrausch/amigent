@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PROTOCOL_6 = (
     "CMD_NOTE", "CMD_LOADED", "CMD_PEEK", "CMD_TASKS", "CMD_TASKCTL", "CMD_POKE",
     "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET", "CMD_EMU68",
+    "CMD_AUDIO",
 )
 
 
@@ -199,24 +200,28 @@ def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, ca
     assert "T:amigent-apollo-probe" not in amiga
 
 
-def test_protocol_6_still_ends_at_quiet_and_the_probe_is_68000_only():
+def test_protocol_6_audio_and_probe_is_68000_only():
     daemon = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
     names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
     assert names == list(PROTOCOL_6)
+    assert names.index("CMD_EMU68") + 37 == 48  # CMD_NOTE is 37 -> CMD_EMU68 is 48
+    assert names.index("CMD_AUDIO") + 37 == 49  # CMD_AUDIO is unique at 49
     assert "PROTOCOL_VERSION 6" in daemon
-    assert "CMD_AUDIO" not in daemon and "CMD_PIP" not in daemon
-    assert "AMIGENT_APOLLO" not in daemon
+    assert "CMD_AUDIO" in daemon and "CMD_PIP" not in daemon
+    assert "AMIGENT_APOLLO" in daemon
 
     detect = (ROOT / "src/native/amiga/apollo/apollo_detect.c").read_text(encoding="utf-8")
     probe = (ROOT / "src/native/amiga/apollo/apollo_probe.c").read_text(encoding="utf-8")
     makefile = (ROOT / "src/native/amiga/Makefile.apollo").read_text(encoding="utf-8")
     assert "apollo_os_here" in detect and "VREG_BOARD" in detect
     assert "CMD_AUDIO" not in detect and "CMD_PIP" not in detect
-    assert "RETURN_WARN" in probe and "m68080" not in probe
+    assert "RETURN_WARN" in probe and "AFF_FPGA" in probe
     assert "amigent-apollo-probe" in makefile
-    assert "amigentd.apollo" not in makefile and "apollo.c" not in makefile
-    assert "-m68080" not in makefile and "-m68000" in makefile
+    assert "amigentd.apollo" in makefile
+    assert "amigent-monitor.apollo" in makefile
+    assert "-m68000" in makefile and "-m68080" in makefile
+    assert not (AMIGA / "bin" / "amigentd.apollo").exists()
 
 
 def test_an_update_asks_nothing_about_apolloos_without_an_apollo_build(tmp_path, monkeypatch):
