@@ -770,7 +770,7 @@ class Amigentd:
 
         return self._retry(call)
 
-    def capture_screen(self, screen: dict) -> Image.Image:
+    def capture_screen(self, screen: dict, region: tuple | None = None) -> Image.Image:
         """The whole of a screen from screens(), in front or not, in full colour.
 
         Needs an amigentd that can aim FRAME_RGB (DISPLAY_KNOWN in SCREENS; an older
@@ -781,7 +781,8 @@ class Amigentd:
                                 "run amigent-setup --update, or bring it to the front with "
                                 "amiga_screen_front")
         try:
-            return self.capture_rgb(0, 0, screen["width"], screen["height"], aim=screen["handle"])
+            box = region or (0, 0, screen["width"], screen["height"])
+            return self.capture_rgb(*box, aim=screen["handle"])
         finally:
             try:
                 self._ok(CMD_SCREEN_FRONT, AIM, 0, 0)
