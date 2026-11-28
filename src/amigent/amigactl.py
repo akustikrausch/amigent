@@ -91,7 +91,7 @@ class AmigaCtl(VolumeFlush):
             parts = line.split(" ", 2)
             self._line()  # sentinel
             code = int(parts[1]) if parts[1].isdigit() else None
-            raise AmigaError(parts[2] if len(parts) > 2 else line, code)
+            raise AmigaError(parts[2] if len(parts) > 2 else line, code, dos_code=code)
         raise AmigaError(f"malformed response: {line!r}")
 
     def _text(self, command: str, *extra_lines: str) -> tuple[str, list[str]]:

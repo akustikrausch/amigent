@@ -1218,6 +1218,70 @@ def _task_hits(tasks: list, which: str) -> list:
     return memory.match_tasks(tasks, w)
 
 
+def _wait_until(probe, timeout: float):
+    if not 0 <= timeout <= 3600:
+        raise ValueError("timeout must be between 0 and 3600 seconds")
+    deadline = time.monotonic() + timeout
+    pause = 0.25
+    while True:
+        remaining = max(0, deadline - time.monotonic())
+        result = probe(remaining)
+        if result:
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return ""
+        time.sleep(min(pause, remaining))
+        pause = min(3, pause * 2)
+
+
+@mcp.tool()
+def amiga_wait_file(path: str, gone: bool = False, crc32: str = "", timeout: float = 30) -> str:
+    """Wait for an Amiga file to appear, disappear, or match a whole-file CRC-32.
+
+    Give crc32 as eight hex digits. Unreadable files and disconnected volumes
+    report an error. timeout controls polling; an in-flight disk read can take
+    longer on a slow Amiga.
+    """
+    if crc32 and (gone or not re.fullmatch(r"[a-fA-F0-9]{8}", crc32)):
+        raise ValueError("crc32 requires eight hex digits and gone=False")
+    def probe(_remaining):
+        def check():
+            try:
+                info = _session().ctl.stat(path)
+            except AmigaError as exc:
+                if exc.dos_code not in (204, 205):  # ERROR_DIR_NOT_FOUND, ERROR_OBJECT_NOT_FOUND
+                    raise
+                return f"{path} is absent" if gone else ""
+            if gone:
+                return ""
+            if info["type"].casefold() != "file":
+                raise AmigaError(f"{path} is not a regular file")
+            if crc32:
+                actual = _session().ctl.checksum(path, int(info["size"]))
+                if actual != int(crc32, 16):
+                    return ""
+                return f"{path} matches CRC-32 {actual:08x}"
+            return f"{path} exists"
+        return _with_ctl(check)
+    return _wait_until(probe, timeout) or f"timed out waiting for {path}"
+
+
+@mcp.tool()
+def amiga_wait_up(timeout: float = 120) -> str:
+    """Wait for the selected machine to return an Amigent greeting at its saved address."""
+    host, port = _session().host, _session().screen.port
+    def probe(remaining):
+        wait = min(3, max(0.05, remaining))
+        if safety.require_tls() or tls.wanted(host):
+            hello = tls.greet(host, port, wait, connect_timeout=wait,
+                              handshake=min(tls.HANDSHAKE_WAIT, max(0.05, remaining)))
+        else:
+            hello = net.greet(machines.address(host), port, wait, connect_timeout=wait)
+        return "amigentd is online" if hello.startswith(b"AMGT") else ""
+    return _wait_until(probe, timeout) or "timed out waiting for amigentd"
+
+
 @mcp.tool()
 def amiga_wait_task(name: str, gone: bool = False, timeout: float = 30) -> str:
     """Wait until a task or process with this name runs (or, gone=True, until none does).

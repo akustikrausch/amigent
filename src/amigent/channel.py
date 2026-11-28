@@ -485,8 +485,10 @@ class AmigaChannel(VolumeFlush):
         status = self._exact(1)[0]
         if status:
             size = struct.unpack(">H", self._exact(2))[0]
-            raise AmigaError(dos_text(self._exact(size).decode(ENCODING)) or f"error {status}",
-                             status)
+            message = self._exact(size).decode(ENCODING)
+            suffix = re.search(r"\[(\d+)\]$", message)
+            raise AmigaError(dos_text(message) or f"error {status}", status,
+                             int(suffix[1]) if suffix else None)
 
     def _request(self, cmd: int, path: str = "", arg: int = 0, y: int = 0, w: int = 0, h: int = 0,
                  payload: bytes = b"", timeout: float | None = None) -> None:
