@@ -158,7 +158,9 @@ enum {
     CMD_LOADED, CMD_PEEK, CMD_TASKS, CMD_TASKCTL, CMD_POKE, CMD_TRACE,  /* protocol 6 */
     CMD_LOCKS, CMD_CPU, CMD_DRAG, CMD_QUIET,  /* protocol 6, "probe" in SYSINFO */
     CMD_EMU68,  /* protocol 6, "emu68" in SYSINFO */
-    CMD_AUDIO   /* protocol 6, opcode 49: ARNE mix, "audio=49" in SYSINFO (Apollo builds only) */
+    CMD_AUDIO,  /* protocol 6, opcode 49: ARNE mix, "audio=49" in SYSINFO (Apollo builds only) */
+    CMD_PUBLISH, /* publish a verified staging file, "publish" in SYSINFO */
+    CMD_APPEND_AT /* checked append, "appendat" in SYSINFO */
 };
 
 const char version[] = "$VER: amigentd 1.5.0 (21.11.2026)";
@@ -4095,7 +4097,11 @@ static void t_entry(struct text *t, struct FileInfoBlock *fib)
     t_tab(t);
     t_str(t, (const UBYTE *)fib->fib_FileName, FALSE);
     t_tab(t);
-    t_num(t, dir ? 0 : fib->fib_Size);
+    {
+        char size[12];
+        dec(size, dir ? 0 : (ULONG)fib->fib_Size);
+        t_str(t, (const UBYTE *)size, FALSE);
+    }
     t_tab(t);
     t_hex(t, fib->fib_Protection);
     t_tab(t);
@@ -4142,8 +4148,21 @@ static BOOL c_dir(struct link *l, UWORD len, BOOL itself)
     return c_text(l, &t);
 }
 
-/* from: the first byte to send (arg bit 1, from 1.3.0), for following a log. */
-static BOOL c_read(struct link *l, UWORD len, ULONG from)
+/* Seek takes a signed displacement even on handlers with unsigned file sizes. */
+static BOOL seek_start(BPTR fh, ULONG from)
+{
+    if (Seek(fh, 0, OFFSET_BEGINNING) == -1)
+        return FALSE;
+    while (from) {
+        LONG step = from > 0x7fffffffUL ? 0x7fffffffL : (LONG)from;
+        if (Seek(fh, step, OFFSET_CURRENT) == -1)
+            return FALSE;
+        from -= step;
+    }
+    return TRUE;
+}
+
+static BOOL c_read(struct link *l, UWORD len, ULONG from, ULONG limit)
 {
     struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
     UBYTE *buf = AllocVec(CHUNK, MEMF_ANY), head[5];
@@ -4162,15 +4181,17 @@ static BOOL c_read(struct link *l, UWORD len, ULONG from)
             err = IoErr();
         else {
             size = (ULONG)fib->fib_Size > from ? fib->fib_Size - from : 0;
-            if (size)
-                Seek(fh, from, OFFSET_BEGINNING);
+            if (size > limit)
+                size = limit;
             /* Some handlers open a read protected file and only refuse the
              * Read: try one before the size goes out, so that is an error
              * reply and not a dropped link. */
-            if (size && Read(fh, buf, size > CHUNK ? CHUNK : size) <= 0)
+            if (size && !seek_start(fh, from))
+                err = IoErr() ? IoErr() : ERROR_SEEK_ERROR;
+            else if (size && Read(fh, buf, size > CHUNK ? CHUNK : size) <= 0)
                 err = IoErr() ? IoErr() : ERROR_READ_PROTECTED;
-            else
-                Seek(fh, size ? from : 0, OFFSET_BEGINNING);
+            else if (size && !seek_start(fh, from))
+                err = IoErr() ? IoErr() : ERROR_SEEK_ERROR;
         }
         if (err)
             alive = c_fault(l, err);
@@ -4403,6 +4424,148 @@ static BOOL c_rename(struct link *l, UWORD old_len, UWORD new_len)
     return err ? c_fault(l, err) : c_ok(l);
 }
 
+static struct SignalSemaphore publish_lock;
+
+/* A client may lose its reply after any prefix reached disk. Only append
+ * bytes beyond EOF after checking the previously accepted part. */
+static LONG append_at(const char *path, ULONG offset, UWORD count, UBYTE *data)
+{
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    UBYTE check[512];
+    ULONG skip, checked = 0;
+    BPTR fh = 0, lock;
+    LONG err = 0, n;
+
+    if (!fib)
+        return ERROR_NO_FREE_STORE;
+    if (offset > ~0UL - count) {
+        err = ERROR_SEEK_ERROR;
+        goto out;
+    }
+    if (!(lock = Lock(path, SHARED_LOCK))) {
+        err = IoErr();
+        if (offset || err != ERROR_OBJECT_NOT_FOUND)
+            goto out;
+        err = 0;
+    } else
+        UnLock(lock);
+    if (!(fh = Open(path, MODE_READWRITE)) || !ExamineFH(fh, fib)) {
+        err = IoErr();
+        goto out;
+    }
+    if (fib->fib_DirEntryType != ST_FILE) {
+        err = ERROR_OBJECT_WRONG_TYPE;
+        goto out;
+    }
+    skip = (ULONG)fib->fib_Size - offset;
+    if ((ULONG)fib->fib_Size < offset || skip > count) {
+        err = ERROR_SEEK_ERROR;
+        goto out;
+    }
+    if (!seek_start(fh, offset)) {
+        err = IoErr() ? IoErr() : ERROR_SEEK_ERROR;
+        goto out;
+    }
+    while (checked < skip) {
+        n = skip - checked > sizeof(check) ? sizeof(check) : skip - checked;
+        if (Read(fh, check, n) != n || memcmp(check, data + checked, n)) {
+            err = ERROR_SEEK_ERROR;
+            goto out;
+        }
+        checked += n;
+    }
+    if (skip < count && Write(fh, data + skip, count - skip) != count - skip)
+        err = IoErr() ? IoErr() : ERROR_DISK_FULL;
+out:
+    if (fh && !Close(fh) && !err)
+        err = IoErr() ? IoErr() : ERROR_DISK_FULL;
+    FreeDosObject(DOS_FIB, fib);
+    return err;
+}
+
+static BOOL c_append_at(struct link *l, UWORD len, ULONG offset, UWORD count)
+{
+    BOOL alive;
+    char *path = c_name(l, len, &alive);
+    UBYTE *data = AllocVec(count ? count : 1, MEMF_ANY);
+    LONG err = ERROR_NO_FREE_STORE;
+
+    if (alive && count)
+        alive = data ? l_recv(l, data, count, IO_SECONDS) : l_skip(l, count, IO_SECONDS);
+    if (alive && data && path) {
+        ObtainSemaphore(&publish_lock);
+        err = append_at(path, offset, count, data);
+        ReleaseSemaphore(&publish_lock);
+    }
+    FreeVec(data);
+    FreeVec(path);
+    return alive && (err ? c_fault(l, err) : c_ok(l));
+}
+
+/* Keep the old inode under a recovery name until the replacement is visible.
+ * Caller owns the staging directory. A leftover backup requires recovery. */
+static LONG publish_file(const char *stage, const char *target, char *backup,
+                         struct FileInfoBlock *fib)
+{
+    BPTR lock;
+    LONG err;
+
+    if ((lock = Lock(backup, SHARED_LOCK))) {
+        UnLock(lock);
+        return ERROR_OBJECT_EXISTS;
+    }
+    if ((err = IoErr()) != ERROR_OBJECT_NOT_FOUND)
+        return err;
+    if (!(lock = Lock(target, SHARED_LOCK))) {
+        err = IoErr();
+        if (err == ERROR_OBJECT_NOT_FOUND)
+            return Rename(stage, target) ? 0 : IoErr();
+        return err;
+    }
+    err = Examine(lock, fib) ? 0 : IoErr();
+    UnLock(lock);
+    if (err)
+        return err;
+    if (fib->fib_DirEntryType != ST_FILE)
+        return ERROR_OBJECT_WRONG_TYPE;
+    if (fib->fib_Protection & FIBF_DELETE)
+        return ERROR_DELETE_PROTECTED;
+    if (fib->fib_Protection & FIBF_WRITE)
+        return ERROR_WRITE_PROTECTED;
+    if (!SetProtection(stage, fib->fib_Protection) || !Rename(target, backup))
+        return IoErr();
+    if (!Rename(stage, target)) {
+        err = IoErr();
+        if (!Rename(backup, target))
+            return IoErr();  /* backup still holds the original */
+        return err;
+    }
+    return DeleteFile(backup) ? 0 : IoErr();
+}
+
+static BOOL c_publish(struct link *l, UWORD old_len, UWORD new_len)
+{
+    BOOL alive;
+    char *stage = c_name(l, old_len, &alive);
+    char *target = alive ? c_name(l, new_len, &alive) : NULL;
+    char *backup = AllocVec(old_len + sizeof(".old"), MEMF_ANY);
+    struct FileInfoBlock *fib = AllocDosObject(DOS_FIB, NULL);
+    LONG err = ERROR_NO_FREE_STORE;
+
+    if (alive && stage && target && backup && fib) {
+        strcpy(backup, stage);
+        strcat(backup, ".old");
+        ObtainSemaphore(&publish_lock);
+        err = publish_file(stage, target, backup, fib);
+        ReleaseSemaphore(&publish_lock);
+    }
+    FreeVec(backup);
+    FreeVec(stage);
+    FreeVec(target);
+    FreeDosObject(DOS_FIB, fib);
+    return alive && (err ? c_fault(l, err) : c_ok(l));
+}
+
 static void t_pair(struct text *t, const char *key, ULONG v)
 {
     char d[12];
@@ -4600,6 +4763,9 @@ static BOOL c_sysinfo(struct link *l)
     t_pair(&t, "text", text_on);
     t_pair(&t, "debug", debug_on);
     t_pair(&t, "note", 1);  /* NOTE is understood */
+    t_pair(&t, "publish", 1);
+    t_pair(&t, "appendat", 1);
+    t_pair(&t, "readrange", 1);  /* READ arg 2, y is the maximum length */
     t_pair(&t, "readfrom", 1);  /* READ takes a start offset */
     t_pair(&t, "loaded", 1);  /* protocol 6: LOADED, PEEK, TASKS, TASKCTL, TRACE */
 #ifdef AMIGENT_APOLLO
@@ -8872,7 +9038,8 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_EXEC:
         return c_exec(l, x, y, w);
     case CMD_READ_FILE:
-        return c_read(l, x, c[1] & 1 ? (ULONG)w << 16 | h : 0);
+        return c_read(l, x, c[1] & 3 ? (ULONG)w << 16 | h : 0,
+                      c[1] & 2 ? y : ~0UL);
     case CMD_WRITE_FILE:
         return c_write(l, c[1] & 1, (c[1] & 2) != 0, x, (ULONG)w << 16 | h);
     case CMD_DIR:
@@ -8882,6 +9049,10 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     case CMD_MAKEDIR:
     case CMD_CHECKSUM:
         return c_path_cmd(l, c[0], x);
+    case CMD_APPEND_AT:
+        return c_append_at(l, x, (ULONG)w << 16 | h, y);
+    case CMD_PUBLISH:
+        return c_publish(l, x, y);
     case CMD_RENAME:
         return c_rename(l, x, y);
     case CMD_SYSINFO:
@@ -10380,6 +10551,7 @@ int main(int argc, char **argv)
     for (i = 0; i < PENDING; i++)
         pend[i].fd = -1;
     InitSemaphore(&picture);
+    InitSemaphore(&publish_lock);
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     KeymapBase = OpenLibrary("keymap.library", 37);

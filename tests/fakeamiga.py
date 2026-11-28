@@ -193,6 +193,9 @@ class FakeAmiga:
             if path not in self.files:
                 return self.fail("Objekt nicht gefunden", 1)
             data = self.files[path]
+            if arg == 2 and self.info.get("readrange") == "1":
+                start = w << 16 | h
+                data = data[start:start + y]
             return self.ok(struct.pack(">I", len(data)) + data)
         if cmd == 23:
             data = rd.read(w << 16 | h)
@@ -207,8 +210,26 @@ class FakeAmiga:
         if cmd in (24, 25):
             return self._dir(path, cmd == 25)
         if cmd == 26:
+            if path in self.dirs and not any(self.parent(f) == path for f in self.files):
+                self.dirs.remove(path)
+                return self.ok()
             if self.files.pop(path, None) is None:
                 return self.fail("Objekt nicht gefunden")
+            return self.ok()
+        if cmd == 51 and self.info.get("appendat") == "1":
+            data = rd.read(y)
+            offset = w << 16 | h
+            current = self.files.get(path, b"")
+            skip = len(current) - offset
+            if skip < 0 or skip > len(data) or current[offset:] != data[:skip]:
+                return self.fail("offset or content differs")
+            self.files[path] = current + data[skip:]
+            return self.ok()
+        if cmd == 50 and self.info.get("publish") == "1":
+            target = rd.read(y).decode("iso-8859-1")
+            if path not in self.files:
+                return self.fail("object not found")
+            self.files[target] = self.files.pop(path)
             return self.ok()
         if cmd == 27:
             new = rd.read(y).decode("iso-8859-1")

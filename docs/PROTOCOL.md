@@ -945,3 +945,31 @@ a second copy. Esc or the close gadget ends it.
   reply is the return code, `255` if the line didn't run at all or SETUP is off.
 - SETUP_END leaves SETUP mode and answers `0`. The service keeps running as a
   plain screen service.
+
+### Ranged reads and verified file replacement
+
+Protocol 6 daemons advertise these extensions individually through SYSINFO.
+Clients must check the flags on each new connection. All offsets are unsigned
+and all multi-byte integers use network byte order.
+
+| Flag | Request | Successful reply |
+| --- | --- | --- |
+| `readrange=1` | READ (22), arg 2, x path length, y maximum bytes, w:h starting byte | A normal READ blob, shortened at EOF |
+| `appendat=1` | APPEND_AT (51), x path length, y data length, w:h expected offset, followed by path and raw data | Status only |
+| `publish=1` | PUBLISH (50), x staging path length, y destination path length, followed by both paths | Status only |
+
+APPEND_AT accepts at most 65535 bytes. If a previous attempt wrote some or all
+of the block, it compares that prefix before appending the remaining bytes.
+A gap, conflicting prefix, or existing tail beyond the block fails. These
+requests and PUBLISH are serialized with each other. READ and APPEND_AT
+support files up to 4294967295 bytes on handlers exposing that size.
+
+Create a private scratch directory on the destination volume and upload into
+a file inside it. Check each block with READ and verify the final size and
+CRC-32 before PUBLISH. PUBLISH preserves the destination's protection bits.
+It renames the old file to the staging path with `.old` appended, then renames
+the staged file into place. A failed second rename triggers restoration.
+A leftover `.old` file prevents another publish from overwriting the recovery
+copy. If interrupted, inspect the scratch directory and destination before
+removing either. Filesystem durability across a power loss depends on the
+handler. A successful publish releases the recovery copy.

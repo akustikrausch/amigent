@@ -11,6 +11,7 @@ from __future__ import annotations
 import zlib
 from pathlib import Path, PurePosixPath
 
+from . import transfer
 from .client import join_path
 from .errors import AmigaError
 from .channel import AmigaChannel, Request
@@ -75,6 +76,13 @@ def put(ctl, src: Path, target: str) -> str:
 
 
 def _put_file(ch: AmigaChannel, src: Path, target: str) -> str:
+    if transfer.can_stage(ch):
+        size, crc = src.stat().st_size, crc_of(src)
+        if size >= CHECK_FROM and _same_on_amiga(ch, target, size, crc):
+            return f"copied 0 file(s) to {target}; it was already there (same size and CRC)"
+        with src.open("rb") as stream:
+            transfer.send(ch, stream, target, size, crc)
+        return f"copied 1 file(s) to {target}"
     data = src.read_bytes()
     if len(data) >= CHECK_FROM and _same_on_amiga(ch, target, len(data), zlib.crc32(data)):
         return f"copied 0 file(s) to {target}; it was already there (same size and CRC)"
@@ -106,15 +114,26 @@ def _put_tree(ch: AmigaChannel, src: Path, target: str) -> str:
               [join_path(target, f) for f in folders if f not in present]
     todo = [f for f in files if f not in unchanged]
     errors: list[tuple[str, AmigaError]] = []
-    first = True
-    for run in _batches(todo, lambda f: (src / f).stat().st_size) or [[]]:
-        dirs = missing if first else []
-        first = False
-        reqs = [Request.makedir(d) for d in dirs]
-        reqs += [Request.write(join_path(target, f), (src / f).read_bytes()) for f in run]
-        answers = ch.pipeline(reqs)
-        # MAKEDIR on a folder that's there fails too; only a write tells if it mattered
-        errors += [(f, a) for f, a in zip(run, answers[len(dirs):]) if isinstance(a, AmigaError)]
+    staged = transfer.can_stage(ch)
+    if staged:
+        ch.pipeline([Request.makedir(d) for d in missing])
+        for f in todo:
+            local = src / f
+            try:
+                with local.open("rb") as stream:
+                    transfer.send(ch, stream, join_path(target, f), local.stat().st_size, crc_of(local))
+            except AmigaError as exc:
+                errors.append((f, exc))
+    else:
+        first = True
+        for run in _batches(todo, lambda f: (src / f).stat().st_size) or [[]]:
+            dirs = missing if first else []
+            first = False
+            reqs = [Request.makedir(d) for d in dirs]
+            reqs += [Request.write(join_path(target, f), (src / f).read_bytes()) for f in run]
+            answers = ch.pipeline(reqs)
+            # MAKEDIR on a folder that's there fails too; only a write tells if it mattered
+            errors += [(f, a) for f, a in zip(run, answers[len(dirs):]) if isinstance(a, AmigaError)]
     if errors:
         raise _failure(len(todo) - len(errors), len(files), errors)
     skipped = f", {len(unchanged)} unchanged ones skipped" if unchanged else ""
@@ -190,6 +209,13 @@ def get(ctl, source: str, target: Path) -> str:
     ch = channel_of(ctl)
     if ch is None:
         return _save(target, ctl.read_file(source))
+    if ch.file_feature("readrange"):
+        info = ch.stat(source)
+        if info["type"].upper() == "DIR":
+            return _get_tree(ch, source, target)
+        size = int(info["size"])
+        transfer.receive(ch, source, target, size)
+        return f"saved {size} bytes to {target}"
     # STAT and READ in one go: a file costs one round trip, a folder gets a failed READ
     info, data = ch.pipeline([Request.stat(source), Request.read_file(source)])
     if isinstance(info, AmigaError):
@@ -223,14 +249,22 @@ def _get_tree(ch: AmigaChannel, source: str, target: Path) -> str:
     errors: list[tuple[str, AmigaError]] = [(e.folder, e) for e in entries
                                             if isinstance(e, AmigaError)]
     total = 0
-    for run in _batches(todo, lambda f: files[f]):
-        answers = ch.pipeline([Request.read_file(join_path(source, f), files[f]) for f in run])
-        for f, data in zip(run, answers):
-            if isinstance(data, AmigaError):
-                errors.append((f, data))
-            else:
-                (target / f).write_bytes(data)
-                total += len(data)
+    if ch.file_feature("readrange"):
+        for f in todo:
+            try:
+                transfer.receive(ch, join_path(source, f), target / f, files[f])
+                total += files[f]
+            except AmigaError as exc:
+                errors.append((f, exc))
+    else:
+        for run in _batches(todo, lambda f: files[f]):
+            answers = ch.pipeline([Request.read_file(join_path(source, f), files[f]) for f in run])
+            for f, data in zip(run, answers):
+                if isinstance(data, AmigaError):
+                    errors.append((f, data))
+                else:
+                    (target / f).write_bytes(data)
+                    total += len(data)
     if errors:
         raise _failure(len(todo) - len(errors), len(files), errors)
     skipped = f", {len(unchanged)} unchanged ones skipped" if unchanged else ""

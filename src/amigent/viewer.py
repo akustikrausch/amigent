@@ -29,7 +29,7 @@ import webbrowser
 import zlib
 from pathlib import Path
 
-from . import __version__, machines, memory, roster, tls, update
+from . import __version__, machines, memory, roster, tls, transfer, update
 from .amigactl import AmigaError, join_path
 from .amigentd import Amigentd, reset_chord
 from .channel import AUDIO, LOADED_PROTOCOL, NEWEST_PROTOCOL, Commands, audio_uses_tls, pc_outdated
@@ -171,7 +171,6 @@ def hear_eligible(info: dict | None, *, connected: bool = True) -> bool:
     return str(info.get("audio") or "") == str(AUDIO)
 
 
-UPLOAD_CHUNK = 32 * 1024
 MAX_DOWNLOAD = 16 * 2**20  # about six minutes over a plipbox, with the command line busy
 MAX_CLIP = 1 << 20
 CLIPBOARD = "CLIPS:0"  # clipboard.device keeps unit 0 there as IFF FTXT
@@ -889,17 +888,17 @@ class Viewer:
         while True:
             job, data = self.uploads.get()
             try:
-                done = 0
-                while True:
-                    chunk = data[done:done + UPLOAD_CHUNK]
-                    self._ctl(lambda: self.ctl.write_file(job["path"], chunk, append=done > 0))
-                    done += len(chunk)
-                    self.event("upload", state="sending", done=done, **job)
-                    if done >= len(data):
-                        break
-                if self._ctl(lambda: self.ctl.checksum(job["path"])) != zlib.crc32(data):
-                    raise AmigaError("checksum differs after the transfer")
-                self.event("upload", state="done", done=done, **job)
+                def send_file():
+                    ch = getattr(self.ctl, "backend", self.ctl)
+                    if transfer.can_stage(ch):
+                        transfer.send(ch, io.BytesIO(data), job["path"], len(data), zlib.crc32(data),
+                                      lambda n: self.event("upload", state="sending", done=n, **job))
+                    else:
+                        self.ctl.write_file(job["path"], data)
+                        if self.ctl.checksum(job["path"]) != zlib.crc32(data):
+                            raise AmigaError("checksum differs after the transfer")
+                self._ctl(send_file)
+                self.event("upload", state="done", done=len(data), **job)
             except (AmigaError, OSError) as e:
                 self.event("upload", state="failed", error=str(e), **job)
 
