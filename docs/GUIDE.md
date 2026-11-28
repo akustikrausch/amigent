@@ -274,6 +274,7 @@ starts the old one again.
 | `amiga_state` | before and after: memory, open libraries, tasks and ports, to find leaks |
 | `amiga_screen_diff` | compare the screen with a saved picture: share changed, boxes, a picture of it |
 | `amiga_create_project`, `amiga_build` | a new C program with a vbcc build script, compiled on the Amiga; `fpu="auto"` builds FPU code for the FPU this Amiga has, `target="warpos"` a PowerPC program for WarpOS |
+| `amiga_pointer` | read the Intuition pointer in pixels on the front screen |
 | `amiga_everywhere` | one command on every Amiga Amigent knows, the results compared |
 | `amiga_emulator` | for an Amiga in WinUAE 6.1: start and quit it, a disk in DF0:, pause, registers, memory, the custom chips (Paula, copper, sprites), a whole-machine save before installing |
 | `amiga_pistorm` | the classic PiStorm emulator under Linux on the Pi, over SSH: its configuration (with undo), restart, log, the Pi's temperature and power |
@@ -884,7 +885,7 @@ or the close gadget ends it, C clears the log.
   with up to 30 seconds for a slow handshake. `amiga_machines` and the overview
   count an Amiga as reachable only there.
 - `AMIGENT_READ_ONLY=1` makes `amigent-server` offer only `amiga_list`,
-  `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
+  `amiga_pointer`, `amiga_screen_text`, `amiga_tasks`, `amiga_loaded`, `amiga_notes` and
   `amiga_installs`, for every saved Amiga (`machine=`). Every other tool, and
   any tool added later, is neither listed nor run, whatever the AI app's own
   tool switches say, and the server refuses to start if anything else is

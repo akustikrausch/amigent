@@ -91,13 +91,13 @@ INSTRUCTIONS = """Amigent operates registered Amigas.
 # channel.READ_ONLY_COMMANDS holds the channel to the same list, whatever a tool does.
 # A tool not named here is not offered and not run: new tools stay out until audited.
 READ_ONLY = safety.read_only()
-READ_ONLY_TOOLS = frozenset({"amiga_list", "amiga_screen_text", "amiga_tasks", "amiga_loaded",
+READ_ONLY_TOOLS = frozenset({"amiga_pointer", "amiga_list", "amiga_screen_text", "amiga_tasks", "amiga_loaded",
                              "amiga_notes", "amiga_installs"})
 # MCP annotations are hints for the client, never the enforcement. Only the
 # read-only server gives them, where every tool it offers was audited to only look;
 # the default server makes no claim, so it stays as it was.
 READ_ONLY_INSTRUCTIONS = """Amigent looks at registered Amigas, read-only (AMIGENT_READ_ONLY).
-- The server enforces it: only amiga_list, amiga_screen_text, amiga_loaded,
+- The server enforces it: only amiga_list, amiga_pointer, amiga_screen_text, amiga_loaded,
   amiga_tasks, amiga_notes and amiga_installs exist, and the line to the Amiga
   takes only the read commands they use. Nothing is run, changed or written on
   the Amiga; when a request needs that, tell the user it needs the server
@@ -411,7 +411,7 @@ _join = join_path
 seen = uptime.Seen()  # under secret.FOLDER, looked up when used
 diary = journal.Journal()  # under secret.FOLDER, looked up when used
 # Looking around changes nothing on the Amiga; a postmortem wants what did.
-UNJOURNALED = {"amiga_status", "amiga_screenshot", "amiga_screenshot_color", "amiga_screen_text",
+UNJOURNALED = {"amiga_status", "amiga_pointer", "amiga_screenshot", "amiga_screenshot_color", "amiga_screen_text",
                "amiga_locks", "amiga_cpu", "amiga_screens", "amiga_ui_tree", "amiga_menus", "amiga_list", "amiga_notes",
                "amiga_installs", "amiga_loaded", "amiga_memory", "amiga_where", "amiga_jobs",
                "amiga_job_output", "amiga_wait_change", "amiga_wait_window", "amiga_wait_text",
@@ -2263,15 +2263,27 @@ def _host_path(path: str) -> str:
 
 
 @mcp.tool()
-def amiga_list(path: str, recursive: bool = False) -> str:
-    """List a directory, e.g. 'Work:Games'. Amiga paths use VOLUME:dir/file."""
+def amiga_list(path: str, recursive: bool = False, protection: bool = False) -> str:
+    """List a directory. With protection, include the Amiga h s p a r w e d flags."""
     if recursive and READ_ONLY:
         raise AmigaError("AMIGENT_READ_ONLY: recursive listing is not offered; list one "
                          "directory at a time")
     entries = _with_ctl(lambda: _session().ctl.list_dir(path, recursive))
-    return "\n".join(
-        f"{e['type']:4} {e['size']:>10} {e['date']} {e['name']}" for e in entries
-    )
+    lines = []
+    for entry in entries:
+        line = f"{entry['type']:4} {entry['size']:>10} {entry['date']}"
+        if protection:
+            flags = entry["protection"]
+            try:
+                bits = int(flags, 16) ^ 0x0f  # RWED bits are active low
+            except ValueError:
+                pass  # legacy servers may already give printable flags
+            else:
+                flags = "".join(c if bits & (128 >> i) else "-"
+                                for i, c in enumerate("hsparwed"))
+            line += f" {flags}"
+        lines.append(f"{line} {entry['name']}")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -2653,6 +2665,21 @@ def amiga_screen_front(screen_id: str) -> str:
         raise AmigaError("that screen has just closed")
     _with_screen(_session().screen.check_size)
     return f"front screen is now {target['title']!r} ({target['width']}x{target['height']})"
+
+
+@mcp.tool()
+def amiga_pointer() -> str:
+    """Read the Intuition pointer in front-screen pixels without moving it."""
+    info = _with_ctl(lambda: _session().ctl.sysinfo())
+    if fields := info.get("pointer", "").split():
+        if len(fields) == 4:
+            x, y, width, height = map(int, fields)
+            return f"pointer at ({x},{y}) on {width}x{height}"
+    if not READ_ONLY:
+        position = _with_screen(_session().screen.pointer)
+        if position is not None:
+            return f"pointer at ({position[0]},{position[1]})"
+    raise AmigaError("the daemon does not report a pointer on this connection")
 
 
 @mcp.tool()

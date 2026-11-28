@@ -239,3 +239,19 @@ def test_amiga_put_and_get_through_the_tools(amiga, tmp_path, monkeypatch):
     assert server.amiga_put(str(src), "RAM:w").startswith("copied 4")
     assert server.amiga_get("RAM:w", str(tmp_path / "back")).startswith("saved 4 file(s)")
     assert (tmp_path / "back/d1/f1.bin").read_bytes() == bytes([1]) * 101
+
+
+def test_pointer_read_only_uses_command_link(monkeypatch):
+    monkeypatch.setattr(server, "READ_ONLY", True)
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: {"pointer": "-1\t12\t640\t256"})
+    assert server.amiga_pointer() == "pointer at (-1,12) on 640x256"
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: {})
+    with pytest.raises(AmigaError, match="does not report"):
+        server.amiga_pointer()
+
+
+def test_directory_protection_preserves_default_output(monkeypatch):
+    entries = [{"type": "FILE", "name": "start", "size": 3, "date": "now", "protection": "00000042"}]
+    monkeypatch.setattr(server, "_with_ctl", lambda fn: entries)
+    assert server.amiga_list("RAM:").endswith("now start")
+    assert server.amiga_list("RAM:", protection=True).endswith("now -s--rw-d start")

@@ -945,3 +945,6 @@ a second copy. Esc or the close gadget ends it.
   reply is the return code, `255` if the line didn't run at all or SETUP is off.
 - SETUP_END leaves SETUP mode and answers `0`. The service keeps running as a
   plain screen service.
+
+SYSINFO may include `pointer=x<TAB>y<TAB>width<TAB>height` for the front
+screen. Coordinates are signed screen pixels. Older daemons omit the field.

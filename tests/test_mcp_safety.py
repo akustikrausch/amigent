@@ -751,6 +751,9 @@ def test_stdio_read_only_and_tls_only(stage, tmp_path):
         assert mcp.request("resources/list")["result"]["resources"] == []
         assert mcp.request("prompts/list")["result"]["prompts"] == []
 
+        world["fake"].info["pointer"] = "64\t42\t640\t256"
+        point = mcp.call("amiga_pointer", {})
+        assert "pointer at (64,42) on 640x256" in point["content"][0]["text"]
         listed = mcp.call("amiga_list", {"path": "SYS:"})
         assert not listed.get("isError") and "C" in listed["content"][0]["text"]
         for name in ("amiga_screen_text", "amiga_tasks", "amiga_loaded", "amiga_notes", "amiga_installs"):

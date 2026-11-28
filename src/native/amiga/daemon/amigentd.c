@@ -4523,6 +4523,31 @@ static BOOL c_sysinfo(struct link *l)
     struct text t = {0};
     LONG i;
 
+    /* Snapshot all four fields before the front screen can change. */
+    {
+        WORD x, y, width = 0, height;
+        struct Screen *front;
+        Forbid();
+        front = IntuitionBase->FirstScreen;
+        if (front) {
+            x = front->MouseX;
+            y = front->MouseY;
+            width = front->Width;
+            height = front->Height;
+        }
+        Permit();
+        if (width > 0) {
+            t_str(&t, (const UBYTE *)"pointer=", FALSE);
+            t_num(&t, x);
+            t_tab(&t);
+            t_num(&t, y);
+            t_tab(&t);
+            t_num(&t, width);
+            t_tab(&t);
+            t_num(&t, height);
+            t_chr(&t, '\n');
+        }
+    }
     t_pair(&t, "chip_free", AvailMem(MEMF_CHIP));
     t_pair(&t, "chip_total", mem_total(MEMF_CHIP));
     t_pair(&t, "chip_largest", AvailMem(MEMF_CHIP | MEMF_LARGEST));
