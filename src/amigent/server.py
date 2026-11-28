@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import functools
 import inspect
 import json
@@ -2275,15 +2277,53 @@ def amiga_list(path: str, recursive: bool = False) -> str:
 
 
 @mcp.tool()
-def amiga_read_text(path: str) -> str:
-    """Read a text file from the Amiga."""
-    return _with_ctl(lambda: _session().ctl.read_file(path)).decode("iso-8859-1")
+def amiga_read_text(path: str, encoding: str = "latin-1", offset: int = 0,
+                    length: int | None = None) -> str:
+    """Read Amiga text, or use encoding='base64' for binary data.
+
+    An offset or length requests a bounded range. Base64 and ranged reads
+    return at most 65535 source bytes per call.
+    """
+    if encoding not in ("latin-1", "base64"):
+        raise ValueError("encoding must be latin-1 or base64")
+    if encoding == "base64" or offset or length is not None:
+        def read():
+            ch = files.channel_of(_session().ctl)
+            if ch is None:
+                raise AmigaError("ranged reads require an updated amigentd", 1)
+            return ch.read_range(path, offset, 65535 if length is None else length)
+        data = _with_ctl(read)
+    else:
+        data = _with_ctl(lambda: _session().ctl.read_file(path))
+    return base64.b64encode(data).decode("ascii") if encoding == "base64" else data.decode("latin-1")
 
 
 @mcp.tool()
-def amiga_write_text(path: str, text: str) -> str:
-    """Create or replace a text file on the Amiga, with LF line endings."""
-    _with_ctl(lambda: _session().ctl.write_file(path, text.encode("iso-8859-1")))
+def amiga_write_text(path: str, text: str, encoding: str = "latin-1",
+                     expected_offset: int | None = None) -> str:
+    """Write text or up to 65535 bytes of base64. Pass expected_offset to append
+    one block at that byte position. Retrying the same block is safe.
+    """
+    if encoding == "base64":
+        if len(text) > 87380:
+            raise ValueError("inline base64 exceeds 65535 decoded bytes")
+        try:
+            data = base64.b64decode(text, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("invalid base64") from exc
+    elif encoding == "latin-1":
+        data = text.encode("iso-8859-1")
+    else:
+        raise ValueError("encoding must be latin-1 or base64")
+    if expected_offset is None:
+        _with_ctl(lambda: _session().ctl.write_file(path, data))
+    else:
+        def append():
+            ch = files.channel_of(_session().ctl)
+            if ch is None:
+                raise AmigaError("checked append requires an updated amigentd", 1)
+            ch.append_at(path, expected_offset, data)
+        _with_ctl(append)
     return f"wrote {path}"
 
 

@@ -198,8 +198,15 @@ class KeyedFake(FakeAmiga):
 
 def _bound(port: int) -> socket.socket:
     s = socket.socket()
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, port))
+    # Winsock's SO_REUSEADDR can bind a second live listener to this port.
+    # Its accept queue can then receive the connection meant for this test.
+    option = socket.SO_EXCLUSIVEADDRUSE if os.name == "nt" else socket.SO_REUSEADDR
+    try:
+        s.setsockopt(socket.SOL_SOCKET, option, 1)
+        s.bind((HOST, port))
+    except OSError:
+        s.close()
+        raise
     return s
 
 
@@ -221,6 +228,14 @@ def _neighbours() -> tuple[socket.socket, socket.socket]:
     pytest.skip("no two neighbouring free ports")
 
 
+def test_live_fixture_port_is_exclusive():
+    with _bound(0) as first:
+        first.listen(1)
+        with pytest.raises(OSError):
+            with _bound(first.getsockname()[1]):
+                pass
+
+
 def _certificate(folder: Path, name: str) -> tuple[Path, bytes]:
     """(certificate and key for the server, certificate for the pin), or a skip without openssl."""
     made = tls.make_certificate(HOST)
@@ -234,6 +249,8 @@ def _certificate(folder: Path, name: str) -> tuple[Path, bytes]:
 @pytest.fixture
 def stage(tmp_path, monkeypatch):
     """Tripwires on the plain and amigactld ports, a pinned TLS FakeAmiga on the port after."""
+    worlds = []
+
     def build(fake=None, pin="same", plain_tls=False):
         plain, tls_port = _neighbours()
         served, certificate = _certificate(tmp_path, "served")
@@ -246,9 +263,16 @@ def stage(tmp_path, monkeypatch):
                  "front": TlsFront(tls_port, fake, served, plain=plain_tls),
                  "certificate": certificate, "served": served}
         world["port"] = world["wire"].port
+        worlds.append(world)
         return world
     monkeypatch.setenv("AMIGENT_KEY", KEY)
-    return build
+    yield build
+    for world in worlds:
+        for label in ("wire", "ctl", "front", "fake"):
+            listener = world[label].listener
+            with contextlib.suppress(OSError):
+                listener.shutdown(socket.SHUT_RDWR)
+            listener.close()
 
 
 def _no_plain(world) -> None:
@@ -781,7 +805,7 @@ def test_stdio_wrong_certificate_fails_closed(stage, tmp_path):
     try:
         mcp.start()
         failed = mcp.call("amiga_list", {"path": "SYS:"})
-        assert failed.get("isError")
+        assert failed.get("isError") and "CERTIFICATE_VERIFY_FAILED" in failed["content"][0]["text"], failed
     finally:
         said = mcp.stop()
     assert world["front"].accepted >= 1 and world["fake"].keys_heard == []

@@ -33,6 +33,8 @@ LOADED, PEEK, TASKS, TASKCTL, POKE, TRACE = 38, 39, 40, 41, 42, 43  # protocol 6
 LOCKS, CPU, DRAG, QUIET = 44, 45, 46, 47  # protocol 6, "probe" in SYSINFO
 EMU68 = 48  # protocol 6, "emu68" in SYSINFO (amigentd 1.5.0)
 AUDIO = 49  # protocol 6, "audio=49" in SYSINFO (Apollo ARNE mix, amigentd 1.6.0)
+PUBLISH = 50  # protocol 6, "publish" in SYSINFO
+APPEND_AT = 51  # protocol 6, "appendat" in SYSINFO
 PEEK_MAX = 65536
 NOTE_MAX = 160
 CHANNEL_PROTOCOL = 3
@@ -388,7 +390,7 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError("amigentd refused a command channel")
             self.banner = f"amigentd protocol {self.protocol}"
             self.zlevel = 0
-            self._notes = self._read_from = None  # a new amigentd may answer now
+            self._notes = self._read_from = self._file_features = None  # a new amigentd may answer now
             self._audio_opcode = 0
             if self.protocol >= PACK_PROTOCOL:
                 if self.policy is None:
@@ -594,6 +596,24 @@ class AmigaChannel(VolumeFlush):
         return self._one(Request(READ, path, 1, 0, (start >> 16) & 0xFFFF, start & 0xFFFF,
                                  read=_read_blob, wait=budget(0, DISK_RATE)))
 
+    def file_feature(self, name: str) -> bool:
+        if not self._sock:
+            self.connect()
+        if self.protocol < LOADED_PROTOCOL:
+            return False
+        if self._file_features is None:
+            self._file_features = self.sysinfo()
+        return self._file_features.get(name) == "1"
+
+    def read_range(self, path: str, offset: int, length: int) -> bytes:
+        """Read at most length bytes from offset. A short result means EOF."""
+        if not 0 <= offset <= 0xffffffff or not 0 <= length <= 0xffff:
+            raise ValueError("offset must fit 32 bits and length must fit 16 bits")
+        if not self.file_feature("readrange"):
+            raise AmigaError("this daemon needs an update for ranged reads", 1)
+        return self._one(Request(READ, path, 2, length, offset >> 16, offset & 0xffff,
+                                 read=_read_blob, wait=budget(length, DISK_RATE)))
+
     def write_file(self, path: str, data: bytes, append: bool = False) -> None:
         self._one(Request.write(path, data, append))
 
@@ -622,6 +642,20 @@ class AmigaChannel(VolumeFlush):
     def rename(self, old: str, new: str) -> None:
         raw = new.encode(ENCODING)
         self._request(RENAME, old, y=len(raw), payload=raw)
+
+    def append_at(self, path: str, offset: int, data: bytes) -> None:
+        if not 0 <= offset <= 0xffffffff - len(data) or len(data) > 0xffff:
+            raise ValueError("append exceeds the supported file or block size")
+        if not self.file_feature("appendat"):
+            raise AmigaError("this daemon needs an update for checked append", 1)
+        self._one(Request(APPEND_AT, path, y=len(data), w=offset >> 16, h=offset & 0xffff,
+                          payload=data, wait=budget(len(data), DISK_RATE)))
+
+    def publish(self, stage: str, target: str) -> None:
+        if not self.file_feature("publish"):
+            raise AmigaError("this daemon needs an update for staged replacement", 1)
+        raw = target.encode(ENCODING)
+        self._one(Request(PUBLISH, stage, y=len(raw), payload=raw))
 
     def makedir(self, path: str) -> None:
         self._request(MAKEDIR, path)

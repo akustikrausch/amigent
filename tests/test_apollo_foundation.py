@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PROTOCOL_6 = (
     "CMD_NOTE", "CMD_LOADED", "CMD_PEEK", "CMD_TASKS", "CMD_TASKCTL", "CMD_POKE",
     "CMD_TRACE", "CMD_LOCKS", "CMD_CPU", "CMD_DRAG", "CMD_QUIET", "CMD_EMU68",
-    "CMD_AUDIO",
+    "CMD_AUDIO", "CMD_PUBLISH", "CMD_APPEND_AT",
 )
 
 
@@ -203,7 +203,7 @@ def test_update_on_apolloos_keeps_the_daemon_there_unless_forced(monkeypatch, ca
 def test_protocol_6_audio_and_probe_is_68000_only():
     daemon = (ROOT / "src/native/amiga/daemon/amigentd.c").read_text(encoding="utf-8")
     start = daemon.index("CMD_NOTE,")
-    names = re.findall(r"CMD_[A-Z0-9]+", daemon[start:daemon.index("};", start)])
+    names = re.findall(r"CMD_[A-Z0-9_]+", daemon[start:daemon.index("};", start)])
     assert names == list(PROTOCOL_6)
     assert names.index("CMD_EMU68") + 37 == 48  # CMD_NOTE is 37 -> CMD_EMU68 is 48
     assert names.index("CMD_AUDIO") + 37 == 49  # CMD_AUDIO is unique at 49
