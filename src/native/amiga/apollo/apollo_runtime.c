@@ -291,6 +291,15 @@ char *strchr(const char *s, int c)
     return want ? 0 : (char *)s;
 }
 
+size_t strspn(const char *s, const char *accept)
+{
+    size_t n = 0;
+
+    while (s[n] && strchr(accept, s[n]))
+        n++;
+    return n;
+}
+
 char *strncpy(char *dst, const char *src, size_t n)
 {
     size_t i = 0;
