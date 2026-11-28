@@ -387,3 +387,17 @@ def test_fleet_comparison():
     assert text.startswith("3 different results on 4 Amigas")
     assert "A1200, A4000: rc 0" in text and "CD32: error timed out" in text
     assert fleet.compare_runs([{"name": "x", "ok": True, "rc": 0, "output": "1"}]).startswith("all 1")
+
+
+def test_job_redirection_goes_right_after_the_command_word():
+    # at the end of the line AmigaDOS hands it to the program as an argument
+    assert server._redirect('BoingCast "Mac Book" RAM:a.wav VOLUME=20', ">PIPE:j") == (
+        'BoingCast >PIPE:j "Mac Book" RAM:a.wav VOLUME=20', False)
+    assert server._redirect('"SYS:My Tools/x" <NIL: a', ">PIPE:j") == ('"SYS:My Tools/x" >PIPE:j <NIL: a', False)
+    assert server._redirect("Avail", ">>RAM:o") == ("Avail >>RAM:o", False)
+
+
+def test_a_job_that_redirects_itself_keeps_its_file():
+    assert server._redirect("BoingCast >RAM:cli.txt <NIL: LIST", ">PIPE:j") == (
+        "BoingCast >RAM:cli.txt <NIL: LIST", True)
+    assert server._redirect("Play16 <NIL: >RAM:p.txt f", ">PIPE:j") == ("Play16 <NIL: >RAM:p.txt f", True)

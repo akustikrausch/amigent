@@ -45,6 +45,10 @@ Versions follow [semver](https://semver.org). The number lives in
   `amiga_list` lists one directory at a time there. With mcp 1.7 or later
   these six tools carry the MCP hint `readOnlyHint`; the default server gives
   no hints, as before.
+- `amiga_job` puts its output redirection right after the command word, where
+  AmigaDOS takes it. At the end of the line it reached the program as one more
+  argument, so a job with its own `>file` failed with "bad number" or "wrong
+  number of arguments"; such a job now keeps its own file.
 
 ## 1.5.0 (2026-11-23)
 

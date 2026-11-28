@@ -114,11 +114,11 @@ class SimAmiga:
         while i < len(lines):
             line = lines[i].strip()
             i += 1
-            redirect = re.match(r"(.*) >>(\S+)$", line)
+            # AmigaDOS takes a redirection right after the command word
+            redirect = re.match(r"(\S+) >>(\S+)(?: (.*))?$", line)
             if redirect:
-                sub = redirect.group(1)
-                m = re.fullmatch(r"Execute (\S+)", sub)
-                rc, said = self.run(m.group(1)) if m else (0, "")
+                m = redirect.group(1) == "Execute" and re.fullmatch(r"\S+", redirect.group(3) or "")
+                rc, said = self.run(redirect.group(3)) if m else (0, "")
                 self.write_file(redirect.group(2), said.encode("iso-8859-1"), append=True)
                 continue
             words = re.findall(r'"[^"]*"|\S+', line)

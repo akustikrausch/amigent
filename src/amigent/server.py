@@ -953,16 +953,21 @@ def _start_job(command: str, title: str = "") -> int:
     me = _amigentd_path()
     if me:  # 1.4.0: output through a pipe, readable while the job runs
         pipe = f"PIPE:amigent-job-{number}"
+        line, own = _redirect(command, f">{pipe}")
         script = (
             "FailAt 21\nChangeTaskPri -5\n"
             f'Run >NIL: "{me}" FOLLOW {pipe} TO {out}\n'
-            f"{command} >{pipe}\n"
-            f'Echo >{_job_file(number, "rc")} "$RC"\n'
+            f"{line}\n"
         )
+        if own:  # the command writes elsewhere: rc first, then close the pipe for FOLLOW
+            script += f'Echo >{_job_file(number, "rc")} "$RC"\nEcho >{pipe} NOLINE ""\n'
+        else:
+            script += f'Echo >{_job_file(number, "rc")} "$RC"\n'
     else:
+        line, _ = _redirect(command, f">>{out}")
         script = (
             "FailAt 21\nChangeTaskPri -5\n"
-            f"{command} >>{out}\n"
+            f"{line}\n"
             f'Echo >{done} "$RC"\n'
         )
     answers = _with_ctl(lambda: perform(_session().ctl, extra + [
@@ -975,6 +980,28 @@ def _start_job(command: str, title: str = "") -> int:
             raise answer
     _session().last_started = command
     return number
+
+
+_COMMAND_WORD = re.compile(r'\s*("[^"]*"|\S+)')
+
+
+def _redirect(line: str, target: str) -> tuple[str, bool]:
+    """line with target as its output redirection, and whether it has one of its own.
+
+    AmigaDOS takes redirections only right after the command word; one at the end
+    of the line reaches the program as an argument (ReadArgs then says "bad number"
+    or "wrong number of arguments"). A line that redirects its output itself keeps it."""
+    m = _COMMAND_WORD.match(line)
+    if not m:
+        return f"{line} {target}", False
+    word, rest = m.group(1), line[m.end():].lstrip()
+    tokens = rest.split()
+    for token in tokens:
+        if token.startswith((">", "*>")):
+            return line, True
+        if not token.startswith("<"):
+            break
+    return f"{word} {target}" + (f" {rest}" if rest else ""), False
 
 
 def _wait_job(number: int, wait: float) -> str | None:
