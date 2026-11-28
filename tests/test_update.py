@@ -171,3 +171,82 @@ def test_a_spare_folder_repairs_from_itself_and_is_remembered(monkeypatch):
     amiga.files["C:amigentd"] = b"old amigentd"
     assert setup.update("192.0.2.1", None) == 0
     assert b"Set SRC Backup:amigent" in amiga.files["Backup:amigent/amigent-repair"]
+
+
+def test_corrupt_staging_aborts_before_live_changes(monkeypatch):
+    amiga = Amiga()
+    original = channel_for(amiga)
+
+    class Corrupt(original):
+        def write_file(self, path, data):
+            super().write_file(path, data + b"!" if path == "C:amigentd.new" else data)
+
+    monkeypatch.setattr(setup, "AmigaChannel", Corrupt)
+    assert setup.update("192.0.2.1", "Work:renamed") == 1
+    assert amiga.files["C:amigentd"] == b"old amigentd"
+    assert not any("rx T:" in c or "ENVARC:" in c for c in amiga.commands)
+
+
+def test_candidate_must_answer_on_the_selected_address(monkeypatch):
+    from types import SimpleNamespace
+    candidate = b"$VER: amigentd 1.5.0 (21.11.2026)\0amigent-trial/1"
+    nonce = "a" * 32
+    seen = []
+
+    class Production:
+        _sock = SimpleNamespace(getpeername=lambda: ("192.0.2.1", 6801))
+        def read_file(self, path):
+            return candidate
+        def exec(self, command, **kwargs):
+            seen.append(command)
+            return ExecResult(0, "amigent-trial/1 " + nonce)
+
+    class WrongTrial:
+        _sock = object()
+        def __init__(self, host, port, timeout, address, trial_nonce, trial_tls):
+            assert address == "192.0.2.1" and trial_nonce == nonce and port >= 49152
+        def connect(self):
+            pass
+        def sysinfo(self):
+            return {"trial": "another process"}
+        def ping(self):
+            pytest.fail("wrong candidate received a ping")
+        def close(self):
+            seen.append("closed")
+
+    monkeypatch.setattr(setup, "AmigaChannel", WrongTrial)
+    with pytest.raises(AmigaError, match="identity"):
+        setup.verify_candidate(Production(), "named-machine", candidate, "C:staged", nonce)
+    assert seen[-1] == "closed"
+    assert not any("QUIT" in line for line in seen)
+
+
+def test_recovery_copy_is_machine_scoped(private_config):
+    first = setup.keep_recovery("192.0.2.1", b"original")
+    second = setup.keep_recovery("192.0.2.2", b"original")
+    assert first != second and first.read_bytes() == second.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("flags,banner,tls", [(1, b"", False), (9, b"b" * 32, False),
+                                              (9, b"a" * 32, True)])
+def test_trial_collision_sends_no_key(monkeypatch, flags, banner, tls):
+    import io
+    import struct
+    from amigent import channel
+
+    class Peer:
+        wire = io.BytesIO(b"AMGT" + struct.pack(">HH", 6, flags) + banner)
+        def setsockopt(self, *args):
+            pass
+        def recv(self, n):
+            return self.wire.read(n)
+        def sendall(self, data):
+            pytest.fail("sent data to an unverified candidate")
+        def close(self):
+            pass
+
+    monkeypatch.setattr(channel.tls, "_dial", lambda *args: Peer())
+    trial = channel.AmigaChannel("192.0.2.1", 49153, address="192.0.2.1",
+                                 key="test", trial_nonce="a" * 32, trial_tls=tls)
+    with pytest.raises(AmigaError, match="unexpected update trial"):
+        trial.connect()

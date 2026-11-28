@@ -338,9 +338,12 @@ class AmigaChannel(VolumeFlush):
     """A command channel to amigentd. Errors come back as AmigaError with a code."""
 
     def __init__(self, host: str, port: int = 6801, timeout: float = 30.0, key: str | None = None,
-                 address: str | None = None, read_only: bool | None = None):
+                 address: str | None = None, read_only: bool | None = None,
+                 trial_nonce: str | None = None, trial_tls: bool = False):
         self.host = identity(host)
         self.port = port
+        self.trial_nonce = trial_nonce
+        self.trial_tls = trial_tls
         self.address = address  # dial here, not where the registry says, and never look elsewhere
         self.timeout = timeout
         self.key = key
@@ -374,6 +377,13 @@ class AmigaChannel(VolumeFlush):
                 raise AmigaError(refused)
             if safety.require_tls() and not hasattr(self._sock, "version"):
                 raise AmigaError("AMIGENT_REQUIRE_TLS is set and this line is not TLS; no key was sent")
+            if self.trial_nonce is not None:
+                if self.trial_tls != hasattr(self._sock, "version"):
+                    raise AmigaError("unexpected update trial transport", 1)
+                if flags & 9 != 9 or self._exact(32) != self.trial_nonce.encode("ascii"):
+                    raise AmigaError("unexpected update trial greeting", 1)
+            elif flags & 8:
+                raise AmigaError("this port belongs to an update trial", 1)
             if flags & 1:
                 key = self.key if self.key is not None else load_key(self.host)
                 if not key:
@@ -633,6 +643,9 @@ class AmigaChannel(VolumeFlush):
         return self._one(Request.exec(command, cd, timeout))
 
     # system state
+
+    def ping(self) -> None:
+        self._one(Request(6))
 
     def sysinfo(self) -> dict:
         return dict(line.split("=", 1) for line in self._text(SYSINFO) if "=" in line)
