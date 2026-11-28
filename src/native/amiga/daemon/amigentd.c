@@ -181,6 +181,8 @@ static APTR old_window;  /* pr_WindowPtr as the Shell or Workbench gave it */
 static struct timerequest *timer_io;
 
 static LONG listener = -1, client = -1;
+static char trial[33];
+#define TRIAL_TAG "amigent-trial/1"
 static BOOL setup_mode, quit, authed, from_wb, quiet, tls_only, allow_poke;
 static ULONG client_id, owner;  /* CLIENT ids: this connection's, and whose picture ref is */
 
@@ -3517,7 +3519,7 @@ static BOOL key_matches(const UBYTE *got, UWORD len)
 
     for (i = 0; i < KEY_MAX; i++)  /* the same work whatever matches */
         diff |= got[i] ^ secret[i];
-    return !secret_len || !diff;
+    return secret_len ? !diff : !trial[0];
 }
 
 static BOOL auth(UWORD len)
@@ -3728,14 +3730,19 @@ static void accept_pending(void)
     load_key();
     /* Operational TLSONLY closes remote plaintext whether or not the TLS
      * port is listening. SETUP is only the operator's SETUP argument. */
+    if (trial[0] && !secret_len) {
+        close_fd(fd);
+        return;
+    }
     locked = tls_only && !setup_mode;
-    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0);
+    hello[7] = (secret_len ? 1 : 0) | (tls_ready ? 2 : 0) | (locked ? 4 : 0) | (trial[0] ? 8 : 0);
     l.base = SocketBase;
     l.fd = fd;
     /* Strangers get the hello, so they know where the door is, then out.
      * 127.0.0.1 is our own TLS pumps, and whoever sits at the Amiga. */
     if (!l_send(&l, hello, 8, HELLO_SECONDS) ||
-        (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK))) {
+        (locked && addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) ||
+        (trial[0] && !l_send(&l, trial, 32, HELLO_SECONDS))) {
         close_fd(fd);
         return;
     }
@@ -3787,6 +3794,8 @@ static void step(LONG i)
     } else if (p->authed) {
         if (p->cmd[0] == CMD_CHANNEL)
             start_channel(i);
+        else if (trial[0])
+            close_pending(i);
         else
             p->screen = TRUE;  /* serve() hands it the screen */
         return;
@@ -8865,6 +8874,22 @@ static BOOL chan_command(struct link *l, const UBYTE *c)
     UWORD x = c[2] << 8 | c[3], y = c[4] << 8 | c[5];
     UWORD w = c[6] << 8 | c[7], h = c[8] << 8 | c[9];
 
+    if (trial[0]) {
+        if (c[0] == CMD_SYSINFO) {
+            struct text t = {0};
+            t_str(&t, (const UBYTE *)"trial=", FALSE);
+            t_str(&t, (const UBYTE *)trial, FALSE);
+            t_chr(&t, '\n');
+            return c_text(l, &t);
+        }
+        if (c[0] == CMD_PING) {
+            BOOL ok = c_ok(l);
+            Signal(server, SIGBREAKF_CTRL_C);
+            return ok;
+        }
+        if (c[0] != CMD_COMPRESS)
+            return FALSE;
+    }
     switch (c[0]) {
     case CMD_PING:
     case CMD_CHANNEL:
@@ -9228,7 +9253,11 @@ static void serve(void)
         struct timeval tv = {1, 0};
         ULONG sigs = SIGBREAKF_CTRL_C | rexx_signal();
 
-        mon_stats();
+        if (trial[0]) {
+            if (now_ms() - start_ms >= 60000)
+                return;
+        } else
+            mon_stats();
         for (i = 0; i < PENDING && !(pend[i].fd >= 0 && pend[i].screen); i++)
             ;
         if (i < PENDING) {  /* the newcomer wins */
@@ -10326,7 +10355,7 @@ static int follow(const char *from, const char *to)
 
 int main(int argc, char **argv)
 {
-    LONG args[11] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    LONG args[13] = {0};
     struct RDArgs *rda;
     UWORD port = DEFAULT_PORT;
     BOOL twin;
@@ -10338,10 +10367,30 @@ int main(int argc, char **argv)
         tool_types((struct WBStartup *)argv, &port);
     } else {
         rda = ReadArgs("PORT/K/N,SETUP/S,KEY/K,QUIET/S,TLSONLY/S,NOTEXT/S,NODEBUG/S,FOLLOW/K,TO/K,"
-                       "ALLOWPOKE/S,EMU68JIT/K", args, NULL);
+                       "ALLOWPOKE/S,EMU68JIT/K,SELFTEST/K,TRIAL/K", args, NULL);
         if (!rda) {
             PrintFault(IoErr(), "amigentd");
             return RETURN_FAIL;
+        }
+        if (args[11] || args[12]) {
+            const char *challenge = (const char *)(args[11] ? args[11] : args[12]);
+            if (strlen(challenge) != 32 || strspn(challenge, "0123456789abcdef") != 32) {
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+            if (args[11]) {
+                PutStr(TRIAL_TAG " ");
+                PutStr(challenge);
+                PutStr("\n");
+                FreeArgs(rda);
+                return RETURN_OK;
+            }
+            if (!args[0] || *(LONG *)args[0] < 1024 || *(LONG *)args[0] > 65534 ||
+                *(LONG *)args[0] == DEFAULT_PORT || args[1]) {
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+            strcpy(trial, challenge);
         }
         if (args[7] && args[8]) {  /* a job's helper, not the daemon */
             rc = follow((const char *)args[7], (const char *)args[8]);
@@ -10390,7 +10439,8 @@ int main(int argc, char **argv)
     os39 = GfxBase->LibNode.lib_Version >= 39;
     CyberGfxBase = OpenLibrary("cybergraphics.library", 40);  /* only with RTG */
     tables_init();
-    zz_open();  /* a ZZ9000 looks at its own screen */
+    if (!trial[0])
+        zz_open();  /* a ZZ9000 looks at its own screen */
     if (!(SocketBase = wait_for("bsdsocket.library", 4)))
         goto out;
     timer_port = CreateMsgPort();
@@ -10438,11 +10488,12 @@ int main(int argc, char **argv)
         goto out;
     }
     plain_port = port;
-    rexx_open(port);
-    /* Without layers.library the text of closed windows would stay: no text then. */
-    if (!(LayersBase = OpenLibrary("layers.library", 37)))
-        no_text = TRUE;
-    hooks_start();
+    if (!trial[0]) {
+        rexx_open(port);
+        if (!(LayersBase = OpenLibrary("layers.library", 37)))
+            no_text = TRUE;
+        hooks_start();
+    }
     Forbid();
     children++;
     Permit();
@@ -10481,7 +10532,8 @@ out:
             break;
         Wait(1UL << chan_gone);
     }
-    hooks_stop();  /* no channel looks at the text any more */
+    if (!trial[0])
+        hooks_stop();  /* no channel looks at the text any more */
     traces_off();
     z_free(frame_z);
     if (LayersBase)

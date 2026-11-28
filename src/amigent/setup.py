@@ -17,14 +17,18 @@ the Amiga starts the old one again.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import secrets
+import tempfile
+from pathlib import Path
 import sys
 import time
 
-from . import __version__, machines, roster, tls
+from . import __version__, machines, paths, roster, tls
 from .amigentd import Amigentd, AmigentdError
 from .channel import CHANNEL_PROTOCOL, AmigaChannel
 from .daemons import (CPU_68000, CPU_68020, CPU_68080, Machine, available_names, choose,
-                      consider_replacement, detect_cpu)
+                      consider_replacement, detect_cpu, embedded_version)
 from .errors import AmigaError
 from .legacy import (UNDO_ALLOW, allow_script, fetch_amigactld,  # noqa: F401 (allow_script: old address)
                      reach_amigactld, same_network, startup_script)
@@ -271,6 +275,8 @@ UPDATE_TROUBLE = {
     b"busy": "The running amigentd did not stop, so nothing was changed.",
     b"reboot": "This amigentd is too old to restart itself. The new one is in C:amigentd now; "
                "restart the Amiga to start it.",
+    b"restore": "Automatic restoration failed. Use the saved recovery binary.",
+    b"backup": "The updater could not save the installed binary on the Amiga.",
     b"missing": "C:amigentd.new did not arrive, so nothing was changed.",
 }
 WINDOWS = ("amigent-status", "amigent-status.info", "amigent-monitor", "amigent-monitor.info")
@@ -372,6 +378,61 @@ def update_windows(channel, home: str | None, build: str = "amigentd") -> None:
             return
 
 
+TRIAL_TAG = "amigent-trial/1"
+
+
+def verify_candidate(channel, host: str, candidate: bytes, staged: str, nonce: str) -> None:
+    """Check the staged executable through the still-running production daemon."""
+    if embedded_version(candidate) is None:
+        raise AmigaError("candidate has no amigentd version")
+    if channel.read_file(staged) != candidate:
+        raise AmigaError("staged amigentd differs from the selected executable")
+    if TRIAL_TAG.encode() not in candidate:
+        print("Staged bytes verified. This build predates the network self-test.")
+        return
+    result = channel.exec(f"{staged} SELFTEST {nonce}", timeout=15)
+    if result.rc or result.output.strip() != f"{TRIAL_TAG} {nonce}":
+        raise AmigaError("candidate failed its executable self-test")
+    port = 49152 + secrets.randbelow(16382)
+    peer = channel._sock.getpeername()[0]
+    secure = hasattr(channel._sock, "version")
+    flags = " TLSONLY" if secure else ""
+    started = channel.exec(f"Run <NIL: >NIL: {staged} PORT {port} TRIAL {nonce} QUIET{flags}")
+    if started.rc:
+        raise AmigaError("failed to start the update trial")
+    trial = AmigaChannel(host, port=port, timeout=3, address=peer, trial_nonce=nonce, trial_tls=secure)
+    deadline = time.monotonic() + 35
+    try:
+        while True:
+            try:
+                trial.connect()
+                break
+            except AmigaError as exc:
+                if exc.code is not None or time.monotonic() >= deadline:
+                    raise AmigaError(f"candidate on port {port} did not authenticate: {exc}") from exc
+                time.sleep(1)
+        if secure != hasattr(trial._sock, "version") or trial.sysinfo().get("trial") != nonce:
+            raise AmigaError("candidate answered with the wrong transport or identity")
+        trial.ping()
+    finally:
+        trial.close()
+
+
+def keep_recovery(host: str, data: bytes) -> Path:
+    folder = paths.FOLDER / "recovery" / paths.safe(roster.identity(host))
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = folder / hashlib.sha256(data).hexdigest()
+    stream = tempfile.NamedTemporaryFile(dir=folder, delete=False)
+    temporary = Path(stream.name)
+    try:
+        with stream:
+            stream.write(data)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
 def update(host: str, home: str | None, spare: str | None = None, force: bool = False) -> int:
     """Put this package's amigentd on an Amiga that runs an older one, by network."""
     channel = AmigaChannel(host, timeout=30)
@@ -385,9 +446,6 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             print(e)
             channel.close()
             return 1
-        if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
-            channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
-        update_windows(channel, home, build)
         try:
             installed = channel.read_file("C:amigentd")
         except AmigaError as e:
@@ -401,6 +459,9 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
         else:
             replace, reason = consider_replacement(installed, new, build, AMIGA / "bin")
         if not replace:
+            if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
+                channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
+            update_windows(channel, home, build)
             # the scripts are renewed all the same; the folders get the amigentd that runs
             update_folders(channel, home, spare, installed or new)
             if installed == new:
@@ -410,14 +471,23 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             channel.close()
             return 0
         print(f"uploading {build} to {shown}")
-        channel.write_file("C:amigentd.new", new)
-        channel.exec("Delete >NIL: T:amigent-update.done QUIET")
-        # the same script that Amigent-Update runs on the Amiga; detached, so it outlives amigentd
-        channel.write_file("T:amigent-update.rexx", (AMIGA / "amigent-update.rexx").read_bytes())
-        channel.exec("Run >NIL: RexxMast >NIL:")  # ARexx is running on most Amigas; this makes sure
-        channel.exec(f"Run >NIL: rx T:amigent-update.rexx {home or ''}".rstrip())
+        nonce = secrets.token_hex(16) if TRIAL_TAG.encode() in new else ""
+        staged = f"C:ag-{nonce[:16]}.new" if nonce else "C:amigentd.new"
+        record = f"T:ag-{nonce[:16]}" if nonce else "T:amigent-update"
+        channel.write_file(staged, new)
+        verify_candidate(channel, host, new, staged, nonce)
+        if installed:
+            print(f"Saved the previous executable to {keep_recovery(host, installed)}")
+        if home:  # else the script takes the folder from ENVARC:amigent-home, or SYS:amigent
+            channel.exec(f'Echo >ENVARC:amigent-home "{home}"')  # for Amigent-Update on the Amiga too
+        update_windows(channel, home, build)
+        channel.exec(f"Delete >NIL: {record}.done QUIET")
+        channel.write_file(f"{record}.rexx", (AMIGA / "amigent-update.rexx").read_bytes())
+        channel.exec("Run >NIL: RexxMast >NIL:")
+        args = f"VERIFY {nonce} " if nonce else ""
+        channel.exec(f"Run >NIL: rx {record}.rexx {args}{home or ''}".rstrip())
         channel.close()
-    except AmigaError as e:
+    except (AmigaError, OSError) as e:
         channel.close()
         print(f"{e}\nWithout a working connection the update needs `amigentd SETUP` on the Amiga "
               "and amigent-setup without --update.")
@@ -429,13 +499,29 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
         channel = AmigaChannel(host, timeout=30)
         try:
             channel.connect()
-            done = channel.read_file("T:amigent-update.done").strip()  # AmigaError until then
+            done = channel.read_file(f"{record}.done").strip()  # AmigaError until then
+            if not done:
+                channel.close()
+                time.sleep(1)
+                continue
+            if nonce and done == b"verify":
+                if channel.read_file("C:amigentd") == new:
+                    channel.write_file(f"{record}.ack", nonce.encode("ascii"))
+                else:
+                    channel.write_file(f"{record}.ack", b"rollback")
+                channel.close()
+                time.sleep(2)
+                continue
             if done != b"new":
                 channel.close()
                 print("\n" + UPDATE_TROUBLE.get(done, f"The update script said {done!r}."))
                 return 0 if done == b"reboot" else 1
+            if channel.read_file("C:amigentd") != new:
+                channel.close()
+                print("Restarted daemon answers but C:amigentd differs from the verified executable.")
+                return 1
             version = channel.exec("Version C:amigentd").output.strip()
-            channel.exec("Delete >NIL: T:amigent-update.done T:amigent-update.rexx QUIET")
+            channel.exec(f"Delete >NIL: {record}.done {record}.rexx QUIET")
             print()
             update_folders(channel, home, spare, new)  # only now: the new amigentd has proved itself
             channel.close()
@@ -445,8 +531,9 @@ def update(host: str, home: str | None, spare: str | None = None, force: bool = 
             channel.close()
             print(".", end="", flush=True)
             time.sleep(3)
-    print(f"\namigentd on {shown} has not answered for {UPDATE_WAIT:.0f} s. Restart the Amiga; "
-          "C:amigentd.old is the previous version.")
+    saved = f"C:ag-{nonce[:16]}.old" if nonce else "C:amigentd.old"
+    print(f"\namigentd on {shown} has not confirmed the update for {UPDATE_WAIT:.0f} s. "
+          f"Check {saved} for the previous version.")
     return 1
 
 

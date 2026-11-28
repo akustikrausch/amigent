@@ -945,3 +945,17 @@ a second copy. Esc or the close gadget ends it.
   reply is the return code, `255` if the line didn't run at all or SETUP is off.
 - SETUP_END leaves SETUP mode and answers `0`. The service keeps running as a
   plain screen service.
+
+### Testing an update candidate
+
+The executable's SELFTEST keyword accepts a 32-character lowercase hex
+challenge and prints `amigent-trial/1` followed by that challenge. TRIAL uses
+the same challenge and a separate PORT. The trial requires a key, has no
+ARexx port or diagnostic hooks, and only serves command-channel compression,
+SYSINFO and PING. It exits after a ping or a 60-second serving interval.
+
+A trial sets greeting flag 8 and sends its 32 ASCII challenge bytes after
+the greeting. The updater checks both challenge and key-required flag
+before sending credentials. It connects to the existing peer address
+with the machine's existing TLS policy. SYSINFO returns `trial=<challenge>`.
+A regular client should close a trial connection before authentication.
