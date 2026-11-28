@@ -4572,8 +4572,8 @@ static BOOL c_sysinfo(struct link *l)
             t_str(&t, (const UBYTE *)"board_name=", FALSE);
             t_str(&t, (const UBYTE *)apollo_board_name(board), FALSE);
             t_chr(&t, '\n');
+            t_pair(&t, "audio", CMD_AUDIO);  /* opcode 49 on Apollo/68080 hardware */
         }
-        t_pair(&t, "audio", CMD_AUDIO);  /* opcode 49 is implemented in this build */
 #else
         t_pair(&t, "cpu", f & AFF_68060 ? 68060 : f & AFF_68040 ? 68040 : f & AFF_68030 ? 68030 :
                           f & AFF_68020 ? 68020 : f & AFF_68010 ? 68010 : 68000);
