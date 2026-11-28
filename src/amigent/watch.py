@@ -42,6 +42,15 @@ class Lookout:
             return False
         return True
 
+    def observe(self, capture, deadline):
+        """A slow capture can finish on the worker after the caller times out."""
+        future = self._pool.submit(capture)
+        try:
+            return future.result(timeout=max(0, deadline - self.clock()))
+        except Late:
+            future.cancel()
+            return None
+
     def _poll(self, screen, guard, region):
         cold = screen.snapshot() is None  # no picture: every tile comes, none of them is news
         guard(lambda: screen.poll(*region))
@@ -73,3 +82,27 @@ def wait_change(screen, guard, lookout: Lookout, region: tuple, since: float, ti
         if left <= 0:
             return f"no change within {timeout:g} s", False
         sleep(min(PAUSE, left))
+
+
+def wait_digest(lookout, capture, timeout, baseline="", quiet=0.0, sleep=time.sleep):
+    """Per-call baseline and quiet interval for a selected screen rectangle."""
+    if not 0 < timeout <= 3600 or not 0 <= quiet <= timeout:
+        raise ValueError("timeout must be in (0, 3600] and quiet must fit within timeout")
+    deadline = lookout.clock() + timeout
+    previous = baseline
+    stable = None
+    while lookout.clock() < deadline:
+        current = lookout.observe(capture, deadline)
+        now = lookout.clock()
+        if current is None or now > deadline:
+            break
+        if quiet:
+            if stable is None or current != previous:
+                stable = now
+            if now - stable >= quiet:
+                return f"still for {quiet:g} s; sha256={current}"
+        elif previous and current != previous:
+            return f"changed; sha256={current}"
+        previous = current
+        sleep(min(PAUSE, max(0, deadline - now)))
+    return f"timed out after {timeout:g} s" + (f"; sha256={previous}" if previous else "")

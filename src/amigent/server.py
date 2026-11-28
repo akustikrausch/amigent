@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import inspect
 import json
 import os
@@ -1848,20 +1849,81 @@ def amiga_state(action: str = "save", name: str = "before") -> str:
     raise AmigaError("action: save or compare")
 
 
+def _observe(screen: str, window: str, x: int, y: int, width: int, height: int):
+    """Resolve and crop a screen or the visible part of a named window."""
+    if min(x, y, width, height) < 0:
+        raise AmigaError("region coordinates and dimensions must be non-negative")
+    device = _session().screen
+    def capture():
+        screens = device.screens()
+        target = _pick_screen(screens, screen) if screen else next((s for s in screens if s["front"]), None)
+        if target is None:
+            raise AmigaError("no front screen is available")
+        sw, sh = target["width"], target["height"]
+        def bounds():
+            if not window:
+                return target["handle"], 0, 0, sw, sh
+            tree = device.ui_tree(target["handle"])
+            if not tree or tree[0].get("handle") != target["handle"]:
+                raise AmigaError("screen changed while resolving the window")
+            wins = [w for w in tree if w["kind"] == "window"]
+            query = window.casefold()
+            hits = [w for w in wins if query in (w["id"].casefold(), w["title"].casefold())]
+            hits = hits or [w for w in wins if query in w["title"].casefold()]
+            if len(hits) != 1:
+                raise AmigaError(f"{len(hits)} windows match {window!r}; use the ID from amiga_ui_tree")
+            w = hits[0]
+            return w["id"], w["x"], w["y"], w["w"], w["h"]
+        for _ in range(2):
+            before = bounds()
+            _, left, top, w, h = before
+            x1, y1 = max(0, left + x), max(0, top + y)
+            x2 = min(sw, left + w, left + x + (width or w))
+            y2 = min(sh, top + h, top + y + (height or h))
+            if x1 >= x2 or y1 >= y2:
+                raise AmigaError("region is outside the visible screen")
+            box = x1, y1, x2 - x1, y2 - y1
+            if target.get("display"):
+                image = device.capture_screen(target, box)
+            elif target["front"]:
+                image = device.capture(*box)
+            else:
+                raise AmigaError("the daemon needs an update to capture a background screen")
+            if not window or before == bounds():
+                return image.convert("RGB"), box
+        raise AmigaError("window moved during capture")
+    return _with_screen(capture)
+
+
+def _image_digest(image):
+    import struct
+    digest = hashlib.sha256(struct.pack(">II", *image.size))
+    digest.update(image.convert("RGB").tobytes())
+    return digest.hexdigest()
+
+
 @mcp.tool()
 def amiga_screen_diff(action: str = "compare", name: str = "baseline", x: int = 0, y: int = 0,
-                      width: int = 0, height: int = 0, threshold: int = 24) -> list:
+                      width: int = 0, height: int = 0, threshold: int = 24,
+                      screen: str = "", window: str = "") -> list:
     """Visual regression test: save a picture of the screen (or a region), later
     compare the screen with it. compare answers the share of changed pixels, the
     boxes of the changed areas and a picture of them (changed pixels magenta,
-    boxes yellow). threshold: how different a pixel must be (0-255)."""
+    boxes yellow). Use checksum for a reusable SHA-256 of the region. A window
+    accepts an ID or unique title and makes coordinates window-relative.
+    threshold: how different a pixel must be (0-255)."""
     from io import BytesIO
     from PIL import Image
     from . import screendiff
     folder = secret.FOLDER / "screens" / journal._safe(_amiga_name())
     path = folder / f"{journal._safe(name)}.png"
     # the 256 colour picture: tiles come from the cache, so a comparison costs little
-    image = _with_screen(lambda: _session().screen.capture(x, y, width or None, height or None)).convert("RGB")
+    if screen or window or action == "checksum":
+        image, box = _observe(screen, window, x, y, width, height)
+        if action == "checksum":
+            return [json.dumps({"sha256": _image_digest(image), "region": box})]
+    else:
+        image = _with_screen(lambda: _session().screen.capture(x, y, width or None, height or None)).convert("RGB")
     if action == "save":
         folder.mkdir(parents=True, exist_ok=True)
         image.save(path)
@@ -2379,7 +2441,8 @@ def amiga_inventory(max_wait: float = 1800) -> str:
 
 @mcp.tool()
 def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
-                     changed: bool = False, text: bool = False, screen: str = "") -> list:
+                     changed: bool = False, text: bool = False, screen: str = "",
+                     window: str = "", jpeg_quality: int | None = None) -> list:
     """Capture the Amiga screen, or a region of it to read small text.
 
     Transfers only what changed since the last call, so repeated shots are
@@ -2392,8 +2455,31 @@ def amiga_screenshot(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
     see amiga_screen_text; for information alone that one is far cheaper.
     The picture is the frontmost Intuition screen, graphics card or chipset;
     screen= takes a handle or part of a title from amiga_screens to picture
-    one behind it. The reply says when the display shows something else.
+    one behind it. Use window for the visible rectangle of a uniquely named
+    window or its ID. Its x and y are window-relative. jpeg_quality selects
+    JPEG (1–100). The reply gives the actual capture area.
     """
+    if window or jpeg_quality is not None:
+        if changed:
+            raise AmigaError("changed screenshots use the front screen and PNG")
+        if jpeg_quality is not None and not 1 <= jpeg_quality <= 100:
+            raise AmigaError("jpeg_quality must be between 1 and 100")
+        if paused := _paused_note():
+            return [paused]
+        image, (left, top, w, h) = _observe(screen, window, x, y, width, height)
+        small, scale = pictures.fit(image)
+        if jpeg_quality is None:
+            result = McpImage(data=pictures.png(small), format="png")
+        else:
+            from io import BytesIO
+            output = BytesIO()
+            small.save(output, "JPEG", quality=jpeg_quality)
+            result = McpImage(data=output.getvalue(), format="jpeg")
+        out = [f"visible region {w}x{h} at ({left},{top}); {scale:.3f} screen pixels per image pixel", result]
+        if text:
+            out.append("text capture is available on the front screen" if screen else
+                       amiga_screen_text(x=left, y=top, width=w, height=h))
+        return out
     if changed:
         out = changed_shot()
         return out + ([amiga_screen_text()] if text else [])
@@ -2573,14 +2659,27 @@ def amiga_screenshot_color(x: int, y: int, width: int, height: int) -> list:
 
 @mcp.tool()
 def amiga_wait_change(x: int = 0, y: int = 0, width: int = 0, height: int = 0,
-                      timeout: float = 30) -> str:
+                      timeout: float = 30, screen: str = "", window: str = "",
+                      checksum: str = "", quiet: float = 0.0) -> str:
     """Wait until a region (or the screen) differs from what you last looked at.
 
     Counts from your last screenshot, so a change your click already caused is
     reported at once. Use it after a click or command instead of taking
     screenshots in a loop; no pictures are sent. Returns within timeout even
-    on a slow link.
+    on a slow link. Use checksum from amiga_screen_diff('checksum') to compare
+    against a specific image, or quiet to wait for that many seconds of stillness.
+    Screen and window selectors follow amiga_screenshot.
     """
+    if screen or window or checksum or quiet:
+        if checksum and not re.fullmatch(r"[0-9a-fA-F]{64}", checksum):
+            raise AmigaError("checksum must contain 64 hexadecimal digits")
+        def capture():
+            if _paused_note():
+                raise AmigaError("the screen is paused")
+            image, _ = _observe(screen, window, x, y, width, height)
+            return _image_digest(image)
+        return watch.wait_digest(_session().lookout, bind_callback(capture), timeout,
+                                 checksum.lower(), quiet)
     if paused := _paused_note():
         return paused
     # Tiles count whoever fetched them: an open viewer may have taken them first.
